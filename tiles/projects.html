@@ -218,6 +218,48 @@
   </div>
 
 <script>
+// The Vitality bridge. postMessage only: a sealed tile has no storage of its
+// own, so save/load/report all travel to the host and back.
+(function(){
+  'use strict';
+
+  var seq = 0;
+  var pending = {};
+
+  window.addEventListener('message', function (e) {
+    var msg = e.data;
+    if (!msg || msg.source !== 'vitality-host') return;
+    if (msg.type === 'load:result') {
+      var resolve = pending[msg.id];
+      if (resolve) { delete pending[msg.id]; resolve(msg.data); }
+    }
+  });
+
+  function post(type, payload) {
+    var msg = { source: 'vitality-tile', type: type };
+    for (var k in payload) { if (Object.prototype.hasOwnProperty.call(payload, k)) msg[k] = payload[k]; }
+    parent.postMessage(msg, '*');
+    return msg;
+  }
+
+  window.Vitality = {
+    save: function (data) { post('save', { data: data }); },
+    load: function () {
+      var id = 'l' + (++seq);
+      return new Promise(function (resolve) {
+        pending[id] = resolve;
+        post('load', { id: id });
+        // The host may not have registered this frame on the very first ask.
+        setTimeout(function () { if (pending[id]) post('load', { id: id }); }, 300);
+        setTimeout(function () { if (pending[id]) { delete pending[id]; resolve(null); } }, 3000);
+      });
+    },
+    report: function (stream) { post('report', { stream: stream }); }
+  };
+})();
+</script>
+
+<script>
 (function(){
   'use strict';
 

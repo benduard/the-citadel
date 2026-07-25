@@ -20,6 +20,9 @@ create policy "own slots" on vault_slots
 grant select, insert, update, delete on vault_slots to authenticated;
 
 -- 2. LEDGER. Every log, one shape, so it reads across everything at once.
+--    key, value, date, source is the core shape. label / kind / goal_direction
+--    / tile carry what a tile's report() already says about its number, so the
+--    remote ledger holds exactly what the local one does.
 create table if not exists ledger (
   id      bigint generated always as identity primary key,
   user_id uuid not null references auth.users on delete cascade,
@@ -31,7 +34,18 @@ create table if not exists ledger (
   logged  timestamptz not null default now()
 );
 
+-- Safe to re-run. A board created before these columns existed gains them here
+-- without touching a row it already holds.
+alter table ledger add column if not exists label          text;
+alter table ledger add column if not exists kind           text;
+alter table ledger add column if not exists goal_direction text;
+alter table ledger add column if not exists tile           text;
+
 create index if not exists ledger_user_key_date on ledger (user_id, key, date desc);
+
+-- One row per key per day: re-reporting a day replaces it, never stacks a
+-- second row. The client relies on this being true.
+create unique index if not exists ledger_user_key_date_unique on ledger (user_id, key, date);
 
 alter table ledger enable row level security;
 

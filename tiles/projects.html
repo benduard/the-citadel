@@ -171,6 +171,19 @@
 
   .empty{ color:var(--faint); font-size:13px; padding:8px 2px; }
 
+  /* Amber is caution. Never red: nothing here is about how a person is doing. */
+  .trouble{
+    margin:0 0 14px;
+    padding:10px 14px;
+    border:1px solid rgba(252,211,77,.32);
+    border-radius:12px;
+    background:rgba(252,211,77,.06);
+    color:#FCD34D;
+    font-size:13px;
+  }
+
+  .addRow input:disabled, .addBtn:disabled{ opacity:.45; cursor:not-allowed; }
+
   @keyframes rise{
     from{ opacity:0; transform:translateY(8px); }
     to{ opacity:1; transform:translateY(0); }
@@ -201,9 +214,14 @@
       <span class="pill" id="pagePill">0 done</span>
     </div>
 
+    <p class="trouble" id="trouble" hidden></p>
+
+    <!-- Both start disabled and are enabled once the vault has answered. If
+         they were live during that gap, anything typed would be silently
+         thrown away the moment the real list arrived. -->
     <div class="addRow">
-      <input id="newTitle" type="text" placeholder="New project" maxlength="80">
-      <button class="addBtn" id="addBtn" type="button">Add</button>
+      <input id="newTitle" type="text" placeholder="New project" maxlength="80" disabled>
+      <button class="addBtn" id="addBtn" type="button" disabled>Add</button>
     </div>
 
     <div class="section">
@@ -225,13 +243,20 @@
 
   var seq = 0;
   var pending = {};
+  var writeErrorHandlers = [];
 
   window.addEventListener('message', function (e) {
     var msg = e.data;
     if (!msg || msg.source !== 'vitality-host') return;
     if (msg.type === 'load:result') {
-      var resolve = pending[msg.id];
-      if (resolve) { delete pending[msg.id]; resolve(msg.data); }
+      var p = pending[msg.id];
+      if (p) { delete pending[msg.id]; p.resolve({ ok: true, data: msg.data }); }
+      return;
+    }
+    // The host says a write did not land. Never let the tile go on showing it
+    // as saved: hand it to whoever is listening so it can say so.
+    if (msg.type === 'save:error' || msg.type === 'report:error') {
+      writeErrorHandlers.forEach(function (fn) { fn(msg.type, msg.reason); });
     }
   });
 
@@ -244,17 +269,36 @@
 
   window.Vitality = {
     save: function (data) { post('save', { data: data }); },
+
+    /**
+     * Resolves { ok, data }. ok:false means the host never answered - NOT that
+     * the slot is empty. The difference is the whole ballgame: treating an
+     * unanswered load as "you have nothing" lets the next save write that
+     * emptiness over real data. A tile must refuse to save until it knows.
+     */
     load: function () {
       var id = 'l' + (++seq);
       return new Promise(function (resolve) {
-        pending[id] = resolve;
+        pending[id] = { resolve: resolve };
         post('load', { id: id });
         // The host may not have registered this frame on the very first ask.
-        setTimeout(function () { if (pending[id]) post('load', { id: id }); }, 300);
-        setTimeout(function () { if (pending[id]) { delete pending[id]; resolve(null); } }, 3000);
+        // Keep asking: a slow vault (a cold remote read) is not an empty one.
+        var tries = 0;
+        var retry = setInterval(function () {
+          if (!pending[id]) { clearInterval(retry); return; }
+          if (++tries > 12) { // ~10s, then admit we do not know
+            clearInterval(retry);
+            delete pending[id];
+            resolve({ ok: false, data: null });
+            return;
+          }
+          post('load', { id: id });
+        }, 800);
       });
     },
-    report: function (stream) { post('report', { stream: stream }); }
+
+    report: function (stream) { post('report', { stream: stream }); },
+    onWriteError: function (fn) { writeErrorHandlers.push(fn); }
   };
 })();
 </script>
@@ -267,6 +311,11 @@
   document.documentElement.setAttribute('data-mode', mode);
 
   var state = { projects: [] };
+  // Until the vault has actually answered, this tile does not know what it
+  // holds, so it must not write. Saving an assumed-empty list would delete
+  // whatever is really there.
+  var loaded = false;
+  var trouble = '';
 
   function todayLocal(){
     var d = new Date();
@@ -292,6 +341,7 @@
   }
 
   function persist(){
+    if (!loaded) return;
     if (window.Vitality) Vitality.save(state);
   }
 
@@ -354,6 +404,19 @@
     var pill = document.getElementById('pagePill');
     if (num) num.textContent = String(activeCount());
     if (pill) pill.textContent = doneCount() + ' done';
+
+    // Amber, never red: something needs attention, nobody is being scolded.
+    var note = document.getElementById('trouble');
+    if (note) {
+      note.textContent = trouble;
+      note.hidden = !trouble;
+    }
+    // Nothing may be added until the vault has answered, or the write would
+    // be built on a list this tile only guessed at.
+    var addBtn = document.getElementById('addBtn');
+    var input = document.getElementById('newTitle');
+    if (addBtn) addBtn.disabled = !loaded;
+    if (input) input.disabled = !loaded;
 
     var todoList = document.getElementById('todoList');
     var doneList = document.getElementById('doneList');
@@ -430,14 +493,25 @@
 
   function boot(){
     wire();
-    if (window.Vitality) {
-      Vitality.load().then(function (data) {
-        if (data && Array.isArray(data.projects)) state.projects = data.projects;
-        renderAll();
-      });
-    } else {
+    if (!window.Vitality) { loaded = true; renderAll(); return; }
+
+    Vitality.onWriteError(function () {
+      trouble = 'Not saved. Check your connection.';
       renderAll();
-    }
+    });
+
+    Vitality.load().then(function (res) {
+      if (res && res.ok) {
+        loaded = true;
+        var data = res.data;
+        if (data && Array.isArray(data.projects)) state.projects = data.projects;
+      } else {
+        // The vault never answered. Show that plainly and stay read-only
+        // rather than pretending the list is empty and writing over it.
+        trouble = 'Could not reach your vault. Nothing was changed.';
+      }
+      renderAll();
+    });
   }
 
   if (document.readyState === 'loading') {

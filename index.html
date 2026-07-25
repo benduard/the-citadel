@@ -566,6 +566,13 @@ body {
      can read it. The mentor writes this file the moment they say their name. -->
 <script src="lib/site.js"></script>
 
+<!-- The remote vault. host.js's Store seam swaps to this when someone is
+     signed in; signed out, these three files sit idle and everything runs
+     on localStorage exactly as before. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="lib/supabase-config.js"></script>
+<script src="lib/vault-remote.js"></script>
+
 <script>
 // ── The host contract. Host present, it uses the dashboard's store. No host,
 //    localStorage, and the shell still runs.

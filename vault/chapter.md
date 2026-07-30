@@ -21,11 +21,15 @@ Order matters here. Each one is a separate build, one at a time.
    note. Reports `checkin_score`. Manual, daily, thirty seconds. Built first
    because it needs nothing else to exist and it starts filling the ledger
    immediately.
-2. **Lifting** - next. Sets, reps, weight, RPE. PRs and progression fall out
-   of the history rather than being tracked separately. The biggest build of
-   the set.
-3. **Body** - one number, one trend line. Small, deliberately placed between
-   two heavy builds.
+2. **Lifting** - DONE, 2026-07-30. Sets, reps, weight, RPE. Reports
+   `lifting_volume` in kg. PRs and progression fall out of the history rather
+   than being tracked separately.
+   Two things to not undo: weight is stored in kg ALWAYS and the unit toggle
+   is display only, because a history that changes meaning when a preference
+   flips is worthless. And a PR is the heaviest set actually performed; the
+   Epley figure beside it is labelled an estimate and never stands in for it.
+3. **Body** - next. One number, one trend line. Small, deliberately placed
+   between two heavy builds.
 4. **Recovery** - see the constraint below. Wearable numbers only; the
    subjective half already lives in Check in.
 5. **Progress and XP** - last, because it reads from everything above.

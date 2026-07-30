@@ -1,0 +1,790 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lifting</title>
+<!--
+  Vitality tile: lifting
+  Log a set in three taps, mid workout, one handed.
+
+  store shape via Vitality.save/load:
+    {
+      unit: "kg" | "lb",              // DISPLAY only. see below.
+      days: { "YYYY-MM-DD": [
+        { id, ex, kg, reps, rpe }     // rpe may be null
+      ] }
+    }
+
+  WEIGHT IS ALWAYS STORED IN KG, whatever the display unit says. Storing what
+  was typed alongside its unit means the day someone flips the toggle their
+  whole history changes meaning, and the ledger ends up holding two units in
+  one column with no way to tell them apart. One canonical unit in, converted
+  at the edges, is the only version of this that survives a preference change.
+
+  reports one stream:
+    key   "lifting_volume"
+    kind  "measure"
+    value total kg moved that day, the sum of kg x reps over every set.
+          Always kg, never the display unit, so the ledger stays comparable
+          across any toggle.
+
+  PRs are the heaviest single set actually performed per exercise. Not an
+  estimated one rep max: that is a formula's opinion, not a thing that
+  happened, and this board does not report opinions as facts. An estimate is
+  shown beside it, labelled as an estimate.
+-->
+<style>
+  :root{
+    --bg:#050505;
+    --card:rgba(9,13,12,0.72);
+    --border:rgba(148,163,158,0.16);
+    --text:#E7ECEA;
+    --muted:#94A39E;
+    --faint:#5C6B66;
+    --mint:#6EE7B7;
+    --amber:#FCD34D;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    min-height:100vh;
+    background:transparent;
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    accent-color:var(--mint);
+    padding-top:env(safe-area-inset-top);
+    padding-right:env(safe-area-inset-right);
+    padding-bottom:env(safe-area-inset-bottom);
+    padding-left:env(safe-area-inset-left);
+    overflow-x:hidden;
+  }
+  html[data-mode="page"] body{ background:var(--bg); }
+
+  ::selection{ background:rgba(110,231,183,.28); }
+
+  .eyebrow{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin:0;
+  }
+  .hero{ font-family:Georgia,"Times New Roman",serif; font-weight:400; line-height:1; }
+  .pill{
+    display:inline-flex; align-items:center;
+    border-radius:999px;
+    border:1px solid rgba(110,231,183,.35);
+    padding:4px 10px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px; letter-spacing:.08em;
+    color:var(--mint); white-space:nowrap;
+  }
+
+  /* ── poster ─────────────────────────────────────────────── */
+  .posterView{
+    display:flex; flex-direction:column; justify-content:center;
+    gap:10px; height:100%; min-height:100vh; padding:20px;
+    opacity:0; animation:rise .6s ease forwards;
+  }
+  .posterHero{ display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; }
+  .posterHero .num{ font-size:46px; }
+  .posterHero .unit{ font-size:13px; color:var(--muted); }
+  .posterEmpty{ font-size:13px; color:var(--faint); }
+
+  /* ── page ───────────────────────────────────────────────── */
+  .pageView{ display:none; }
+  html[data-mode="page"] .pageView{
+    display:block; min-height:100vh;
+    padding:28px 20px calc(40px + env(safe-area-inset-bottom));
+    max-width:560px; margin:0 auto;
+  }
+  html[data-mode="page"] .posterView{ display:none; }
+
+  .pageHead{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  .pageHero{ display:flex; align-items:baseline; gap:12px; margin:10px 0 22px; flex-wrap:wrap; }
+  .pageHero .num{ font-size:56px; }
+  .pageHero .unit{ font-size:14px; color:var(--muted); }
+
+  .unitToggle{
+    border:1px solid var(--border); background:transparent;
+    color:var(--muted); border-radius:999px;
+    padding:6px 12px; min-height:36px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+    cursor:pointer; flex:none;
+    transition:color .2s ease, border-color .2s ease;
+  }
+  .unitToggle:hover{ color:var(--mint); border-color:rgba(110,231,183,.5); }
+  .unitToggle:disabled{ opacity:.4; cursor:not-allowed; }
+
+  .trouble{
+    margin:0 0 16px; padding:10px 14px;
+    border:1px solid rgba(252,211,77,.32); border-radius:12px;
+    background:rgba(252,211,77,.06); color:var(--amber); font-size:13px;
+  }
+
+  .block{
+    background:var(--card); border:1px solid var(--border);
+    border-radius:18px; padding:18px; margin-bottom:12px;
+  }
+  .blockTitle{ margin:0 0 12px; }
+
+  .field{ margin-bottom:10px; }
+  .fieldLabel{
+    display:block; margin-bottom:6px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
+  }
+  input[type="text"], input[type="number"]{
+    width:100%; min-height:46px;
+    background:transparent; border:1px solid var(--border); border-radius:12px;
+    padding:10px 12px; color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif; font-size:15px;
+  }
+  input::placeholder{ color:var(--faint); }
+  input:disabled{ opacity:.4; }
+
+  .trio{ display:flex; gap:8px; }
+  .trio .field{ flex:1; margin-bottom:0; }
+
+  .addBtn{
+    width:100%; margin-top:12px;
+    background:var(--mint); color:#04120c;
+    border:0; border-radius:999px; min-height:50px;
+    font-size:15px; font-weight:600;
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    cursor:pointer; transition:transform .14s ease, opacity .2s ease;
+  }
+  .addBtn:active{ transform:scale(.97); }
+  .addBtn:disabled{ opacity:.45; cursor:not-allowed; }
+
+  .setRow{
+    display:flex; align-items:center; gap:10px;
+    padding:10px 0;
+    border-top:1px solid var(--border);
+  }
+  .setRow:first-child{ border-top:0; }
+  .setEx{ flex:1; font-size:14px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .setNums{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:12px; color:var(--mint); font-variant-numeric:tabular-nums; white-space:nowrap;
+  }
+  .setRpe{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--faint); white-space:nowrap; }
+
+  .iconBtn{
+    flex:none; width:40px; height:40px;
+    background:transparent; border:1px solid var(--border); border-radius:999px;
+    color:var(--muted); cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    transition:transform .14s ease, border-color .2s ease, color .2s ease;
+  }
+  .iconBtn:active{ transform:scale(.9); }
+  .iconBtn:hover{ border-color:rgba(110,231,183,.5); color:var(--mint); }
+  .iconBtn svg{ width:15px; height:15px; }
+  .iconBtn.ghost{ border-color:transparent; }
+  .iconBtn.ghost:hover{ color:var(--amber); border-color:rgba(252,211,77,.4); }
+
+  .prRow{
+    display:flex; align-items:baseline; justify-content:space-between;
+    gap:10px; padding:9px 0; border-top:1px solid var(--border);
+  }
+  .prRow:first-child{ border-top:0; }
+  .prEx{ font-size:14px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .prVal{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:12px; color:var(--mint); font-variant-numeric:tabular-nums; white-space:nowrap;
+  }
+  .prEst{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10px; color:var(--faint); white-space:nowrap; }
+
+  .chart{ display:flex; align-items:flex-end; gap:7px; height:78px; margin-top:14px; }
+  .bar{ flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; }
+  .barFill{ width:100%; border-radius:5px; background:rgba(110,231,183,.5); min-height:3px; }
+  .barFill.today{ background:var(--mint); }
+  .barFill.none{ background:rgba(148,163,158,.16); }
+  .chartDays{ display:flex; gap:7px; margin-top:7px; }
+  .chartDay{
+    flex:1; text-align:center;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:9.5px; letter-spacing:.06em; color:var(--faint);
+  }
+  .empty{ color:var(--faint); font-size:13px; }
+
+  @keyframes rise{
+    from{ opacity:0; transform:translateY(8px); }
+    to{ opacity:1; transform:translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce){
+    .posterView{ animation:none; opacity:1; }
+    .addBtn, .iconBtn, .unitToggle{ transition:none; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="posterView" id="posterView">
+    <p class="eyebrow">Lifting</p>
+    <div class="posterHero" id="posterHero"></div>
+  </div>
+
+  <div class="pageView" id="pageView">
+    <div class="pageHead">
+      <p class="eyebrow">Lifting</p>
+      <button class="unitToggle" id="unitToggle" type="button" disabled>kg</button>
+    </div>
+    <div class="pageHero" id="pageHero"></div>
+
+    <p class="trouble" id="trouble" hidden></p>
+
+    <div class="block">
+      <p class="eyebrow blockTitle">Add a set</p>
+      <div class="field">
+        <label class="fieldLabel" for="ex">Exercise</label>
+        <input type="text" id="ex" list="exList" placeholder="Bench press" maxlength="60" autocomplete="off" disabled>
+        <datalist id="exList"></datalist>
+      </div>
+      <div class="trio">
+        <div class="field">
+          <label class="fieldLabel" for="weight">Weight <span id="unitLabel">kg</span></label>
+          <input type="number" id="weight" inputmode="decimal" step="0.5" min="0" placeholder="60" disabled>
+        </div>
+        <div class="field">
+          <label class="fieldLabel" for="reps">Reps</label>
+          <input type="number" id="reps" inputmode="numeric" step="1" min="1" placeholder="8" disabled>
+        </div>
+        <div class="field">
+          <label class="fieldLabel" for="rpe">RPE</label>
+          <input type="number" id="rpe" inputmode="decimal" step="0.5" min="1" max="10" placeholder="8" disabled>
+        </div>
+      </div>
+      <button class="addBtn" id="addBtn" type="button" disabled>Add set</button>
+    </div>
+
+    <div class="block">
+      <p class="eyebrow blockTitle">Today</p>
+      <div id="todayList"></div>
+    </div>
+
+    <div class="block">
+      <p class="eyebrow blockTitle">Best sets</p>
+      <div id="prList"></div>
+    </div>
+
+    <div class="block">
+      <p class="eyebrow blockTitle">Last 7 days</p>
+      <div id="chartWrap"></div>
+    </div>
+  </div>
+
+<script>
+// The Vitality bridge. postMessage only: a sealed tile has no storage of its
+// own, so save/load/report all travel to the host and back.
+(function(){
+  'use strict';
+
+  var seq = 0;
+  var pending = {};
+  var writeErrorHandlers = [];
+
+  window.addEventListener('message', function (e) {
+    var msg = e.data;
+    if (!msg || msg.source !== 'vitality-host') return;
+    if (msg.type === 'load:result') {
+      var p = pending[msg.id];
+      if (p) { delete pending[msg.id]; p.resolve({ ok: true, data: msg.data }); }
+      return;
+    }
+    if (msg.type === 'save:error' || msg.type === 'report:error') {
+      writeErrorHandlers.forEach(function (fn) { fn(msg.type, msg.reason); });
+    }
+  });
+
+  function post(type, payload) {
+    var msg = { source: 'vitality-tile', type: type };
+    for (var k in payload) { if (Object.prototype.hasOwnProperty.call(payload, k)) msg[k] = payload[k]; }
+    parent.postMessage(msg, '*');
+    return msg;
+  }
+
+  window.Vitality = {
+    save: function (data) { post('save', { data: data }); },
+
+    /**
+     * Resolves { ok, data }. ok:false means the host never answered, NOT that
+     * the slot is empty. Treating an unanswered load as "you have nothing"
+     * lets the next save write that emptiness over real data.
+     */
+    load: function () {
+      var id = 'l' + (++seq);
+      return new Promise(function (resolve) {
+        pending[id] = { resolve: resolve };
+        post('load', { id: id });
+        var tries = 0;
+        var retry = setInterval(function () {
+          if (!pending[id]) { clearInterval(retry); return; }
+          if (++tries > 12) {
+            clearInterval(retry);
+            delete pending[id];
+            resolve({ ok: false, data: null });
+            return;
+          }
+          post('load', { id: id });
+        }, 800);
+      });
+    },
+
+    report: function (stream) { post('report', { stream: stream }); },
+    onWriteError: function (fn) { writeErrorHandlers.push(fn); }
+  };
+})();
+</script>
+
+<script>
+(function(){
+  'use strict';
+
+  var mode = location.hash === '#page' ? 'page' : 'grid';
+  document.documentElement.setAttribute('data-mode', mode);
+
+  var state = { unit: 'kg', days: {} };
+  var loaded = false;
+  var trouble = '';
+
+  var LB_PER_KG = 2.2046226218;
+
+  function pad(n){ n = String(n); return n.length < 2 ? '0' + n : n; }
+  function dayKey(d){
+    // Local getters, never toISOString: that is UTC and drifts a day.
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+  function today(){ return dayKey(new Date()); }
+
+  function toDisplay(kg){ return state.unit === 'lb' ? kg * LB_PER_KG : kg; }
+  function toKg(shown){ return state.unit === 'lb' ? shown / LB_PER_KG : shown; }
+  function fmtWeight(kg){
+    var v = toDisplay(kg);
+    // Trim a trailing .0 so 60 reads as 60, but keep 62.5 intact.
+    return (Math.round(v * 10) / 10).toString();
+  }
+
+  function setsOn(key){ var s = state.days[key]; return Array.isArray(s) ? s : []; }
+  function volumeKg(sets){
+    var t = 0;
+    for (var i = 0; i < sets.length; i++) {
+      var s = sets[i];
+      if (isFinite(s.kg) && isFinite(s.reps)) t += s.kg * s.reps;
+    }
+    return t;
+  }
+  function fmtVolume(kg){
+    var v = toDisplay(kg);
+    return Math.round(v).toLocaleString();
+  }
+
+  function uid(){
+    return 's_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+  }
+
+  function persist(){
+    if (!loaded) return;
+    if (window.Vitality) Vitality.save(state);
+  }
+
+  function report(){
+    if (!loaded || !window.Vitality) return;
+    // Always kg. A ledger holding two units in one column cannot be read.
+    Vitality.report({
+      key: 'lifting_volume',
+      label: 'Lifting volume',
+      value: Math.round(volumeKg(setsOn(today()))),
+      date: today(),
+      kind: 'measure',
+      goalDirection: 'up'
+    });
+  }
+
+  // ── icons, drawn not typed ────────────────────────────────
+  function icoRepeat(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>' +
+      '<path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>';
+  }
+  function icoRemove(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">' +
+      '<line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>';
+  }
+
+  // ── render ────────────────────────────────────────────────
+  function renderPoster(){
+    var hero = document.getElementById('posterHero');
+    if (!hero) return;
+    hero.innerHTML = '';
+    var sets = setsOn(today());
+    if (!sets.length) {
+      var e = document.createElement('span');
+      e.className = 'posterEmpty';
+      e.textContent = 'no session yet';
+      hero.appendChild(e);
+      return;
+    }
+    var num = document.createElement('span');
+    num.className = 'num hero';
+    num.textContent = fmtVolume(volumeKg(sets));
+    var unit = document.createElement('span');
+    unit.className = 'unit';
+    unit.textContent = state.unit + ' moved';
+    var pill = document.createElement('span');
+    pill.className = 'pill';
+    pill.textContent = sets.length + (sets.length === 1 ? ' set' : ' sets');
+    hero.appendChild(num);
+    hero.appendChild(unit);
+    hero.appendChild(pill);
+  }
+
+  function renderPageHero(){
+    var hero = document.getElementById('pageHero');
+    if (!hero) return;
+    hero.innerHTML = '';
+    var sets = setsOn(today());
+    if (!sets.length) {
+      var e = document.createElement('span');
+      e.className = 'posterEmpty';
+      e.textContent = 'no sets logged today';
+      hero.appendChild(e);
+      return;
+    }
+    var num = document.createElement('span');
+    num.className = 'num hero';
+    num.textContent = fmtVolume(volumeKg(sets));
+    var unit = document.createElement('span');
+    unit.className = 'unit';
+    unit.textContent = state.unit + ' moved';
+    var pill = document.createElement('span');
+    pill.className = 'pill';
+    pill.textContent = sets.length + (sets.length === 1 ? ' set' : ' sets');
+    hero.appendChild(num);
+    hero.appendChild(unit);
+    hero.appendChild(pill);
+  }
+
+  function renderToday(){
+    var list = document.getElementById('todayList');
+    if (!list) return;
+    list.innerHTML = '';
+    var sets = setsOn(today());
+    if (!sets.length) {
+      var none = document.createElement('p');
+      none.className = 'empty';
+      none.textContent = 'nothing logged today';
+      list.appendChild(none);
+      return;
+    }
+    sets.forEach(function (s) {
+      var row = document.createElement('div');
+      row.className = 'setRow';
+
+      var ex = document.createElement('div');
+      ex.className = 'setEx';
+      ex.textContent = s.ex;
+
+      var nums = document.createElement('div');
+      nums.className = 'setNums';
+      nums.textContent = fmtWeight(s.kg) + state.unit + ' x ' + s.reps;
+
+      var rpe = document.createElement('div');
+      rpe.className = 'setRpe';
+      rpe.textContent = (s.rpe == null || !isFinite(s.rpe)) ? '' : 'RPE ' + s.rpe;
+
+      var again = document.createElement('button');
+      again.className = 'iconBtn';
+      again.type = 'button';
+      again.setAttribute('aria-label', 'Log this set again');
+      again.innerHTML = icoRepeat();
+      again.addEventListener('click', function () { repeatSet(s); });
+
+      var del = document.createElement('button');
+      del.className = 'iconBtn ghost';
+      del.type = 'button';
+      del.setAttribute('aria-label', 'Remove this set');
+      del.innerHTML = icoRemove();
+      del.addEventListener('click', function () { removeSet(s.id); });
+
+      row.appendChild(ex);
+      row.appendChild(nums);
+      row.appendChild(rpe);
+      row.appendChild(again);
+      row.appendChild(del);
+      list.appendChild(row);
+    });
+  }
+
+  function bestSets(){
+    // Heaviest single set per exercise. A thing that happened, not a formula.
+    var best = {};
+    Object.keys(state.days).forEach(function (k) {
+      setsOn(k).forEach(function (s) {
+        if (!s.ex || !isFinite(s.kg)) return;
+        var cur = best[s.ex];
+        if (!cur || s.kg > cur.kg) best[s.ex] = { kg: s.kg, reps: s.reps, date: k };
+      });
+    });
+    return Object.keys(best).sort().map(function (ex) {
+      return { ex: ex, kg: best[ex].kg, reps: best[ex].reps, date: best[ex].date };
+    });
+  }
+
+  function renderPRs(){
+    var list = document.getElementById('prList');
+    if (!list) return;
+    list.innerHTML = '';
+    var best = bestSets();
+    if (!best.length) {
+      var none = document.createElement('p');
+      none.className = 'empty';
+      none.textContent = 'no sets logged yet';
+      list.appendChild(none);
+      return;
+    }
+    best.forEach(function (b) {
+      var row = document.createElement('div');
+      row.className = 'prRow';
+
+      var ex = document.createElement('div');
+      ex.className = 'prEx';
+      ex.textContent = b.ex;
+
+      var right = document.createElement('div');
+
+      var val = document.createElement('span');
+      val.className = 'prVal';
+      val.textContent = fmtWeight(b.kg) + state.unit + ' x ' + b.reps;
+
+      right.appendChild(val);
+
+      // Epley, and labelled as the estimate it is. Never presented as a max
+      // that was actually lifted.
+      if (isFinite(b.reps) && b.reps > 1) {
+        var est = document.createElement('span');
+        est.className = 'prEst';
+        var e1rm = b.kg * (1 + b.reps / 30);
+        est.textContent = '  est. 1RM ' + fmtWeight(e1rm) + state.unit;
+        right.appendChild(est);
+      }
+
+      row.appendChild(ex);
+      row.appendChild(right);
+      list.appendChild(row);
+    });
+  }
+
+  function renderChart(){
+    var wrap = document.getElementById('chartWrap');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+
+    var days = [];
+    var max = 0;
+    for (var i = 6; i >= 0; i--) {
+      var d = new Date();
+      d.setDate(d.getDate() - i);
+      var key = dayKey(d);
+      var v = volumeKg(setsOn(key));
+      if (v > max) max = v;
+      days.push({ key: key, vol: v, date: d });
+    }
+
+    if (max <= 0) {
+      var none = document.createElement('p');
+      none.className = 'empty';
+      none.textContent = 'no sessions in the last 7 days';
+      wrap.appendChild(none);
+      return;
+    }
+
+    var chart = document.createElement('div');
+    chart.className = 'chart';
+    var labels = document.createElement('div');
+    labels.className = 'chartDays';
+    var t = today();
+
+    days.forEach(function (d) {
+      var bar = document.createElement('div');
+      bar.className = 'bar';
+      var fill = document.createElement('div');
+      // A rest day is a flat trace, never a zero-height bar pretending to be
+      // a session that went badly.
+      fill.className = 'barFill' + (d.key === t ? ' today' : '') + (d.vol <= 0 ? ' none' : '');
+      fill.style.height = d.vol <= 0 ? '3px' : Math.max(4, (d.vol / max) * 78) + 'px';
+      bar.appendChild(fill);
+      chart.appendChild(bar);
+
+      var lab = document.createElement('div');
+      lab.className = 'chartDay';
+      lab.textContent = ['S', 'M', 'T', 'W', 'T', 'F', 'S'][d.date.getDay()];
+      labels.appendChild(lab);
+    });
+
+    wrap.appendChild(chart);
+    wrap.appendChild(labels);
+  }
+
+  function renderExOptions(){
+    var dl = document.getElementById('exList');
+    if (!dl) return;
+    var seen = {};
+    Object.keys(state.days).forEach(function (k) {
+      setsOn(k).forEach(function (s) { if (s.ex) seen[s.ex] = true; });
+    });
+    dl.innerHTML = '';
+    Object.keys(seen).sort().forEach(function (ex) {
+      var o = document.createElement('option');
+      o.value = ex;
+      dl.appendChild(o);
+    });
+  }
+
+  function renderControls(){
+    var ids = ['ex', 'weight', 'reps', 'rpe', 'addBtn', 'unitToggle'];
+    ids.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.disabled = !loaded;
+    });
+    var ut = document.getElementById('unitToggle');
+    if (ut) ut.textContent = state.unit;
+    var ul = document.getElementById('unitLabel');
+    if (ul) ul.textContent = state.unit;
+    var tr = document.getElementById('trouble');
+    if (tr) { tr.textContent = trouble; tr.hidden = !trouble; }
+  }
+
+  function renderAll(){
+    renderPoster();
+    renderPageHero();
+    renderControls();
+    renderToday();
+    renderPRs();
+    renderChart();
+    renderExOptions();
+  }
+
+  // ── actions ───────────────────────────────────────────────
+  function addSet(){
+    if (!loaded) return;
+    var exEl = document.getElementById('ex');
+    var wEl = document.getElementById('weight');
+    var rEl = document.getElementById('reps');
+    var pEl = document.getElementById('rpe');
+    if (!exEl || !wEl || !rEl) return;
+
+    var ex = exEl.value.trim();
+    var shown = parseFloat(wEl.value);
+    var reps = parseInt(rEl.value, 10);
+    var rpeRaw = pEl ? parseFloat(pEl.value) : NaN;
+
+    // Silence beats a wrong row. Nothing is logged from an incomplete set.
+    if (!ex || !isFinite(shown) || shown < 0 || !isFinite(reps) || reps < 1) return;
+
+    var key = today();
+    if (!Array.isArray(state.days[key])) state.days[key] = [];
+    state.days[key].push({
+      id: uid(),
+      ex: ex,
+      kg: toKg(shown),
+      reps: reps,
+      rpe: isFinite(rpeRaw) ? rpeRaw : null
+    });
+
+    persist();
+    report();
+    renderAll();
+
+    // Weight and exercise stay put: the next set is usually the same lift.
+    if (pEl) pEl.value = '';
+    rEl.focus();
+  }
+
+  function repeatSet(s){
+    if (!loaded) return;
+    var key = today();
+    if (!Array.isArray(state.days[key])) state.days[key] = [];
+    state.days[key].push({ id: uid(), ex: s.ex, kg: s.kg, reps: s.reps, rpe: s.rpe });
+    persist();
+    report();
+    renderAll();
+  }
+
+  function removeSet(id){
+    if (!loaded) return;
+    var key = today();
+    state.days[key] = setsOn(key).filter(function (s) { return s.id !== id; });
+    if (!state.days[key].length) delete state.days[key];
+    persist();
+    report();
+    renderAll();
+  }
+
+  function toggleUnit(){
+    if (!loaded) return;
+    state.unit = state.unit === 'kg' ? 'lb' : 'kg';
+
+    // Clear whatever was half typed. A 100 sitting in the box meant 100 kg a
+    // moment ago and would now be read as 100 lb, quietly logging 45.4 kg
+    // instead. Converting it would be guessing at intent; emptying it asks.
+    var wEl = document.getElementById('weight');
+    if (wEl) wEl.value = '';
+
+    // Only the display changed. Every stored weight is still kg, so nothing
+    // in the history or the ledger moved.
+    persist();
+    renderAll();
+  }
+
+  function wire(){
+    var add = document.getElementById('addBtn');
+    if (add) add.addEventListener('click', addSet);
+
+    var ut = document.getElementById('unitToggle');
+    if (ut) ut.addEventListener('click', toggleUnit);
+
+    ['ex', 'weight', 'reps', 'rpe'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') addSet();
+      });
+    });
+  }
+
+  function boot(){
+    wire();
+    if (!window.Vitality) { loaded = true; renderAll(); return; }
+
+    Vitality.onWriteError(function () {
+      trouble = 'Not saved. Check your connection.';
+      renderAll();
+    });
+
+    Vitality.load().then(function (res) {
+      if (res && res.ok) {
+        loaded = true;
+        var data = res.data;
+        if (data && data.days && typeof data.days === 'object') state.days = data.days;
+        if (data && (data.unit === 'kg' || data.unit === 'lb')) state.unit = data.unit;
+      } else {
+        trouble = 'Could not reach your vault. Nothing was changed.';
+      }
+      renderAll();
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,688 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Check in</title>
+<!--
+  Vitality tile: checkin
+  Thirty seconds a day. How you actually are, in your own numbers.
+
+  store shape via Vitality.save/load:
+    { days: { "YYYY-MM-DD": {
+        mood, energy, focus, stress, soreness,   // 0-10 integers
+        water,                                   // glasses, integer >= 0
+        supps,                                   // boolean, supplements taken
+        note                                     // string, free text, may be ''
+    } } }
+
+  reports one stream:
+    key   "checkin_score"
+    kind  "rating"
+    value 0-10, one decimal. The average of mood, energy, focus, and the
+          INVERTED stress and soreness (10 - x), because low stress and low
+          soreness are the good direction and a plain average would score a
+          wrecked day the same as a good one. The tile always shows the five
+          inputs beside the score, so it is never a number you have to trust.
+-->
+<style>
+  :root{
+    --bg:#050505;
+    --card:rgba(9,13,12,0.72);
+    --border:rgba(148,163,158,0.16);
+    --text:#E7ECEA;
+    --muted:#94A39E;
+    --faint:#5C6B66;
+    --mint:#6EE7B7;
+    --amber:#FCD34D;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    min-height:100vh;
+    background:transparent;
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    accent-color:var(--mint);
+    padding-top:env(safe-area-inset-top);
+    padding-right:env(safe-area-inset-right);
+    padding-bottom:env(safe-area-inset-bottom);
+    padding-left:env(safe-area-inset-left);
+    overflow-x:hidden;
+  }
+  html[data-mode="page"] body{ background:var(--bg); }
+
+  ::selection{ background:rgba(110,231,183,.28); }
+
+  .eyebrow{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin:0;
+  }
+  .hero{
+    font-family:Georgia,"Times New Roman",serif;
+    font-weight:400;
+    line-height:1;
+  }
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    border-radius:999px;
+    border:1px solid rgba(110,231,183,.35);
+    padding:4px 10px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px;
+    letter-spacing:.08em;
+    color:var(--mint);
+    white-space:nowrap;
+  }
+  .pill.quiet{ border-color:var(--border); color:var(--muted); }
+
+  /* ── poster ─────────────────────────────────────────────── */
+  .posterView{
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    gap:10px;
+    height:100%;
+    min-height:100vh;
+    padding:20px;
+    opacity:0;
+    animation:rise .6s ease forwards;
+  }
+  .posterHero{ display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; }
+  .posterHero .num{ font-size:46px; }
+  .posterHero .unit{ font-size:13px; color:var(--muted); }
+  .posterEmpty{ font-size:13px; color:var(--faint); }
+
+  /* ── page ───────────────────────────────────────────────── */
+  .pageView{ display:none; }
+  html[data-mode="page"] .pageView{
+    display:block;
+    min-height:100vh;
+    padding:28px 20px calc(40px + env(safe-area-inset-bottom));
+    max-width:560px;
+    margin:0 auto;
+  }
+  html[data-mode="page"] .posterView{ display:none; }
+
+  .pageHero{ display:flex; align-items:baseline; gap:12px; margin:10px 0 22px; flex-wrap:wrap; }
+  .pageHero .num{ font-size:56px; }
+  .pageHero .unit{ font-size:14px; color:var(--muted); }
+
+  .trouble{
+    margin:0 0 16px;
+    padding:10px 14px;
+    border:1px solid rgba(252,211,77,.32);
+    border-radius:12px;
+    background:rgba(252,211,77,.06);
+    color:var(--amber);
+    font-size:13px;
+  }
+
+  .block{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:18px;
+    padding:18px;
+    margin-bottom:12px;
+  }
+
+  .scale{ margin-bottom:16px; }
+  .scale:last-child{ margin-bottom:0; }
+  .scaleTop{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:8px; gap:10px; }
+  .scaleName{ font-size:14px; }
+  .scaleVal{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:13px;
+    color:var(--mint);
+    font-variant-numeric:tabular-nums;
+  }
+  .scaleHint{ font-size:11px; color:var(--faint); }
+
+  input[type="range"]{
+    width:100%;
+    height:34px;
+    background:transparent;
+    cursor:pointer;
+  }
+  input[type="range"]:disabled{ opacity:.4; cursor:not-allowed; }
+
+  .row{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .rowLabel{ font-size:14px; }
+
+  .stepper{ display:flex; align-items:center; gap:6px; }
+  .step{
+    width:44px; height:44px;
+    border-radius:999px;
+    border:1px solid var(--border);
+    background:transparent;
+    color:var(--text);
+    font-size:20px;
+    line-height:1;
+    cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    transition:transform .14s ease, border-color .2s ease;
+  }
+  .step:active{ transform:scale(.9); }
+  .step:hover{ border-color:rgba(110,231,183,.5); }
+  .step:disabled{ opacity:.4; cursor:not-allowed; }
+  .stepVal{
+    min-width:44px;
+    text-align:center;
+    font-family:Georgia,"Times New Roman",serif;
+    font-size:26px;
+  }
+
+  .toggle{
+    width:56px; height:32px;
+    border-radius:999px;
+    border:1px solid var(--border);
+    background:transparent;
+    cursor:pointer;
+    position:relative;
+    transition:background .2s ease, border-color .2s ease;
+  }
+  .toggle:disabled{ opacity:.4; cursor:not-allowed; }
+  .toggle .knob{
+    position:absolute; top:3px; left:3px;
+    width:24px; height:24px;
+    border-radius:999px;
+    background:var(--muted);
+    transition:transform .2s ease, background .2s ease;
+  }
+  .toggle[aria-pressed="true"]{ background:rgba(110,231,183,.18); border-color:var(--mint); }
+  .toggle[aria-pressed="true"] .knob{ transform:translateX(24px); background:var(--mint); }
+
+  textarea{
+    width:100%;
+    min-height:70px;
+    resize:vertical;
+    background:transparent;
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:10px 12px;
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    font-size:14px;
+    margin-top:10px;
+  }
+  textarea::placeholder{ color:var(--faint); }
+  textarea:disabled{ opacity:.4; }
+
+  .saveBtn{
+    width:100%;
+    background:var(--mint);
+    color:#04120c;
+    border:0;
+    border-radius:999px;
+    padding:0 22px;
+    min-height:50px;
+    font-size:15px;
+    font-weight:600;
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    cursor:pointer;
+    transition:transform .14s ease, opacity .2s ease;
+  }
+  .saveBtn:active{ transform:scale(.97); }
+  .saveBtn:disabled{ opacity:.45; cursor:not-allowed; }
+
+  /* ── 7 day chart ────────────────────────────────────────── */
+  .chart{ display:flex; align-items:flex-end; gap:7px; height:78px; margin-top:14px; }
+  .bar{ flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; }
+  .barFill{
+    width:100%;
+    border-radius:5px;
+    background:rgba(110,231,183,.5);
+    min-height:3px;
+  }
+  .barFill.today{ background:var(--mint); }
+  .barFill.none{ background:rgba(148,163,158,.16); }
+  .chartDays{ display:flex; gap:7px; margin-top:7px; }
+  .chartDay{
+    flex:1;
+    text-align:center;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:9.5px;
+    letter-spacing:.06em;
+    color:var(--faint);
+  }
+  .empty{ color:var(--faint); font-size:13px; }
+
+  @keyframes rise{
+    from{ opacity:0; transform:translateY(8px); }
+    to{ opacity:1; transform:translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .posterView{ animation:none; opacity:1; }
+    .step, .toggle, .toggle .knob, .saveBtn{ transition:none; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="posterView" id="posterView">
+    <p class="eyebrow">Check in</p>
+    <div class="posterHero" id="posterHero"></div>
+  </div>
+
+  <div class="pageView" id="pageView">
+    <p class="eyebrow">Check in</p>
+    <div class="pageHero" id="pageHero"></div>
+
+    <p class="trouble" id="trouble" hidden></p>
+
+    <div class="block" id="scalesBlock">
+      <div class="scale">
+        <div class="scaleTop"><span class="scaleName">Mood</span><span class="scaleVal" id="valMood">5</span></div>
+        <input type="range" id="mood" min="0" max="10" step="1" value="5" disabled>
+      </div>
+      <div class="scale">
+        <div class="scaleTop"><span class="scaleName">Energy</span><span class="scaleVal" id="valEnergy">5</span></div>
+        <input type="range" id="energy" min="0" max="10" step="1" value="5" disabled>
+      </div>
+      <div class="scale">
+        <div class="scaleTop"><span class="scaleName">Focus</span><span class="scaleVal" id="valFocus">5</span></div>
+        <input type="range" id="focus" min="0" max="10" step="1" value="5" disabled>
+      </div>
+      <div class="scale">
+        <div class="scaleTop">
+          <span class="scaleName">Stress <span class="scaleHint">lower is better</span></span>
+          <span class="scaleVal" id="valStress">5</span>
+        </div>
+        <input type="range" id="stress" min="0" max="10" step="1" value="5" disabled>
+      </div>
+      <div class="scale">
+        <div class="scaleTop">
+          <span class="scaleName">Soreness <span class="scaleHint">lower is better</span></span>
+          <span class="scaleVal" id="valSoreness">5</span>
+        </div>
+        <input type="range" id="soreness" min="0" max="10" step="1" value="5" disabled>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="row">
+        <span class="rowLabel">Water <span class="scaleHint">glasses</span></span>
+        <div class="stepper">
+          <button class="step" id="waterDown" type="button" aria-label="One glass fewer" disabled>-</button>
+          <span class="stepVal" id="valWater">0</span>
+          <button class="step" id="waterUp" type="button" aria-label="One glass more" disabled>+</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="row">
+        <span class="rowLabel">Supplements taken</span>
+        <button class="toggle" id="supps" type="button" aria-pressed="false" aria-label="Supplements taken" disabled>
+          <span class="knob"></span>
+        </button>
+      </div>
+      <textarea id="note" placeholder="Any discomfort, or anything worth remembering" maxlength="500" disabled></textarea>
+    </div>
+
+    <button class="saveBtn" id="saveBtn" type="button" disabled>Save today</button>
+
+    <div class="block" style="margin-top:22px">
+      <p class="eyebrow">Last 7 days</p>
+      <div id="chartWrap"></div>
+    </div>
+  </div>
+
+<script>
+// The Vitality bridge. postMessage only: a sealed tile has no storage of its
+// own, so save/load/report all travel to the host and back.
+(function(){
+  'use strict';
+
+  var seq = 0;
+  var pending = {};
+  var writeErrorHandlers = [];
+
+  window.addEventListener('message', function (e) {
+    var msg = e.data;
+    if (!msg || msg.source !== 'vitality-host') return;
+    if (msg.type === 'load:result') {
+      var p = pending[msg.id];
+      if (p) { delete pending[msg.id]; p.resolve({ ok: true, data: msg.data }); }
+      return;
+    }
+    if (msg.type === 'save:error' || msg.type === 'report:error') {
+      writeErrorHandlers.forEach(function (fn) { fn(msg.type, msg.reason); });
+    }
+  });
+
+  function post(type, payload) {
+    var msg = { source: 'vitality-tile', type: type };
+    for (var k in payload) { if (Object.prototype.hasOwnProperty.call(payload, k)) msg[k] = payload[k]; }
+    parent.postMessage(msg, '*');
+    return msg;
+  }
+
+  window.Vitality = {
+    save: function (data) { post('save', { data: data }); },
+
+    /**
+     * Resolves { ok, data }. ok:false means the host never answered, NOT that
+     * the slot is empty. Treating an unanswered load as "you have nothing"
+     * lets the next save write that emptiness over real data.
+     */
+    load: function () {
+      var id = 'l' + (++seq);
+      return new Promise(function (resolve) {
+        pending[id] = { resolve: resolve };
+        post('load', { id: id });
+        var tries = 0;
+        var retry = setInterval(function () {
+          if (!pending[id]) { clearInterval(retry); return; }
+          if (++tries > 12) {
+            clearInterval(retry);
+            delete pending[id];
+            resolve({ ok: false, data: null });
+            return;
+          }
+          post('load', { id: id });
+        }, 800);
+      });
+    },
+
+    report: function (stream) { post('report', { stream: stream }); },
+    onWriteError: function (fn) { writeErrorHandlers.push(fn); }
+  };
+})();
+</script>
+
+<script>
+(function(){
+  'use strict';
+
+  var mode = location.hash === '#page' ? 'page' : 'grid';
+  document.documentElement.setAttribute('data-mode', mode);
+
+  var state = { days: {} };
+  var loaded = false;
+  var trouble = '';
+
+  var SCALES = ['mood', 'energy', 'focus', 'stress', 'soreness'];
+  // Low is the good direction for these, so they are flipped before scoring.
+  var INVERTED = { stress: true, soreness: true };
+
+  var draft = { mood: 5, energy: 5, focus: 5, stress: 5, soreness: 5, water: 0, supps: false, note: '' };
+
+  function pad(n){ n = String(n); return n.length < 2 ? '0' + n : n; }
+  function dayKey(d){
+    // Local getters, never toISOString: that is UTC and drifts a day.
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+  function today(){ return dayKey(new Date()); }
+
+  function scoreOf(e){
+    if (!e) return null;
+    var sum = 0;
+    for (var i = 0; i < SCALES.length; i++) {
+      var k = SCALES[i];
+      var v = Number(e[k]);
+      if (!isFinite(v)) return null;
+      sum += INVERTED[k] ? (10 - v) : v;
+    }
+    return Math.round((sum / SCALES.length) * 10) / 10;
+  }
+
+  function todaysEntry(){ return state.days[today()] || null; }
+
+  function persist(){
+    if (!loaded) return;
+    if (window.Vitality) Vitality.save(state);
+  }
+
+  function report(){
+    if (!loaded || !window.Vitality) return;
+    var s = scoreOf(todaysEntry());
+    if (s == null) return;
+    Vitality.report({
+      key: 'checkin_score',
+      label: 'Check in',
+      value: s,
+      date: today(),
+      kind: 'rating',
+      goalDirection: 'up'
+    });
+  }
+
+  // ── render ────────────────────────────────────────────────
+  function renderPoster(){
+    var hero = document.getElementById('posterHero');
+    if (!hero) return;
+    hero.innerHTML = '';
+    var s = scoreOf(todaysEntry());
+    if (s == null) {
+      var e = document.createElement('span');
+      e.className = 'posterEmpty';
+      e.textContent = 'not logged yet';
+      hero.appendChild(e);
+      return;
+    }
+    var num = document.createElement('span');
+    num.className = 'num hero';
+    num.textContent = String(s);
+    var unit = document.createElement('span');
+    unit.className = 'unit';
+    unit.textContent = 'out of 10';
+    hero.appendChild(num);
+    hero.appendChild(unit);
+  }
+
+  function renderPageHero(){
+    var hero = document.getElementById('pageHero');
+    if (!hero) return;
+    hero.innerHTML = '';
+    var s = scoreOf(todaysEntry());
+    if (s == null) {
+      var e = document.createElement('span');
+      e.className = 'posterEmpty';
+      e.textContent = 'not logged yet today';
+      hero.appendChild(e);
+      return;
+    }
+    var num = document.createElement('span');
+    num.className = 'num hero';
+    num.textContent = String(s);
+    var unit = document.createElement('span');
+    unit.className = 'unit';
+    unit.textContent = 'out of 10';
+    var pill = document.createElement('span');
+    pill.className = 'pill';
+    pill.textContent = 'logged';
+    hero.appendChild(num);
+    hero.appendChild(unit);
+    hero.appendChild(pill);
+  }
+
+  function renderChart(){
+    var wrap = document.getElementById('chartWrap');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+
+    var days = [];
+    for (var i = 6; i >= 0; i--) {
+      var d = new Date();
+      d.setDate(d.getDate() - i);
+      var key = dayKey(d);
+      days.push({ key: key, score: scoreOf(state.days[key]), date: d });
+    }
+
+    var any = days.some(function (d) { return d.score != null; });
+    if (!any) {
+      var none = document.createElement('p');
+      none.className = 'empty';
+      none.textContent = 'no check ins yet';
+      wrap.appendChild(none);
+      return;
+    }
+
+    var chart = document.createElement('div');
+    chart.className = 'chart';
+    var labels = document.createElement('div');
+    labels.className = 'chartDays';
+    var t = today();
+
+    days.forEach(function (d) {
+      var bar = document.createElement('div');
+      bar.className = 'bar';
+      var fill = document.createElement('div');
+      fill.className = 'barFill' + (d.key === t ? ' today' : '') + (d.score == null ? ' none' : '');
+      // A day with no entry gets a flat trace, never a zero: zero is a real
+      // score someone could have, and drawing "did not log" as "felt awful"
+      // would be inventing a number.
+      fill.style.height = d.score == null ? '3px' : Math.max(4, (d.score / 10) * 78) + 'px';
+      bar.appendChild(fill);
+      chart.appendChild(bar);
+
+      var lab = document.createElement('div');
+      lab.className = 'chartDay';
+      lab.textContent = ['S', 'M', 'T', 'W', 'T', 'F', 'S'][d.date.getDay()];
+      labels.appendChild(lab);
+    });
+
+    wrap.appendChild(chart);
+    wrap.appendChild(labels);
+  }
+
+  function renderControls(){
+    SCALES.forEach(function (k) {
+      var input = document.getElementById(k);
+      var val = document.getElementById('val' + k.charAt(0).toUpperCase() + k.slice(1));
+      if (input) { input.value = draft[k]; input.disabled = !loaded; }
+      if (val) val.textContent = String(draft[k]);
+    });
+
+    var w = document.getElementById('valWater');
+    if (w) w.textContent = String(draft.water);
+    var wu = document.getElementById('waterUp');
+    var wd = document.getElementById('waterDown');
+    if (wu) wu.disabled = !loaded;
+    if (wd) wd.disabled = !loaded;
+
+    var sup = document.getElementById('supps');
+    if (sup) {
+      sup.setAttribute('aria-pressed', draft.supps ? 'true' : 'false');
+      sup.disabled = !loaded;
+    }
+
+    var note = document.getElementById('note');
+    if (note) { note.value = draft.note; note.disabled = !loaded; }
+
+    var save = document.getElementById('saveBtn');
+    if (save) {
+      save.disabled = !loaded;
+      save.textContent = todaysEntry() ? 'Update today' : 'Save today';
+    }
+
+    var note2 = document.getElementById('trouble');
+    if (note2) { note2.textContent = trouble; note2.hidden = !trouble; }
+  }
+
+  function renderAll(){
+    renderPoster();
+    renderPageHero();
+    renderControls();
+    renderChart();
+  }
+
+  // ── actions ───────────────────────────────────────────────
+  function save(){
+    if (!loaded) return;
+    state.days[today()] = {
+      mood: draft.mood, energy: draft.energy, focus: draft.focus,
+      stress: draft.stress, soreness: draft.soreness,
+      water: draft.water, supps: draft.supps, note: draft.note
+    };
+    persist();
+    report();
+    renderAll();
+  }
+
+  function loadDraftFromToday(){
+    var e = todaysEntry();
+    if (!e) return;
+    SCALES.forEach(function (k) { if (isFinite(Number(e[k]))) draft[k] = Number(e[k]); });
+    if (isFinite(Number(e.water))) draft.water = Number(e.water);
+    draft.supps = !!e.supps;
+    draft.note = typeof e.note === 'string' ? e.note : '';
+  }
+
+  function wire(){
+    SCALES.forEach(function (k) {
+      var input = document.getElementById(k);
+      if (!input) return;
+      input.addEventListener('input', function () {
+        draft[k] = Number(input.value);
+        var val = document.getElementById('val' + k.charAt(0).toUpperCase() + k.slice(1));
+        if (val) val.textContent = String(draft[k]);
+      });
+    });
+
+    var wu = document.getElementById('waterUp');
+    var wd = document.getElementById('waterDown');
+    if (wu) wu.addEventListener('click', function () {
+      draft.water += 1;
+      var w = document.getElementById('valWater');
+      if (w) w.textContent = String(draft.water);
+    });
+    if (wd) wd.addEventListener('click', function () {
+      draft.water = Math.max(0, draft.water - 1);
+      var w = document.getElementById('valWater');
+      if (w) w.textContent = String(draft.water);
+    });
+
+    var sup = document.getElementById('supps');
+    if (sup) sup.addEventListener('click', function () {
+      draft.supps = !draft.supps;
+      sup.setAttribute('aria-pressed', draft.supps ? 'true' : 'false');
+    });
+
+    var note = document.getElementById('note');
+    if (note) note.addEventListener('input', function () { draft.note = note.value; });
+
+    var saveBtn = document.getElementById('saveBtn');
+    if (saveBtn) saveBtn.addEventListener('click', save);
+  }
+
+  function boot(){
+    wire();
+    if (!window.Vitality) { loaded = true; renderAll(); return; }
+
+    Vitality.onWriteError(function () {
+      trouble = 'Not saved. Check your connection.';
+      renderAll();
+    });
+
+    Vitality.load().then(function (res) {
+      if (res && res.ok) {
+        loaded = true;
+        var data = res.data;
+        if (data && data.days && typeof data.days === 'object') state.days = data.days;
+        loadDraftFromToday();
+      } else {
+        trouble = 'Could not reach your vault. Nothing was changed.';
+      }
+      renderAll();
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>
+</body>
+</html>

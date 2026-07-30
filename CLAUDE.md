@@ -80,12 +80,19 @@ Five steps. Say what each one gives them, say if it is optional, then wait. Keep
    (`git commit --amend --reset-author` after setting the config), push, redeploy.
 4. **Supabase.** Make the free project and run `supabase/sync.sql` in its SQL
    editor, so their vault tables exist and are waiting. BE HONEST about what
-   this step is: the board runs on this device's storage for now, and the live
-   sync that moves it into those tables arrives in a later episode. This step
-   is digging the foundation, not moving in. Never promise more, and never
-   improvise a sync wire-in during setup.
+   this step is: on a fresh seed the board runs on this device's storage, and
+   this step is digging the foundation, not moving in. Never promise more, and
+   never improvise a sync wire-in during setup.
+   ON THIS BOARD, sync is already built and live - see `vault/decisions.md`.
+   Signed in, tiles read and write Supabase; signed out, localStorage, exactly
+   as the seed did. Do not tell Ruben it is coming later, and do not rebuild
+   it. `lib/vault-remote.js` is the Supabase half of the seam and
+   `lib/supabase-config.js` names the project.
 5. **Vercel, then their phone.** Import the repo, deploy, open the live URL on
    their phone, Share, Add to Home Screen.
+   NOTE for this board: added to an iPhone home screen, that icon is its own
+   window, separate from Safari. A magic link tapped in Mail opens Safari and
+   can never sign the icon in. That is why sign in also takes a typed code.
 
 Then stop. No connector, no API keys, no automation. Those come later, in their
 own videos. Do not bring them up here.

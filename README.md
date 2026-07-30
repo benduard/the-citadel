@@ -62,11 +62,18 @@ registry entries, my weights, my vault/ and my tile data stay exactly as
 they are. Tell me what changed when you're done, then push.
 
 1) Refresh the platform from github.com/rowanthistlebrooke/seed:
-   index.html, lib/tiles/host.js and lib/tiles/library.js (fetch the raw
-   files, replace mine). If lib/site.js or lib/tiles/registry.js are missing,
-   create them from the seed - never overwrite ones that exist. If my
-   index.html has no <script src="lib/tiles/library.js">, add it after host.js
-   so the Library gear loads.
+   index.html, lib/tiles/host.js and lib/tiles/library.js. Do NOT blind
+   replace them. This board has sync built on top of all three, and a
+   straight overwrite silently rips it out: index.html would lose the
+   supabase-config and vault-remote script tags, host.js would lose the
+   Store seam that routes to Supabase, library.js would lose the whole
+   account panel. Signed in, the board would then render empty while the
+   data sat safe but unreachable in Supabase. So: diff the seed's version
+   against mine, take what is genuinely new, and keep every sync change.
+   If lib/site.js or lib/tiles/registry.js are missing, create them from
+   the seed - never overwrite ones that exist. If my index.html has no
+   <script src="lib/tiles/library.js">, add it after host.js so the
+   Library gear loads.
 
 2) Refresh every tile I have from its source, keeping my registry line:
    - finance -> github.com/rowanthistlebrooke/ep-finance-stocks (finance.html)
@@ -86,16 +93,18 @@ they are. Tell me what changed when you're done, then push.
 ## What is in here
 
 ```
-index.html            your board. gem, your name, your date. nothing else yet
+index.html            your board. gem, your name, your date, your tiles
 CLAUDE.md             the mentor's instructions. this is what makes it a mentor
 lib/site.js           your name. one line, written the moment you say it
+lib/supabase-config.js  which Supabase project is yours. the anon key is public by design
+lib/vault-remote.js   sign in, and the Supabase half of the storage seam
 lib/tiles/registry.js the list of tiles on your board. one line per tile
 lib/tiles/host.js     the host. renders each tile sealed, carries its data
-lib/tiles/library.js  the Library: the settings gear, top right. every tile and what powers it
+lib/tiles/library.js  the Library: the settings gear, top right. every tile, and your account
 lib/tiles/weights.ts  the equation. y = Sum of w times x. empty until it is yours
 vault/                your context. who you are, the chapter, the decisions
-supabase/sync.sql     the vault schema. two tables, both yours only
-tiles/                empty. this fills up one video at a time
+supabase/sync.sql     the vault schema. two tables, both yours only. safe to re-run
+tiles/                your tiles. one file each
 SETUP.md              the checklist. it ticks as you go
 ```
 

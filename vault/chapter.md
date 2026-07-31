@@ -28,13 +28,45 @@ Order matters here. Each one is a separate build, one at a time.
    is display only, because a history that changes meaning when a preference
    flips is worthless. And a PR is the heaviest set actually performed; the
    Epley figure beside it is labelled an estimate and never stands in for it.
-3. **Body** - next. One number, one trend line. Small, deliberately placed
-   between two heavy builds.
-4. **Recovery** - see the constraint below. Wearable numbers only; the
-   subjective half already lives in Check in.
-5. **Progress and XP** - last, because it reads from everything above.
+3. **Body** - DONE, 2026-07-30. Weight, stored in kg always, with a 7 day
+   rolling average drawn only where a window holds 4 or more weigh ins.
+   A single morning reading is water and food and time of day; presenting one
+   as the truth misleads, and averaging two points into a trend is worse.
+   Reports `body_weight`, goalDirection `neutral` because whether it should
+   rise or fall is a fact about intent nobody has stated.
+4. **Recovery** - DONE, 2026-07-30. Sleep, HRV, resting heart rate,
+   respiratory rate, typed in. Reports `sleep_hours`.
+   The readiness band is the part to not water down: it refuses to render
+   until 7 mornings exist, baselines against that person's own trailing 14
+   days rather than population norms, floors the spread at 4 percent of the
+   mean so a flat fortnight cannot promote noise into a verdict, and lists
+   every contributing metric underneath. Observation, never diagnosis.
+5. **Progress and XP** - DONE, 2026-07-30. Quests, XP, levels, streaks.
+   Self contained, because a sealed tile can only read its own slot and so XP
+   cannot be awarded from the other tiles. The page says that plainly.
+   Deleting a finished quest does not decrement `quests_done`; retired quests
+   are counted separately so the ledger never walks backwards for a
+   bookkeeping action. Ticks do not undo, so XP cannot be farmed.
    Weight zero in every goal: it is a lens on the other tiles, not its own
    input, and weighting it would count the same work twice.
+
+The roadmap is complete. Six tiles, verified together as well as alone: no
+cross-writes between slots, no duplicate key+date ledger rows.
+
+## Where the board goes next
+
+Nothing is queued. The obvious candidates, none of them started:
+
+- The automation that would let Recovery fill itself. A scheduled job holding
+  the wearable's API key, writing JSON into this repo, which the host fetches
+  and hands to the tile as a feed. This is the only path; the tile can never
+  fetch.
+- Board LAYOUT does not sync yet. Tile data does. Which tiles you have hidden
+  through the Library is still per device (`v:board` is localStorage only).
+- Cardio, deferred when Lifting was scoped. Heart rate zones and active
+  calories have the same wearable constraint as Recovery.
+- Ruben's own deferred list: full nutrition, cognitive analytics beyond mood
+  and focus, finances.
 
 Deferred by Ruben, not forgotten: full nutrition, cognitive analytics beyond
 mood and focus, finances.

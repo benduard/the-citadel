@@ -21,13 +21,22 @@ Order matters here. Each one is a separate build, one at a time.
    note. Reports `checkin_score`. Manual, daily, thirty seconds. Built first
    because it needs nothing else to exist and it starts filling the ledger
    immediately.
-2. **Lifting** - DONE, 2026-07-30. Sets, reps, weight, RPE. Reports
-   `lifting_volume` in kg. PRs and progression fall out of the history rather
-   than being tracked separately.
-   Two things to not undo: weight is stored in kg ALWAYS and the unit toggle
-   is display only, because a history that changes meaning when a preference
-   flips is worthless. And a PR is the heaviest set actually performed; the
-   Epley figure beside it is labelled an estimate and never stands in for it.
+2. **Lifting** - DONE, 2026-07-30, then rebuilt the same day into a ranked gym
+   log at Ruben's request. Routines and hand written plans, a full log with a
+   rest timer, exercise by exercise ranks, an overall gym rank, XP and levels,
+   records, streaks, quests, titles, a muscle recovery estimate, a bodygraph
+   and a searchable library. Size `big`, four way bottom navigation. Reports
+   `lifting_volume` in kg, and nothing else.
+   Things to not undo: weight is stored in kg ALWAYS and the unit toggle is
+   display only, because a history that changes meaning when a preference
+   flips is worthless. A PR is the heaviest set actually performed; the Epley
+   figure beside it is labelled an estimate and never stands in for it. The
+   rank ladder prints its own thresholds because it is a scale somebody chose,
+   not a measurement. Bodyweight is held here for the ratio maths and is never
+   reported, because Body owns that ledger row. XP is derived from history, not
+   stored, so it cannot drift or be farmed.
+   See `vault/decisions.md` for the four parts of the brief that could not be
+   built as asked and what was done instead.
 3. **Body** - DONE, 2026-07-30. Weight, stored in kg always, with a 7 day
    rolling average drawn only where a window holds 4 or more weigh ins.
    A single morning reading is water and food and time of day; presenting one

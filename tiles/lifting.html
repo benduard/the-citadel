@@ -6,15 +6,30 @@
 <title>Lifting</title>
 <!--
   Vitality tile: lifting
-  Log a set in three taps, mid workout, one handed.
+  A gym log with a rank ladder on top of it. Log sets, get an exercise by
+  exercise strength rank from estimated one rep max over bodyweight, an overall
+  gym rank, XP, PRs, streaks, quests, a muscle recovery estimate and a bodygraph.
 
   store shape via Vitality.save/load:
     {
-      unit: "kg" | "lb",              // DISPLAY only. see below.
-      days: { "YYYY-MM-DD": [
-        { id, ex, kg, reps, rpe }     // rpe may be null
-      ] }
+      v: 2,
+      unit: "kg" | "lb",              // DISPLAY only, see below
+      bw: <number|null>,              // bodyweight, KG always. rank maths only
+      weekTarget: <number>,           // sessions a week that keep a streak alive
+      rest: <number>,                 // rest timer default, seconds
+      days:     { "YYYY-MM-DD": [ { id, ex, kg, reps, rpe, note } ] },
+      notes:    { "YYYY-MM-DD": "session note" },
+      routines: [ { id, name, items: [ { ex, sets, reps, kg } ] } ],
+      custom:   [ { id, name, pri, sec: [], cat, pat, bwf, w, lad: [9], cues: [] } ],
+      claimed:  { "<weekKey>:<questId>": true },
+      lvlSeen:  <number>,             // last level celebrated, so it fires once
+      rankSeen: { "<exercise name>": <rank index 0-26> }
     }
+
+  v2 replaces v1 on Ruben's word, 2026-07-30. v1 held { unit, days } with the
+  same set shape. A v1 blob loads its sets across rather than binning them, but
+  he asked for a clean start, so a v1 blob is read once and the rest of the
+  state starts empty.
 
   WEIGHT IS ALWAYS STORED IN KG, whatever the display unit says. Storing what
   was typed alongside its unit means the day someone flips the toggle their
@@ -22,28 +37,54 @@
   one column with no way to tell them apart. One canonical unit in, converted
   at the edges, is the only version of this that survives a preference change.
 
+  DUMBBELL AND CABLE WEIGHT IS THE TOTAL ON THE BODY. Two 20kg dumbbells is
+  logged as 40. One number per set, one meaning, so volume and ratios stay
+  comparable across every exercise.
+
   reports one stream:
     key   "lifting_volume"
     kind  "measure"
-    value total kg moved that day, the sum of kg x reps over every set.
-          Always kg, never the display unit, so the ledger stays comparable
-          across any toggle.
+    value total kg moved that day, the sum of effective load x reps over every
+          set. Effective load includes bodyweight where the movement carries it
+          (a pull up moves you), which needs bodyweight set. Always kg, never
+          the display unit, so the ledger stays comparable across any toggle.
+
+  It does NOT report bodyweight. The Body tile owns body_weight, and the ledger
+  holds one row per key per date, so two tiles writing it would overwrite each
+  other every morning.
+
+  THE RANK LADDER IS A SCALE, NOT A MEASUREMENT. Nine tiers, Wood to Olympian,
+  three divisions each, 0-100 Lift Points inside a division. A rank comes from
+  estimated one rep max divided by bodyweight, against a per exercise ladder of
+  nine ratios. Those ratios are an editorial calibration, so every one of them
+  is printed on the Ranks page. Nothing here is a measured fact about a human
+  body; it is a scoreboard with its own numbers on show.
+
+  MUSCLE RECOVERY IS AN ESTIMATE FROM LOGGED VOLUME AND NOTHING ELSE. It has
+  never seen a heart rate, a sleep stage or a blood test. It says so on screen.
 
   PRs are the heaviest single set actually performed per exercise. Not an
   estimated one rep max: that is a formula's opinion, not a thing that
-  happened, and this board does not report opinions as facts. An estimate is
-  shown beside it, labelled as an estimate.
+  happened. An estimate is shown beside it, labelled as an estimate.
+
+  Colour: the game layer is electric blue. Anything that judges how the person
+  is doing stays mint and amber, and nothing is ever red. A rank is a
+  scoreboard, recovery is a person.
 -->
 <style>
   :root{
     --bg:#050505;
     --card:rgba(9,13,12,0.72);
+    --card2:rgba(14,19,18,0.6);
     --border:rgba(148,163,158,0.16);
     --text:#E7ECEA;
     --muted:#94A39E;
     --faint:#5C6B66;
     --mint:#6EE7B7;
     --amber:#FCD34D;
+    --volt:#4EA8FF;
+    --volt-soft:rgba(78,168,255,.16);
+    --volt-line:rgba(78,168,255,.34);
   }
   *{ box-sizing:border-box; }
   html,body{ height:100%; }
@@ -62,222 +103,521 @@
     overflow-x:hidden;
   }
   html[data-mode="page"] body{ background:var(--bg); }
-
   ::selection{ background:rgba(110,231,183,.28); }
+
+  button{ font:inherit; color:inherit; }
+  input,select,textarea{ font:inherit; color:inherit; }
 
   .eyebrow{
     font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:10px;
-    letter-spacing:.16em;
-    text-transform:uppercase;
-    color:var(--muted);
-    margin:0;
+    font-size:10px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--muted); margin:0;
   }
   .hero{ font-family:Georgia,"Times New Roman",serif; font-weight:400; line-height:1; }
+  .mono{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+
   .pill{
-    display:inline-flex; align-items:center;
-    border-radius:999px;
-    border:1px solid rgba(110,231,183,.35);
-    padding:4px 10px;
+    display:inline-flex; align-items:center; gap:5px;
+    border-radius:999px; border:1px solid rgba(110,231,183,.35);
+    padding:3px 9px;
     font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:10px; letter-spacing:.08em;
+    font-size:9.5px; letter-spacing:.12em; text-transform:uppercase;
     color:var(--mint); white-space:nowrap;
   }
+  .pill.volt{ border-color:var(--volt-line); color:var(--volt); }
+  .pill.flat{ border-color:var(--border); color:var(--muted); }
 
-  /* ── poster ─────────────────────────────────────────────── */
+  /* ---------- rise-in, transform + opacity only ---------- */
+  .rise{ opacity:0; transform:translateY(10px); animation:rise .62s cubic-bezier(.16,1,.3,1) forwards; }
+  @keyframes rise{ to{ opacity:1; transform:translateY(0); } }
+
+  /* =====================  POSTER FACE  ===================== */
   .posterView{
-    display:flex; flex-direction:column; justify-content:center;
-    gap:10px; height:100%; min-height:100vh; padding:20px;
-    opacity:0; animation:rise .6s ease forwards;
-  }
-  .posterHero{ display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; }
-  .posterHero .num{ font-size:46px; }
-  .posterHero .unit{ font-size:13px; color:var(--muted); }
-  .posterEmpty{ font-size:13px; color:var(--faint); }
-
-  /* ── page ───────────────────────────────────────────────── */
-  .pageView{ display:none; }
-  html[data-mode="page"] .pageView{
-    display:block; min-height:100vh;
-    padding:28px 20px calc(40px + env(safe-area-inset-bottom));
-    max-width:560px; margin:0 auto;
+    height:100%; min-height:100%;
+    padding:18px 18px 16px;
+    display:flex; flex-direction:column; gap:10px;
   }
   html[data-mode="page"] .posterView{ display:none; }
 
-  .pageHead{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
-  .pageHero{ display:flex; align-items:baseline; gap:12px; margin:10px 0 22px; flex-wrap:wrap; }
-  .pageHero .num{ font-size:56px; }
-  .pageHero .unit{ font-size:14px; color:var(--muted); }
+  .pTop{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+  .pHeroRow{ display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+  .pHero{ font-size:clamp(30px,7.4vw,48px); }
+  .pUnit{ font-size:12px; color:var(--muted); }
+  .pSub{ font-size:11.5px; color:var(--muted); margin:0; }
 
-  .unitToggle{
-    border:1px solid var(--border); background:transparent;
-    color:var(--muted); border-radius:999px;
-    padding:6px 12px; min-height:36px;
-    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:10px; letter-spacing:.1em; text-transform:uppercase;
-    cursor:pointer; flex:none;
-    transition:color .2s ease, border-color .2s ease;
-  }
-  .unitToggle:hover{ color:var(--mint); border-color:rgba(110,231,183,.5); }
-  .unitToggle:disabled{ opacity:.4; cursor:not-allowed; }
+  .pRank{ display:flex; align-items:center; gap:10px; }
+  .pRankText{ min-width:0; }
+  .pRankName{ font-size:13px; font-weight:600; letter-spacing:.01em; }
+  .pRankMeta{ font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint);
+              font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
 
-  .trouble{
-    margin:0 0 16px; padding:10px 14px;
-    border:1px solid rgba(252,211,77,.32); border-radius:12px;
-    background:rgba(252,211,77,.06); color:var(--amber); font-size:13px;
-  }
+  .bar{ height:5px; border-radius:999px; background:rgba(148,163,158,.14); overflow:hidden; }
+  .bar > i{ display:block; height:100%; border-radius:999px; background:var(--volt);
+            transform:scaleX(0); transform-origin:left center;
+            transition:transform .6s cubic-bezier(.16,1,.3,1); }
+  .bar.mint > i{ background:var(--mint); }
 
-  .block{
-    background:var(--card); border:1px solid var(--border);
-    border-radius:18px; padding:18px; margin-bottom:12px;
-  }
-  .blockTitle{ margin:0 0 12px; }
+  /* Grows to fill a tall tile rather than leaving a hole under the rank. */
+  .spark{ display:flex; align-items:flex-end; gap:5px; margin-top:auto;
+          flex:1 1 auto; min-height:38px; max-height:104px; }
+  .spark .col{ flex:1 1 0; min-width:0; display:flex; flex-direction:column; justify-content:flex-end; height:100%; }
+  .spark .bx{ border-radius:3px 3px 2px 2px; background:rgba(110,231,183,.42); }
+  .spark .bx.today{ background:var(--mint); }
+  .spark .flat{ height:2px; border-radius:2px; background:rgba(148,163,158,.2); }
+  .spark .lab{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px;
+               color:var(--faint); text-align:center; margin-top:4px; }
 
-  .field{ margin-bottom:10px; }
-  .fieldLabel{
-    display:block; margin-bottom:6px;
-    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
-  }
-  input[type="text"], input[type="number"]{
-    width:100%; min-height:46px;
-    background:transparent; border:1px solid var(--border); border-radius:12px;
-    padding:10px 12px; color:var(--text);
-    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif; font-size:15px;
-  }
-  input::placeholder{ color:var(--faint); }
-  input:disabled{ opacity:.4; }
+  .empty{ color:var(--faint); font-size:12px; }
 
-  .trio{ display:flex; gap:8px; }
-  .trio .field{ flex:1; margin-bottom:0; }
+  /* =====================  PAGE FACE  ===================== */
+  .pageView{ display:none; }
+  html[data-mode="page"] .pageView{ display:block; }
 
-  .addBtn{
-    width:100%; margin-top:12px;
-    background:var(--mint); color:#04120c;
-    border:0; border-radius:999px; min-height:50px;
-    font-size:15px; font-weight:600;
-    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
-    cursor:pointer; transition:transform .14s ease, opacity .2s ease;
-  }
-  .addBtn:active{ transform:scale(.97); }
-  .addBtn:disabled{ opacity:.45; cursor:not-allowed; }
+  .pgWrap{ max-width:720px; margin:0 auto; padding:22px 18px 104px; }
+  /* The host's close button sits top right, over this. Keep clear of it. */
+  .pgHead{ display:flex; align-items:center; justify-content:space-between; gap:12px;
+           margin-bottom:16px; padding-right:52px; }
+  .pgTitle{ font-size:18px; font-weight:600; margin:2px 0 0; }
 
-  .setRow{
-    display:flex; align-items:center; gap:10px;
-    padding:10px 0;
-    border-top:1px solid var(--border);
+  .card{
+    background:var(--card); border:1px solid var(--border); border-radius:18px;
+    padding:18px; margin-bottom:14px;
   }
-  .setRow:first-child{ border-top:0; }
-  .setEx{ flex:1; font-size:14px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .setNums{
-    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:12px; color:var(--mint); font-variant-numeric:tabular-nums; white-space:nowrap;
-  }
-  .setRpe{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--faint); white-space:nowrap; }
+  .card h3{ margin:0 0 3px; font-size:14px; font-weight:600; }
+  .card p.note{ margin:0 0 12px; font-size:12px; color:var(--muted); line-height:1.5; }
+  .sec{ margin:0 0 8px; }
 
-  .iconBtn{
-    flex:none; width:40px; height:40px;
-    background:transparent; border:1px solid var(--border); border-radius:999px;
-    color:var(--muted); cursor:pointer;
-    display:flex; align-items:center; justify-content:center;
-    transition:transform .14s ease, border-color .2s ease, color .2s ease;
-  }
-  .iconBtn:active{ transform:scale(.9); }
-  .iconBtn:hover{ border-color:rgba(110,231,183,.5); color:var(--mint); }
-  .iconBtn svg{ width:15px; height:15px; }
-  .iconBtn.ghost{ border-color:transparent; }
-  .iconBtn.ghost:hover{ color:var(--amber); border-color:rgba(252,211,77,.4); }
+  .row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .grow{ flex:1 1 120px; min-width:0; }
+  /* weight, reps and RPE have to stay on one line on a phone, one handed */
+  .row.three > .grow{ flex:1 1 88px; }
 
-  .prRow{
-    display:flex; align-items:baseline; justify-content:space-between;
-    gap:10px; padding:9px 0; border-top:1px solid var(--border);
-  }
-  .prRow:first-child{ border-top:0; }
-  .prEx{ font-size:14px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .prVal{
-    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:12px; color:var(--mint); font-variant-numeric:tabular-nums; white-space:nowrap;
-  }
-  .prEst{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10px; color:var(--faint); white-space:nowrap; }
+  label.fl{ display:block; }
+  .fl > span{ display:block; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+              font-size:9.5px; letter-spacing:.14em; text-transform:uppercase;
+              color:var(--faint); margin-bottom:5px; }
 
-  .chart{ display:flex; align-items:flex-end; gap:7px; height:78px; margin-top:14px; }
-  .bar{ flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; }
-  .barFill{ width:100%; border-radius:5px; background:rgba(110,231,183,.5); min-height:3px; }
-  .barFill.today{ background:var(--mint); }
-  .barFill.none{ background:rgba(148,163,158,.16); }
-  .chartDays{ display:flex; gap:7px; margin-top:7px; }
-  .chartDay{
-    flex:1; text-align:center;
-    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:9.5px; letter-spacing:.06em; color:var(--faint);
+  input[type="text"],input[type="number"],input[type="search"],select,textarea{
+    width:100%; min-width:0; background:rgba(255,255,255,.04);
+    border:1px solid var(--border); border-radius:12px;
+    padding:11px 12px; font-size:16px; outline:none;
   }
-  .empty{ color:var(--faint); font-size:13px; }
+  textarea{ resize:vertical; min-height:64px; font-size:14px; }
+  input:focus,select:focus,textarea:focus{ border-color:rgba(110,231,183,.42); }
+  input:disabled,select:disabled,textarea:disabled,button:disabled{ opacity:.45; }
+  select{ appearance:none; -webkit-appearance:none; }
 
-  @keyframes rise{
-    from{ opacity:0; transform:translateY(8px); }
-    to{ opacity:1; transform:translateY(0); }
+  .btn{
+    border:1px solid var(--border); background:rgba(255,255,255,.04);
+    border-radius:999px; padding:10px 16px; font-size:13.5px; cursor:pointer;
+    min-height:42px; transition:transform .12s ease, border-color .2s ease;
   }
+  .btn:active{ transform:scale(.97); }
+  .btn.primary{ background:var(--mint); border-color:var(--mint); color:#05100C; font-weight:600; }
+  .btn.volt{ background:var(--volt); border-color:var(--volt); color:#04121F; font-weight:600; }
+  .btn.small{ padding:7px 12px; font-size:12px; min-height:34px; }
+  .btn.ghost{ background:transparent; }
+  .btn.on{ border-color:rgba(110,231,183,.5); color:var(--mint); }
+
+  .seg{ display:inline-flex; border:1px solid var(--border); border-radius:999px; padding:3px; gap:3px; max-width:100%; overflow-x:auto; }
+  .seg button{ border:0; background:transparent; border-radius:999px; padding:7px 13px;
+               font-size:12px; color:var(--muted); cursor:pointer; white-space:nowrap; min-height:34px; }
+  .seg button[aria-pressed="true"]{ background:rgba(255,255,255,.07); color:var(--text); }
+
+  .list{ list-style:none; margin:0; padding:0; }
+  .list li{ display:flex; align-items:center; gap:10px; padding:10px 0;
+            border-top:1px solid rgba(148,163,158,.1); }
+  .list li:first-child{ border-top:0; }
+  .list .l1{ font-size:13.5px; }
+  .list .l2{ font-size:11px; color:var(--muted); margin-top:2px; }
+  .list .num{ margin-left:auto; text-align:right; white-space:nowrap;
+              font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+
+  .kv{ display:flex; justify-content:space-between; gap:10px; padding:7px 0;
+       border-top:1px solid rgba(148,163,158,.1); font-size:13px; }
+  .kv:first-child{ border-top:0; }
+  .kv span:last-child{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); }
+
+  .scrollx{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
+
+  /* rank badge */
+  .badge{ display:block; flex:0 0 auto; }
+  .rankHead{ display:flex; align-items:center; gap:14px; }
+  .rankHead .big{ font-size:22px; font-weight:600; }
+  .lp{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--volt); }
+
+  /* ladder table */
+  table.lad{ border-collapse:collapse; width:100%; font-size:12px; }
+  table.lad th,table.lad td{ text-align:left; padding:7px 10px 7px 0; white-space:nowrap;
+                             border-top:1px solid rgba(148,163,158,.1); }
+  table.lad th{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9.5px;
+                letter-spacing:.14em; text-transform:uppercase; color:var(--faint); border-top:0; }
+  table.lad td.tier{ font-weight:600; }
+
+  /* bodygraph */
+  .bodyWrap{ display:flex; gap:8px; justify-content:center; }
+  .bodyWrap svg{ width:100%; height:auto; max-width:170px; }
+  .mus{ stroke:rgba(5,5,5,.75); stroke-width:1; cursor:pointer; }
+  .frame{ fill:rgba(148,163,158,.09); stroke:rgba(148,163,158,.18); stroke-width:1; }
+  .legend{ display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+  .legend i{ display:inline-flex; align-items:center; gap:5px; font-style:normal;
+             font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9px;
+             letter-spacing:.1em; text-transform:uppercase; color:var(--faint); }
+  .legend b{ width:9px; height:9px; border-radius:3px; display:inline-block; }
+
+  /* chart */
+  .chart{ display:flex; align-items:flex-end; gap:4px; height:96px; }
+  .chart .col{ flex:1 1 0; min-width:0; display:flex; flex-direction:column; justify-content:flex-end; height:100%; }
+  .chart .bx{ border-radius:3px 3px 2px 2px; background:rgba(110,231,183,.42); }
+  .chart .bx.today{ background:var(--mint); }
+  .chart .flat{ height:2px; border-radius:2px; background:rgba(148,163,158,.2); }
+  .chart .lab{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px;
+               color:var(--faint); text-align:center; margin-top:5px; overflow:hidden; }
+
+  /* pattern animation */
+  .anim{ width:100%; max-width:150px; height:auto; }
+  .anim .lim{ stroke:var(--volt); stroke-width:3.2; stroke-linecap:round; fill:none; }
+  .anim .bar2{ stroke:var(--text); stroke-width:3.4; stroke-linecap:round; }
+  .anim .hd{ fill:var(--volt); }
+  .anim .mv{ animation:pat 2.4s ease-in-out infinite; }
+  @keyframes pat{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-11px); } }
+  .anim.squat .mv{ animation-name:patDown; }
+  @keyframes patDown{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(13px); } }
+  .anim.hinge .mv{ animation-name:patHinge; }
+  @keyframes patHinge{ 0%,100%{ transform:translateY(0) rotate(0deg); } 50%{ transform:translateY(6px) rotate(-16deg); } }
+  .anim.rowH .mv{ animation-name:patRow; }
+  @keyframes patRow{ 0%,100%{ transform:translateX(0); } 50%{ transform:translateX(-13px); } }
+  .anim.curl .mv{ animation-name:patCurl; }
+  @keyframes patCurl{ 0%,100%{ transform:translateY(0) scale(1); } 50%{ transform:translateY(-9px) scale(.97); } }
+
+  /* rest timer */
+  .rest{ display:flex; align-items:center; gap:12px; }
+  .rest .t{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:26px; }
+  .rest.done .t{ color:var(--mint); }
+
+  /* toast + celebration */
+  .toast{ margin:0 0 12px; padding:11px 13px; border-radius:12px; font-size:12.5px; line-height:1.5;
+          border:1px solid rgba(252,211,77,.35); background:rgba(252,211,77,.07); color:var(--amber); }
+  .toast.ok{ border-color:rgba(110,231,183,.32); background:rgba(110,231,183,.06); color:var(--mint); }
+
+  .cel{ position:fixed; inset:0; z-index:40; display:flex; align-items:center; justify-content:center;
+        background:rgba(5,5,5,.86); padding:24px; text-align:center;
+        opacity:0; transform:scale(.94); animation:celIn .5s cubic-bezier(.16,1,.3,1) forwards; }
+  @keyframes celIn{ to{ opacity:1; transform:scale(1); } }
+  .cel .in{ max-width:320px; }
+  .cel .k{ font-size:11px; letter-spacing:.2em; text-transform:uppercase; color:var(--volt);
+           font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .cel .v{ font-family:Georgia,"Times New Roman",serif; font-size:44px; margin:8px 0 4px; }
+  .cel .d{ font-size:13px; color:var(--muted); line-height:1.6; }
+  .cel .ring{ position:absolute; width:180px; height:180px; border-radius:50%;
+              border:1px solid var(--volt-line); opacity:0; transform:scale(.5);
+              animation:ring 1.5s cubic-bezier(.16,1,.3,1) infinite; }
+  @keyframes ring{ 0%{ opacity:.7; transform:scale(.5); } 100%{ opacity:0; transform:scale(1.6); } }
+
+  /* bottom nav */
+  .nav{
+    position:fixed; left:0; right:0; bottom:0; z-index:30;
+    display:flex; background:rgba(5,5,5,.94); border-top:1px solid var(--border);
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  .nav button{
+    flex:1 1 0; min-width:0; border:0; background:transparent; cursor:pointer;
+    padding:9px 4px 10px; display:flex; flex-direction:column; align-items:center; gap:3px;
+    color:var(--faint); transition:transform .12s ease, color .2s ease; min-height:54px;
+  }
+  .nav button:active{ transform:scale(.94); }
+  .nav button[aria-current="page"]{ color:var(--volt); }
+  .nav .lb{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8.5px;
+            letter-spacing:.12em; text-transform:uppercase; }
+  .nav svg{ display:block; }
+
+  [hidden]{ display:none !important; }
+
   @media (prefers-reduced-motion: reduce){
-    .posterView{ animation:none; opacity:1; }
-    .addBtn, .iconBtn, .unitToggle{ transition:none; }
+    .rise{ opacity:1; transform:none; animation:none; }
+    .anim .mv{ animation:none; }
+    .cel{ opacity:1; transform:none; animation:none; }
+    .cel .ring{ animation:none; opacity:.35; transform:scale(1.2); }
+    .bar > i{ transition:none; }
+    .btn:active,.nav button:active{ transform:none; }
   }
 </style>
 </head>
 <body>
 
-  <div class="posterView" id="posterView">
-    <p class="eyebrow">Lifting</p>
-    <div class="posterHero" id="posterHero"></div>
-  </div>
-
-  <div class="pageView" id="pageView">
-    <div class="pageHead">
+<!-- ============ POSTER FACE (no controls: the host owns the tap) ============ -->
+<div class="posterView rise">
+  <div class="pTop">
+    <div>
       <p class="eyebrow">Lifting</p>
-      <button class="unitToggle" id="unitToggle" type="button" disabled>kg</button>
-    </div>
-    <div class="pageHero" id="pageHero"></div>
-
-    <p class="trouble" id="trouble" hidden></p>
-
-    <div class="block">
-      <p class="eyebrow blockTitle">Add a set</p>
-      <div class="field">
-        <label class="fieldLabel" for="ex">Exercise</label>
-        <input type="text" id="ex" list="exList" placeholder="Bench press" maxlength="60" autocomplete="off" disabled>
-        <datalist id="exList"></datalist>
+      <div class="pHeroRow" id="pHeroRow" hidden>
+        <span class="hero pHero" id="pHero"></span>
+        <span class="pUnit" id="pUnit">kg</span>
       </div>
-      <div class="trio">
-        <div class="field">
-          <label class="fieldLabel" for="weight">Weight <span id="unitLabel">kg</span></label>
-          <input type="number" id="weight" inputmode="decimal" step="0.5" min="0" placeholder="60" disabled>
-        </div>
-        <div class="field">
-          <label class="fieldLabel" for="reps">Reps</label>
-          <input type="number" id="reps" inputmode="numeric" step="1" min="1" placeholder="8" disabled>
-        </div>
-        <div class="field">
-          <label class="fieldLabel" for="rpe">RPE</label>
-          <input type="number" id="rpe" inputmode="decimal" step="0.5" min="1" max="10" placeholder="8" disabled>
-        </div>
-      </div>
-      <button class="addBtn" id="addBtn" type="button" disabled>Add set</button>
+      <p class="pSub" id="pSub">no set logged today</p>
     </div>
+    <span class="pill volt" id="pPill" hidden></span>
+  </div>
 
-    <div class="block">
-      <p class="eyebrow blockTitle">Today</p>
-      <div id="todayList"></div>
-    </div>
-
-    <div class="block">
-      <p class="eyebrow blockTitle">Best sets</p>
-      <div id="prList"></div>
-    </div>
-
-    <div class="block">
-      <p class="eyebrow blockTitle">Last 7 days</p>
-      <div id="chartWrap"></div>
+  <div class="pRank" id="pRankRow" hidden>
+    <span id="pBadge"></span>
+    <div class="pRankText grow">
+      <div class="pRankName" id="pRankName"></div>
+      <div class="pRankMeta" id="pRankMeta"></div>
+      <div class="bar" style="margin-top:6px"><i id="pLpBar"></i></div>
     </div>
   </div>
+
+  <div class="spark" id="pSpark"></div>
+</div>
+
+<!-- ============ PAGE FACE ============ -->
+<div class="pageView">
+  <div class="pgWrap">
+    <header class="pgHead rise">
+      <div>
+        <p class="eyebrow">Lifting</p>
+        <h2 class="pgTitle" id="pgTitle">Today</h2>
+      </div>
+      <span class="pill flat mono" id="pgLevel">LVL 1</span>
+    </header>
+
+    <div id="msg"></div>
+
+    <!-- ---------- HOME ---------- -->
+    <section data-view="home">
+      <div class="card">
+        <h3>Log a set</h3>
+        <p class="note" id="logNote">Total load on the body. Two 20kg dumbbells is 40.</p>
+        <div class="row" style="margin-bottom:8px">
+          <label class="fl grow" style="flex:1 1 100%"><span>Exercise</span>
+            <select id="fEx" disabled></select>
+          </label>
+        </div>
+        <div class="row three" style="margin-bottom:8px">
+          <label class="fl grow"><span>Weight (<i id="fUnit">kg</i>)</span>
+            <input id="fKg" type="number" inputmode="decimal" step="0.5" min="0" placeholder="0" disabled>
+          </label>
+          <label class="fl grow"><span>Reps</span>
+            <input id="fReps" type="number" inputmode="numeric" step="1" min="1" placeholder="0" disabled>
+          </label>
+          <label class="fl grow"><span>RPE</span>
+            <input id="fRpe" type="number" inputmode="decimal" step="0.5" min="1" max="10" placeholder="-" disabled>
+          </label>
+        </div>
+        <div class="row">
+          <button class="btn primary grow" id="bLog" disabled>Log set</button>
+          <button class="btn small" id="bRest" disabled>Rest</button>
+        </div>
+        <div class="rest" id="restBox" hidden style="margin-top:14px">
+          <span class="t" id="restT">2:00</span>
+          <div class="grow"><div class="bar mint"><i id="restBar"></i></div></div>
+          <button class="btn small ghost" id="bRestStop">Stop</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Today</h3>
+        <p class="note" id="todayNote">Nothing logged yet.</p>
+        <ul class="list" id="todayList"></ul>
+        <label class="fl" style="margin-top:12px"><span>Session note</span>
+          <textarea id="fNote" placeholder="How it felt, what to change next time" disabled></textarea>
+        </label>
+      </div>
+
+      <div class="card">
+        <h3>Last 14 days</h3>
+        <p class="note">Volume moved, in kg. A rest day draws a flat line, never a zero bar.</p>
+        <div class="chart" id="volChart"></div>
+      </div>
+
+      <div class="card">
+        <h3>Quests</h3>
+        <p class="note" id="questNote">Weekly. They reset Monday and the progress is read straight off what you logged.</p>
+        <ul class="list" id="questList"></ul>
+      </div>
+    </section>
+
+    <!-- ---------- WORKOUTS ---------- -->
+    <section data-view="workouts" hidden>
+      <div class="seg rise" id="wSeg" style="margin-bottom:14px">
+        <button type="button" data-wtab="routines" aria-pressed="true">Routines</button>
+        <button type="button" data-wtab="history" aria-pressed="false">History</button>
+        <button type="button" data-wtab="library" aria-pressed="false">Library</button>
+      </div>
+
+      <div data-wtab-body="routines">
+        <div class="card">
+          <h3>Plans</h3>
+          <p class="note">Written by hand, not generated in the app. There is no AI key in here and there never will be. Ask in Claude Code for a plan built round your numbers and it gets added to this list.</p>
+          <ul class="list" id="planList"></ul>
+        </div>
+        <div class="card">
+          <h3>Your routines</h3>
+          <p class="note">A routine is a list of exercises with a target. Starting one drops its first exercise into the log form.</p>
+          <ul class="list" id="routineList"></ul>
+          <div class="row" style="margin-top:12px">
+            <input id="fRoutine" type="text" class="grow" placeholder="New routine name" disabled>
+            <button class="btn small" id="bAddRoutine" disabled>Add</button>
+          </div>
+        </div>
+        <div class="card" id="routineEdit" hidden>
+          <h3 id="reTitle">Routine</h3>
+          <p class="note">Add exercises with a set and rep target.</p>
+          <ul class="list" id="reList"></ul>
+          <div class="row" style="margin-top:12px">
+            <select id="reEx" class="grow" style="flex:1 1 100%"></select>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <label class="fl grow"><span>Sets</span><input id="reSets" type="number" inputmode="numeric" min="1" step="1" placeholder="3"></label>
+            <label class="fl grow"><span>Reps</span><input id="reReps" type="number" inputmode="numeric" min="1" step="1" placeholder="8"></label>
+            <label class="fl grow"><span>Weight</span><input id="reKg" type="number" inputmode="decimal" min="0" step="0.5" placeholder="0"></label>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn small grow" id="bReAdd">Add exercise</button>
+            <button class="btn small ghost" id="bReClose">Done</button>
+          </div>
+        </div>
+      </div>
+
+      <div data-wtab-body="history" hidden>
+        <div class="card">
+          <h3>Every session</h3>
+          <p class="note" id="histNote">Newest first.</p>
+          <ul class="list" id="histList"></ul>
+        </div>
+      </div>
+
+      <div data-wtab-body="library" hidden>
+        <div class="card">
+          <h3>Exercise library</h3>
+          <p class="note">Search by name or muscle. Every exercise carries its own rank ladder, because a deadlift ratio and a curl ratio are not the same thing.</p>
+          <input id="fSearch" type="search" placeholder="Search exercises" disabled>
+          <ul class="list" id="libList" style="margin-top:12px"></ul>
+        </div>
+        <div class="card" id="libDetail" hidden></div>
+        <div class="card">
+          <h3>Custom exercise</h3>
+          <p class="note">Anything the library is missing. A custom exercise logs and counts toward volume from the start. It only gets a rank if you give it a ladder, and the honest default is no ladder.</p>
+          <div class="row" style="margin-bottom:8px">
+            <input id="cName" type="text" class="grow" placeholder="Name" disabled>
+          </div>
+          <div class="row" style="margin-bottom:8px">
+            <label class="fl grow"><span>Main muscle</span><select id="cMus" disabled></select></label>
+            <label class="fl grow"><span>Pattern</span><select id="cPat" disabled></select></label>
+          </div>
+          <button class="btn small" id="bAddCustom" disabled>Add exercise</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- RANKS ---------- -->
+    <section data-view="ranks" hidden>
+      <div class="card">
+        <div class="rankHead">
+          <span id="rBadge"></span>
+          <div class="grow">
+            <div class="big" id="rName">Unranked</div>
+            <div class="lp" id="rLp"></div>
+            <div class="bar" style="margin-top:8px"><i id="rBar"></i></div>
+          </div>
+        </div>
+        <p class="note" id="rNote" style="margin:14px 0 0"></p>
+      </div>
+
+      <div class="card">
+        <h3>Bodygraph</h3>
+        <p class="note" id="bgNote">A muscle is coloured by the best rank you hold on a lift that trains it directly.</p>
+        <div class="seg" id="bgSeg" style="margin-bottom:14px">
+          <button type="button" data-bg="rank" aria-pressed="true">Rank</button>
+          <button type="button" data-bg="recovery" aria-pressed="false">Recovery</button>
+        </div>
+        <div class="bodyWrap" id="bodyWrap"></div>
+        <div class="legend" id="bgLegend"></div>
+        <p class="note" id="bgPick" style="margin:12px 0 0"></p>
+      </div>
+
+      <div class="card">
+        <h3>By exercise</h3>
+        <p class="note" id="exRankNote">Estimated one rep max over bodyweight. Only sets of 1 to 12 reps count, because past twelve the estimate stops meaning anything.</p>
+        <ul class="list" id="exRankList"></ul>
+      </div>
+
+      <div class="card">
+        <h3>Personal records</h3>
+        <p class="note">The heaviest set you actually performed. The estimate beside it is a formula's opinion and never stands in for the real number.</p>
+        <ul class="list" id="prList"></ul>
+      </div>
+
+      <div class="card">
+        <h3>The ladder</h3>
+        <p class="note">Nine tiers, three divisions each, 0 to 100 Lift Points inside a division. Every threshold is here so you can see it is a scale somebody chose, not a measurement of you. Pick a lift to read its numbers.</p>
+        <select id="ladPick" style="margin-bottom:14px" disabled></select>
+        <div class="scrollx"><table class="lad" id="ladTable"></table></div>
+      </div>
+    </section>
+
+    <!-- ---------- PROFILE ---------- -->
+    <section data-view="profile" hidden>
+      <div class="card">
+        <h3>Level</h3>
+        <p class="note" id="xpNote"></p>
+        <div class="bar" style="margin:10px 0 12px"><i id="xpBar"></i></div>
+        <ul class="list" id="xpBreak"></ul>
+      </div>
+
+      <div class="card">
+        <h3>Bodyweight</h3>
+        <p class="note">Ranks are a ratio, so nothing ranks until this is set. Stored in kg whatever the toggle says. This does not write to your ledger, the Body tile owns that row.</p>
+        <div class="row">
+          <input id="fBw" type="number" inputmode="decimal" step="0.1" min="20" class="grow" placeholder="0" disabled>
+          <button class="btn small" id="bBw" disabled>Save</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Streak</h3>
+        <p class="note" id="streakNote"></p>
+        <div class="row" style="margin-top:10px">
+          <label class="fl grow"><span>Sessions a week that keep it</span>
+            <input id="fTarget" type="number" inputmode="numeric" min="1" max="7" step="1" disabled>
+          </label>
+          <label class="fl grow"><span>Rest timer (seconds)</span>
+            <input id="fRest" type="number" inputmode="numeric" min="10" max="600" step="5" disabled>
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Rewards</h3>
+        <p class="note">Titles. They unlock at a level and that is all they do.</p>
+        <ul class="list" id="titleList"></ul>
+      </div>
+
+      <div class="card">
+        <h3>Units</h3>
+        <p class="note">Display only. Everything is stored in kilograms, so flipping this never changes what your history means. It clears a half typed weight rather than guess whether you meant the old unit or the new one.</p>
+        <div class="seg" id="unitSeg">
+          <button type="button" data-unit="kg" aria-pressed="true">kg</button>
+          <button type="button" data-unit="lb" aria-pressed="false">lb</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>What this tile is honest about</h3>
+        <ul class="list">
+          <li><div><div class="l1">The ladder is a scale</div><div class="l2">Nine tiers of ratios somebody picked. Printed in full on the Ranks page. It is not a measurement of you.</div></div></li>
+          <li><div><div class="l1">Recovery is an estimate from volume</div><div class="l2">It reads the sets you logged and nothing else. No heart rate, no sleep, no wearable. It cannot see how you actually feel, which is what Check in is for.</div></div></li>
+          <li><div><div class="l1">One rep max is a formula</div><div class="l2">Epley, off sets of 1 to 12. Always labelled as an estimate, never shown as a lift you did.</div></div></li>
+          <li><div><div class="l1">Haptics do nothing on iPhone</div><div class="l2">iOS Safari has no vibration API. The call is wired for Android and quietly does nothing here.</div></div></li>
+          <li><div><div class="l1">Nothing leaves this frame</div><div class="l2">The tile is sealed. It cannot fetch, it holds no key, and it can only read and write its own slot in your vault.</div></div></li>
+        </ul>
+      </div>
+    </section>
+  </div>
+
+  <nav class="nav" id="nav" aria-label="Sections"></nav>
+</div>
 
 <script>
 // The Vitality bridge. postMessage only: a sealed tile has no storage of its
@@ -349,441 +689,1599 @@
   var mode = location.hash === '#page' ? 'page' : 'grid';
   document.documentElement.setAttribute('data-mode', mode);
 
-  var state = { unit: 'kg', days: {} };
-  var loaded = false;
-  var trouble = '';
-
   var LB_PER_KG = 2.2046226218;
 
+  /* ============================ dates ============================ */
   function pad(n){ n = String(n); return n.length < 2 ? '0' + n : n; }
   function dayKey(d){
     // Local getters, never toISOString: that is UTC and drifts a day.
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
   }
   function today(){ return dayKey(new Date()); }
-
-  function toDisplay(kg){ return state.unit === 'lb' ? kg * LB_PER_KG : kg; }
-  function toKg(shown){ return state.unit === 'lb' ? shown / LB_PER_KG : shown; }
-  function fmtWeight(kg){
-    var v = toDisplay(kg);
-    // Trim a trailing .0 so 60 reads as 60, but keep 62.5 intact.
-    return (Math.round(v * 10) / 10).toString();
+  function fromKey(k){
+    var p = k.split('-');
+    return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+  }
+  function shift(k, n){
+    var d = fromKey(k); d.setDate(d.getDate() + n); return dayKey(d);
+  }
+  function weekKey(k){
+    var d = fromKey(k);
+    var off = (d.getDay() + 6) % 7;   // 0 = Monday
+    d.setDate(d.getDate() - off);
+    return dayKey(d);
+  }
+  function shortDay(k){
+    return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][fromKey(k).getDay()];
+  }
+  function niceDate(k){
+    var d = fromKey(k);
+    var m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return d.getDate() + ' ' + m[d.getMonth()];
   }
 
-  function setsOn(key){ var s = state.days[key]; return Array.isArray(s) ? s : []; }
-  function volumeKg(sets){
-    var t = 0;
-    for (var i = 0; i < sets.length; i++) {
-      var s = sets[i];
-      if (isFinite(s.kg) && isFinite(s.reps)) t += s.kg * s.reps;
-    }
+  /* ============================ ranks ============================ */
+  // Nine tiers. Each holds three divisions (III, II, I) and 0-100 Lift Points
+  // inside a division, so the whole ladder is 27 grades and 2700 points.
+  var TIERS = [
+    { n:'Wood',     c:'#6B6357' },
+    { n:'Stone',    c:'#8A9095' },
+    { n:'Bronze',   c:'#B0794A' },
+    { n:'Iron',     c:'#7E8894' },
+    { n:'Steel',    c:'#9FB2C6' },
+    { n:'Silver',   c:'#CBD6E2' },
+    { n:'Gold',     c:'#E6C15A' },
+    { n:'Titan',    c:'#4EA8FF' },
+    { n:'Olympian', c:'#A9DCFF' }
+  ];
+  var DIVS = ['III','II','I'];
+  var MAX_PTS = 9 * 300;
+
+  /**
+   * ratio -> { pts, tier, div, lp } or null when it has not reached Wood III.
+   * lad[k] is the ratio that ENTERS tier k. The span to lad[k+1] is worth 300
+   * points, three divisions of a hundred. The top tier borrows the width of
+   * the one below it so Olympian I is reachable and then caps.
+   */
+  function grade(lad, ratio){
+    if (!lad || !isFinite(ratio) || ratio <= 0) return null;
+    if (ratio < lad[0]) return { pts:0, tier:-1, div:0, lp:0, toward: ratio / lad[0] };
+    var k = 8;
+    for (var i = 0; i < 8; i++){ if (ratio < lad[i + 1]) { k = i; break; } }
+    var lo = lad[k];
+    var hi = (k < 8) ? lad[k + 1] : lad[8] + (lad[8] - lad[7]);
+    var t = hi > lo ? (ratio - lo) / (hi - lo) : 1;
+    if (t < 0) t = 0; if (t > 1) t = 1;
+    var pts = k * 300 + t * 300;
+    if (pts > MAX_PTS) pts = MAX_PTS;
+    var within = pts - k * 300;
+    var div = Math.min(2, Math.floor(within / 100));
+    var lp = Math.floor(within - div * 100);
+    if (k === 8 && t >= 1) { div = 2; lp = 100; }
+    return { pts: pts, tier: k, div: div, lp: lp, toward: 1 };
+  }
+  function ptsToGrade(pts){
+    if (pts <= 0) return { pts:0, tier:-1, div:0, lp:0 };
+    if (pts > MAX_PTS) pts = MAX_PTS;
+    var k = Math.min(8, Math.floor(pts / 300));
+    var within = pts - k * 300;
+    var div = Math.min(2, Math.floor(within / 100));
+    var lp = Math.floor(within - div * 100);
+    return { pts: pts, tier: k, div: div, lp: lp };
+  }
+  function gradeName(g){
+    if (!g || g.tier < 0) return 'Unranked';
+    return TIERS[g.tier].n + ' ' + DIVS[g.div];
+  }
+  function gradeColor(g){ return (!g || g.tier < 0) ? 'rgba(148,163,158,.28)' : TIERS[g.tier].c; }
+  function rankIndex(g){ return (!g || g.tier < 0) ? -1 : g.tier * 3 + g.div; }
+
+  function badgeSvg(g, size){
+    var s = size || 44;
+    var col = gradeColor(g);
+    var txt = (!g || g.tier < 0) ? '-' : DIVS[g.div];
+    var h = Math.round(s * 1.12);
+    return '<svg class="badge" width="' + s + '" height="' + h + '" viewBox="0 0 48 54" aria-hidden="true">' +
+      '<path d="M24 1 46 13.5 46 40.5 24 53 2 40.5 2 13.5Z" fill="' + col + '" opacity="' + (g && g.tier >= 0 ? '.9' : '.28') + '"/>' +
+      '<path d="M24 1 46 13.5 46 40.5 24 53 2 40.5 2 13.5Z" fill="none" stroke="rgba(255,255,255,.28)" stroke-width="1.2"/>' +
+      '<path d="M24 7 40.5 16.5 40.5 37.5 24 47 7.5 37.5 7.5 16.5Z" fill="none" stroke="rgba(5,5,5,.4)" stroke-width="1.4"/>' +
+      '<text x="24" y="31" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" ' +
+      'font-size="13" letter-spacing="0.5" fill="rgba(5,5,5,.82)">' + txt + '</text></svg>';
+  }
+
+  /* ======================= the exercise library ======================= */
+  // name | primary | secondary | category | pattern | bodyweight factor |
+  // weight in the overall rank | ladder of 9 entry ratios | cues
+  var MUSCLES = {
+    chest:'Chest', lats:'Lats', traps:'Traps', delts:'Shoulders', reardelt:'Rear delts',
+    biceps:'Biceps', triceps:'Triceps', forearms:'Forearms', abs:'Abs', obliques:'Obliques',
+    lowerback:'Lower back', glutes:'Glutes', quads:'Quads', hams:'Hamstrings', calves:'Calves'
+  };
+  var BIG_MUSCLES = { chest:1, lats:1, quads:1, hams:1, glutes:1, lowerback:1, traps:1 };
+  var PATTERNS = { pressH:'Horizontal press', pressV:'Overhead press', squat:'Squat',
+                   hinge:'Hinge', pullV:'Vertical pull', rowH:'Row', curl:'Isolation' };
+
+  var RAW = [
+    ['Barbell Bench Press','chest','delts,triceps','push','pressH',0,3,[0.35,0.55,0.75,1.00,1.25,1.50,1.75,2.05,2.40],'Shoulder blades pinned down and back before the bar moves.|Bar to the lower chest, elbows about 45 degrees from the ribs.|Push the bench away from you. Hips stay down.'],
+    ['Incline Barbell Press','chest','delts,triceps','push','pressH',0,2,[0.30,0.45,0.62,0.82,1.05,1.28,1.50,1.75,2.05],'Bench at 30 degrees. Steeper turns it into a shoulder press.|Bar to the collarbone, not the throat.|Same setup as flat: blades back, ribs down.'],
+    ['Dumbbell Bench Press','chest','delts,triceps','push','pressH',0,2,[0.30,0.46,0.64,0.85,1.08,1.30,1.52,1.78,2.08],'Log both dumbbells added together.|Wrists stacked over elbows the whole way.|Stop when the upper arm reaches the torso line.'],
+    ['Incline Dumbbell Press','chest','delts,triceps','push','pressH',0,2,[0.26,0.40,0.55,0.72,0.92,1.12,1.32,1.55,1.80],'Log both dumbbells added together.|Let the hands drift slightly together at the top.|Control the way down, that is where the work is.'],
+    ['Close Grip Bench Press','triceps','chest,delts','push','pressH',0,2,[0.30,0.46,0.63,0.85,1.06,1.28,1.50,1.75,2.02],'Hands about shoulder width. Narrower wrecks wrists.|Elbows tucked close to the ribs.|Bar to the lower sternum.'],
+    ['Overhead Press','delts','triceps,traps','push','pressV',0,3,[0.25,0.40,0.55,0.70,0.85,1.00,1.20,1.40,1.60],'Squeeze the glutes so the lower back does not take it.|Head moves back, then through, as the bar passes.|Finish with the bar over the middle of the foot.'],
+    ['Seated Dumbbell Shoulder Press','delts','triceps','push','pressV',0,2,[0.20,0.32,0.45,0.60,0.75,0.90,1.06,1.24,1.44],'Log both dumbbells added together.|Do not flare the elbows straight out to the sides.|Stop just short of locking out to keep tension.'],
+    ['Dip','chest','triceps,delts','push','pressH',1,2,[1.00,1.12,1.25,1.42,1.60,1.82,2.05,2.32,2.60],'Log added weight only. Your bodyweight is counted for you.|Lean forward for chest, stay upright for triceps.|Go to upper arm parallel, no deeper if shoulders complain.'],
+    ['Push Up','chest','triceps,delts','push','pressH',0.64,1,[0.55,0.60,0.64,0.68,0.72,0.78,0.85,0.95,1.06],'Log added weight only. About 64 percent of you is counted for you.|One straight line from head to heels.|Elbows back, not out.'],
+    ['Cable Triceps Pushdown','triceps','','push','curl',0,1,[0.15,0.25,0.35,0.45,0.58,0.70,0.85,1.00,1.18],'Elbows pinned to your sides the whole set.|Only the forearm moves.|Pause a beat at the bottom.'],
+    ['Skull Crusher','triceps','','push','curl',0,1,[0.12,0.20,0.28,0.38,0.48,0.60,0.72,0.86,1.00],'Lower to the forehead or just behind it.|Upper arms stay still and slightly back.|Light and clean beats heavy and ugly here.'],
+    ['Lateral Raise','delts','','push','curl',0,1,[0.08,0.14,0.20,0.27,0.35,0.44,0.54,0.65,0.78],'Log both dumbbells added together.|Lead with the elbow, not the hand.|Stop at shoulder height. Higher is traps.'],
+    ['Deadlift','lowerback','glutes,hams,traps,lats','pull','hinge',0,3,[0.60,0.90,1.25,1.60,2.00,2.40,2.85,3.30,3.80],'Bar over the middle of the foot before you pull.|Take the slack out of the bar first, then push the floor away.|Lock out with the glutes. Do not lean back.'],
+    ['Romanian Deadlift','hams','glutes,lowerback','pull','hinge',0,2,[0.50,0.75,1.00,1.30,1.65,2.00,2.35,2.75,3.15],'Hips back, not knees down. Shins near vertical.|Bar stays touching the legs the whole way.|Stop where the hamstrings stop, not where the floor is.'],
+    ['Sumo Deadlift','glutes','quads,lowerback,traps','pull','hinge',0,3,[0.60,0.90,1.25,1.62,2.02,2.42,2.88,3.35,3.85],'Feet wide, toes out, shins vertical at the start.|Push the knees out and the floor away.|Chest up, hips low but not squatting it.'],
+    ['Barbell Row','lats','traps,biceps,reardelt','pull','rowH',0,3,[0.30,0.50,0.70,0.90,1.15,1.40,1.65,1.90,2.20],'Torso around 45 degrees and it stays there.|Pull to the bottom of the ribs, elbows past the body.|No heaving with the lower back.'],
+    ['Pendlay Row','lats','traps,biceps','pull','rowH',0,2,[0.28,0.46,0.65,0.85,1.08,1.32,1.55,1.80,2.08],'Bar rests on the floor between every rep.|Torso stays parallel to the floor.|Explosive up, controlled down.'],
+    ['Pull Up','lats','biceps,forearms','pull','pullV',1,3,[1.00,1.08,1.18,1.30,1.45,1.62,1.82,2.05,2.30],'Log added weight only. Your bodyweight is counted for you.|Start from a dead hang, chest up.|Pull the elbows down and back, not just up.'],
+    ['Chin Up','biceps','lats,forearms','pull','pullV',1,2,[1.00,1.10,1.20,1.33,1.48,1.66,1.86,2.10,2.36],'Log added weight only. Your bodyweight is counted for you.|Palms toward you, hands about shoulder width.|Full hang at the bottom every rep.'],
+    ['Lat Pulldown','lats','biceps','pull','pullV',0,2,[0.35,0.52,0.70,0.90,1.10,1.32,1.55,1.80,2.05],'Chest up, slight lean back and hold it.|Bar to the collarbone.|Let the shoulder blades travel, do not lock them.'],
+    ['Seated Cable Row','lats','traps,biceps,reardelt','pull','rowH',0,2,[0.35,0.52,0.70,0.90,1.12,1.35,1.58,1.84,2.10],'Sit tall. The torso does not rock.|Pull to the belly button.|Let the weight stretch you forward at the front.'],
+    ['Dumbbell Row','lats','traps,biceps','pull','rowH',0,2,[0.30,0.46,0.62,0.82,1.02,1.24,1.46,1.70,1.96],'Log both sides added together if you alternate.|Pull the elbow past the ribs.|Do not twist the torso to lift more.'],
+    ['Face Pull','reardelt','traps','pull','rowH',0,1,[0.12,0.20,0.28,0.38,0.48,0.60,0.72,0.86,1.02],'Rope at eye height, pull to the forehead.|Elbows high, hands finish beside the ears.|Light. This one is for shoulders, not ego.'],
+    ['Barbell Curl','biceps','forearms','pull','curl',0,1,[0.15,0.25,0.35,0.45,0.58,0.70,0.85,1.00,1.15],'Elbows in front of nothing. They stay by your sides.|No swinging from the hips.|Lower slower than you lift.'],
+    ['Dumbbell Curl','biceps','forearms','pull','curl',0,1,[0.14,0.22,0.32,0.42,0.54,0.66,0.80,0.94,1.10],'Log both dumbbells added together.|Turn the palm up as you come through.|Full extension at the bottom.'],
+    ['Hammer Curl','forearms','biceps','pull','curl',0,1,[0.16,0.25,0.35,0.46,0.58,0.72,0.86,1.02,1.18],'Log both dumbbells added together.|Thumbs up the whole way.|Elbows pinned, no shoulder swing.'],
+    ['Shrug','traps','forearms','pull','curl',0,1,[0.40,0.65,0.90,1.20,1.50,1.85,2.20,2.60,3.00],'Straight up, not in circles.|Hold the top for a beat.|Straps are fine, grip is not the point here.'],
+    ['Back Squat','quads','glutes,lowerback,hams','legs','squat',0,3,[0.50,0.75,1.00,1.30,1.65,2.00,2.40,2.80,3.25],'Brace before you unrack, not after.|Sit between the hips, knees track over the toes.|Hip crease below the knee, or say it is a half squat.'],
+    ['Front Squat','quads','glutes,abs','legs','squat',0,2,[0.40,0.60,0.80,1.05,1.35,1.65,1.95,2.30,2.65],'Elbows high. The moment they drop the bar follows.|Upright torso, all the way down.|Grip can be loose, the shelf is the shoulders.'],
+    ['Leg Press','quads','glutes,hams','legs','squat',0,1,[1.00,1.50,2.00,2.60,3.30,4.00,4.80,5.60,6.50],'Do not let the lower back round off the pad.|Feet flat, push through the whole foot.|Stop just short of locking the knees.'],
+    ['Bulgarian Split Squat','quads','glutes','legs','squat',0,2,[0.20,0.32,0.45,0.60,0.78,0.96,1.15,1.36,1.58],'Log both hands added together.|Back foot rests, front leg works.|Slight forward lean puts it in the glute.'],
+    ['Walking Lunge','quads','glutes,hams','legs','squat',0,1,[0.20,0.32,0.45,0.60,0.76,0.94,1.12,1.32,1.54],'Log both hands added together.|Long step for glutes, short step for quads.|Back knee to just above the floor.'],
+    ['Goblet Squat','quads','glutes,abs','legs','squat',0,1,[0.15,0.25,0.35,0.48,0.62,0.78,0.94,1.12,1.30],'Weight held at the chest, elbows inside the knees.|Sit straight down, chest tall.|Great warm up, honest builder.'],
+    ['Leg Extension','quads','','legs','squat',0,1,[0.30,0.45,0.62,0.80,1.00,1.22,1.45,1.70,1.96],'Pause at the top, squeeze.|No kicking. Slow both ways.|Back stays against the pad.'],
+    ['Leg Curl','hams','calves','legs','hinge',0,1,[0.25,0.38,0.52,0.68,0.85,1.04,1.24,1.45,1.68],'Hips stay down on the pad.|Squeeze at the shortest point.|Control the return, do not let it snap back.'],
+    ['Hip Thrust','glutes','hams','legs','hinge',0,2,[0.60,0.95,1.30,1.70,2.15,2.60,3.10,3.60,4.15],'Chin tucked, ribs down. Do not arch to finish.|Drive through the heels.|Hold the top for a full beat.'],
+    ['Standing Calf Raise','calves','','legs','curl',0,1,[0.50,0.80,1.10,1.45,1.85,2.25,2.70,3.15,3.65],'Full stretch at the bottom, full squeeze at the top.|Slow. Bouncing is the tendon, not the muscle.|Knees straight, or it becomes a soleus raise.'],
+    ['Hanging Leg Raise','abs','obliques,forearms','core','pullV',1,1,[1.00,1.04,1.09,1.15,1.22,1.30,1.40,1.52,1.66],'Log added weight only. Your bodyweight is counted for you.|Curl the pelvis up, do not just swing the legs.|Stop the swing between reps.'],
+    ['Cable Crunch','abs','obliques','core','curl',0,1,[0.20,0.32,0.45,0.60,0.76,0.94,1.12,1.32,1.55],'Hips fixed. Only the spine moves.|Pull with the abs, not the arms.|Round down toward the knees.'],
+    ['Ab Wheel Rollout','abs','lats,lowerback','core','pullV',1,1,[1.00,1.02,1.05,1.09,1.14,1.20,1.28,1.38,1.50],'Log added weight only. Your bodyweight is counted for you.|Ribs down, glutes squeezed, no sag.|Only roll as far as you can come back from.'],
+    ['Back Extension','lowerback','glutes,hams','core','hinge',1,1,[1.00,1.10,1.22,1.36,1.52,1.70,1.90,2.14,2.40],'Log added weight only. Your bodyweight is counted for you.|Round or stay flat, pick one and own it.|Do not hyperextend at the top.']
+  ];
+
+  function mkEx(r){
+    return {
+      name: r[0], pri: r[1], sec: r[2] ? r[2].split(',') : [], cat: r[3],
+      pat: r[4], bwf: r[5], w: r[6], lad: r[7], cues: r[8].split('|'), custom: false
+    };
+  }
+  var LIB = RAW.map(mkEx);
+
+  // Plans are written by hand, here, and shipped with the tile. There is no
+  // model in this file and there never will be: no AI key in the app, ever.
+  var PLANS = [
+    { id:'ul4', name:'Upper lower, 4 days', why:'The default for someone who can train four times a week and wants every lift moving.',
+      routines:[
+        { name:'Upper A', items:[['Barbell Bench Press',4,5,0],['Barbell Row',4,6,0],['Overhead Press',3,8,0],['Lat Pulldown',3,10,0],['Barbell Curl',3,10,0],['Cable Triceps Pushdown',3,12,0]] },
+        { name:'Lower A', items:[['Back Squat',4,5,0],['Romanian Deadlift',3,8,0],['Leg Press',3,10,0],['Leg Curl',3,12,0],['Standing Calf Raise',4,12,0]] },
+        { name:'Upper B', items:[['Incline Barbell Press',4,6,0],['Pull Up',4,6,0],['Seated Dumbbell Shoulder Press',3,10,0],['Seated Cable Row',3,10,0],['Lateral Raise',3,15,0],['Hammer Curl',3,12,0]] },
+        { name:'Lower B', items:[['Deadlift',3,4,0],['Front Squat',3,8,0],['Hip Thrust',3,10,0],['Bulgarian Split Squat',3,10,0],['Hanging Leg Raise',3,12,0]] }
+      ] },
+    { id:'fb3', name:'Full body, 3 days', why:'Every session hits everything. The best return when three days is what the week actually allows.',
+      routines:[
+        { name:'Full A', items:[['Back Squat',3,5,0],['Barbell Bench Press',3,5,0],['Barbell Row',3,8,0],['Standing Calf Raise',3,12,0],['Cable Crunch',3,12,0]] },
+        { name:'Full B', items:[['Deadlift',3,4,0],['Overhead Press',3,6,0],['Lat Pulldown',3,10,0],['Bulgarian Split Squat',3,10,0],['Barbell Curl',3,12,0]] },
+        { name:'Full C', items:[['Front Squat',3,6,0],['Incline Barbell Press',3,8,0],['Pull Up',3,8,0],['Romanian Deadlift',3,8,0],['Face Pull',3,15,0]] }
+      ] },
+    { id:'ppl', name:'Push pull legs, 6 days', why:'High volume. Only worth it once sleep and food are already handled.',
+      routines:[
+        { name:'Push', items:[['Barbell Bench Press',4,6,0],['Overhead Press',3,8,0],['Incline Dumbbell Press',3,10,0],['Lateral Raise',4,15,0],['Cable Triceps Pushdown',3,12,0],['Skull Crusher',3,12,0]] },
+        { name:'Pull', items:[['Deadlift',3,5,0],['Pull Up',4,8,0],['Barbell Row',3,8,0],['Face Pull',3,15,0],['Barbell Curl',3,10,0],['Hammer Curl',3,12,0]] },
+        { name:'Legs', items:[['Back Squat',4,6,0],['Romanian Deadlift',3,8,0],['Leg Press',3,12,0],['Leg Curl',3,12,0],['Standing Calf Raise',4,15,0],['Hanging Leg Raise',3,12,0]] }
+      ] },
+    { id:'min2', name:'Two days, everything that matters', why:'A busy stretch. Squat, hinge, push, pull, and nothing else.',
+      routines:[
+        { name:'Day 1', items:[['Back Squat',4,5,0],['Barbell Bench Press',4,5,0],['Barbell Row',3,8,0]] },
+        { name:'Day 2', items:[['Deadlift',3,5,0],['Overhead Press',4,6,0],['Pull Up',3,8,0]] }
+      ] }
+  ];
+
+  var TITLES = [
+    { lvl:3,  n:'Regular',    d:'You showed up enough times that it stopped being a decision.' },
+    { lvl:5,  n:'Committed',  d:'The log has weeks in it, not days.' },
+    { lvl:8,  n:'Relentless', d:'Months. This is where most people stopped and you did not.' },
+    { lvl:12, n:'Iron Will',  d:'The boring part, done for long enough to work.' },
+    { lvl:20, n:'Immovable',  d:'There is no shortcut that arrives here.' }
+  ];
+
+  var QUESTS = [
+    { id:'days', label:'Train 3 days',            target:3,     xp:200, m:'days' },
+    { id:'sets', label:'Log 40 sets',             target:40,    xp:150, m:'sets' },
+    { id:'vol',  label:'Move 15,000 kg',          target:15000, xp:250, m:'vol'  },
+    { id:'var',  label:'Hit 6 different lifts',   target:6,     xp:150, m:'var'  },
+    { id:'pr',   label:'Set a personal record',   target:1,     xp:250, m:'pr'   }
+  ];
+
+  /* ============================ state ============================ */
+  var S = {
+    v:2, unit:'kg', bw:null, weekTarget:3, rest:120,
+    days:{}, notes:{}, routines:[], custom:[], claimed:{}, lvlSeen:1, rankSeen:{}
+  };
+  var loaded = false;
+  var trouble = '';
+  var view = 'home';
+  var wtab = 'routines';
+  var bgMode = 'rank';
+  var bgPick = '';
+  var libPick = '';
+  var ladPick = 'Barbell Bench Press';
+  var editRoutine = null;
+  var restTimer = null, restLeft = 0, restTotal = 0;
+  var searchTerm = '';
+
+  function allEx(){ return LIB.concat(S.custom.map(function(c){ var o = mkEx([c.name,c.pri,(c.sec||[]).join(','),c.cat||'custom',c.pat||'curl',c.bwf||0,c.w||1,c.lad||null,(c.cues||[]).join('|')||'Yours.']); o.custom = true; if (!c.lad) o.lad = null; return o; })); }
+  function findEx(n){ var a = allEx(); for (var i=0;i<a.length;i++) if (a[i].name === n) return a[i]; return null; }
+
+  /* ============================ maths ============================ */
+  function toKg(v){ return S.unit === 'lb' ? v / LB_PER_KG : v; }
+  function fromKg(v){ return S.unit === 'lb' ? v * LB_PER_KG : v; }
+  function unitLabel(){ return S.unit; }
+  function showW(kg){
+    var v = fromKg(kg);
+    return (Math.round(v * 10) / 10).toLocaleString(undefined, { maximumFractionDigits:1 });
+  }
+  function num(n){ return Math.round(n).toLocaleString(); }
+
+  // "0 kg x 8" on a pull up is a lie of omission: you moved yourself.
+  function setLabel(s, e){
+    var carried = e && e.bwf && S.bw;
+    if (carried && !s.kg) return 'bodyweight x ' + s.reps;
+    if (carried) return 'bodyweight + ' + showW(s.kg) + ' ' + unitLabel() + ' x ' + s.reps;
+    return showW(s.kg) + ' ' + unitLabel() + ' x ' + s.reps;
+  }
+
+  // The load actually moved by one rep: what was on the bar plus whatever
+  // fraction of the body the movement carries.
+  function effLoad(set){
+    var e = findEx(set.ex);
+    var f = e ? e.bwf : 0;
+    if (!f) return set.kg;
+    if (!S.bw) return set.kg;         // no bodyweight, no honest guess
+    return set.kg + S.bw * f;
+  }
+  function setVolume(set){ return effLoad(set) * set.reps; }
+
+  // Epley. Only 1-12 reps, past that the formula stops describing anything.
+  function e1rm(set){
+    if (set.reps < 1 || set.reps > 12) return null;
+    var L = effLoad(set);
+    if (!L) return null;
+    return L * (1 + set.reps / 30);
+  }
+
+  // Every derived figure walks the whole log. Streaks walk it once a week and
+  // could walk it a hundred times in a render, so the walks are memoised and
+  // the memo is dropped the moment anything changes.
+  var memo = {};
+  function fresh(){ memo = {}; }
+  function once(k, fn){
+    if (!(k in memo)) memo[k] = fn();
+    return memo[k];
+  }
+
+  function sortedDays(){ return Object.keys(S.days).filter(function(k){ return S.days[k] && S.days[k].length; }).sort(); }
+  function dayVolume(k){
+    var a = S.days[k] || [], t = 0;
+    for (var i=0;i<a.length;i++) t += setVolume(a[i]);
     return t;
   }
-  function fmtVolume(kg){
-    var v = toDisplay(kg);
-    return Math.round(v).toLocaleString();
+
+  /* ---- best per exercise, walked in order so PR events are real ---- */
+  function history(){ return once('hist', historyRaw); }
+  function historyRaw(){
+    var ks = sortedDays(), out = [];
+    for (var i=0;i<ks.length;i++){
+      var a = S.days[ks[i]];
+      for (var j=0;j<a.length;j++) out.push({ d:ks[i], s:a[j] });
+    }
+    return out;
+  }
+  function bests(){ return once('bests', bestsRaw); }
+  function bestsRaw(){
+    var h = history(), best = {}, prEvents = 0;
+    for (var i=0;i<h.length;i++){
+      var s = h[i].s, L = effLoad(s);
+      if (!L || !s.reps) continue;
+      var b = best[s.ex];
+      if (!b){ best[s.ex] = { kg:L, reps:s.reps, date:h[i].d, e1:e1rm(s) || 0 }; prEvents++; continue; }
+      if (L > b.kg){ b.kg = L; b.reps = s.reps; b.date = h[i].d; prEvents++; }
+      var e = e1rm(s);
+      if (e && e > b.e1) b.e1 = e;
+    }
+    return { best: best, prEvents: prEvents };
+  }
+  function prDates(){ return once('prDates', prDatesRaw); }
+  function prDatesRaw(){
+    var h = history(), seen = {}, out = {};
+    for (var i=0;i<h.length;i++){
+      var s = h[i].s, L = effLoad(s);
+      if (!L || !s.reps) continue;
+      if (!(s.ex in seen) || L > seen[s.ex]){ seen[s.ex] = L; out[h[i].d] = (out[h[i].d]||0) + 1; }
+    }
+    return out;
   }
 
-  function uid(){
-    return 's_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+  /* ---- ranks ---- */
+  function exRanks(){ return once('exRanks', exRanksRaw); }
+  function exRanksRaw(){
+    if (!S.bw) return [];
+    var b = bests().best, out = [];
+    for (var name in b){
+      var e = findEx(name);
+      if (!e || !e.lad) continue;
+      var top = b[name].e1;
+      if (!top) continue;
+      var g = grade(e.lad, top / S.bw);
+      if (!g) continue;
+      out.push({ name:name, ex:e, g:g, e1:top, ratio: top / S.bw });
+    }
+    out.sort(function(x,y){ return y.g.pts - x.g.pts; });
+    return out;
+  }
+  function overallRank(){
+    var r = exRanks();
+    if (!r.length) return { g:null, n:0, missing:[] };
+    var sw = 0, sp = 0;
+    for (var i=0;i<r.length;i++){ sw += r[i].ex.w; sp += r[i].g.pts * r[i].ex.w; }
+    var core = ['Back Squat','Barbell Bench Press','Deadlift','Overhead Press','Barbell Row','Pull Up'];
+    var have = {}; r.forEach(function(x){ have[x.name] = 1; });
+    var missing = core.filter(function(c){ return !have[c]; });
+    return { g: ptsToGrade(sw ? sp / sw : 0), n: r.length, missing: missing };
+  }
+  function muscleRanks(){
+    var r = exRanks(), out = {};
+    for (var i=0;i<r.length;i++){
+      var m = r[i].ex.pri;
+      if (!out[m] || r[i].g.pts > out[m].pts) out[m] = r[i].g;
+    }
+    return out;
   }
 
+  /* ---- recovery estimate: logged volume only, nothing else ---- */
+  function muscleRecovery(){
+    var now = new Date();
+    var out = {};
+    for (var m in MUSCLES) out[m] = { load:0, window: BIG_MUSCLES[m] ? 72 : 48, seen:false };
+    var ref = S.bw || 0;
+    if (!ref) return null;
+    var ks = sortedDays();
+    for (var i = ks.length - 1; i >= 0 && i > ks.length - 8; i--){
+      var k = ks[i];
+      var d = fromKey(k); d.setHours(18, 0, 0, 0);       // sessions land in the evening
+      var hrs = (now - d) / 3600000;
+      if (hrs < 0) hrs = 0;
+      var a = S.days[k];
+      for (var j=0;j<a.length;j++){
+        var e = findEx(a[j].ex);
+        if (!e) continue;
+        var vol = setVolume(a[j]) / ref;
+        var targets = [[e.pri, 1]];
+        (e.sec || []).forEach(function(s){ if (MUSCLES[s]) targets.push([s, 0.5]); });
+        for (var t=0;t<targets.length;t++){
+          var mm = targets[t][0];
+          if (!out[mm]) continue;
+          // seen is set BEFORE the decay check on purpose. A muscle trained
+          // four days ago is fully recovered, which is a real answer. Saying
+          // "nothing logged" there would be a different claim, and a false one.
+          out[mm].seen = true;
+          var decay = 1 - hrs / out[mm].window;
+          if (decay <= 0) continue;
+          out[mm].load += vol * targets[t][1] * decay;
+        }
+      }
+    }
+    var res = {};
+    for (var m2 in out){
+      var cap = BIG_MUSCLES[m2] ? 26 : 13;
+      var f = Math.min(1, out[m2].load / cap);
+      res[m2] = { pct: Math.round(100 * (1 - f)), seen: out[m2].seen };
+    }
+    return res;
+  }
+
+  /* ---- xp, level, streak, quests ---- */
+  function xpTotal(){
+    var h = history(), xp = 0;
+    for (var i=0;i<h.length;i++) xp += 10 + Math.floor(setVolume(h[i].s) / 100);
+    xp += bests().prEvents * 50;
+    for (var k in S.claimed){
+      var id = k.split(':')[1];
+      for (var q=0;q<QUESTS.length;q++) if (QUESTS[q].id === id) xp += QUESTS[q].xp;
+    }
+    return xp;
+  }
+  function xpForLevel(L){ return 250 * L * (L - 1); }
+  function levelFor(xp){ var L = 1; while (xpForLevel(L + 1) <= xp) L++; return L; }
+
+  function weekStats(wk){
+    var days = 0, sets = 0, vol = 0, exs = {}, prs = 0;
+    var pr = prDates();
+    for (var i=0;i<7;i++){
+      var k = shift(wk, i);
+      var a = S.days[k];
+      if (!a || !a.length) continue;
+      days++;
+      sets += a.length;
+      for (var j=0;j<a.length;j++){ vol += setVolume(a[j]); exs[a[j].ex] = 1; }
+      prs += pr[k] || 0;
+    }
+    return { days:days, sets:sets, vol:vol, var:Object.keys(exs).length, pr:prs };
+  }
+  function streakWeeks(){
+    var ks = sortedDays();
+    if (!ks.length) return 0;
+    var thisWk = weekKey(today()), run = 0, wk = thisWk, guard = 0;
+    // The current week is still in progress, so it never breaks the run.
+    if (weekStats(thisWk).days >= S.weekTarget) run++;
+    wk = shift(thisWk, -7);
+    while (guard++ < 260){
+      if (weekStats(wk).days >= S.weekTarget){ run++; wk = shift(wk, -7); }
+      else break;
+    }
+    return run;
+  }
+
+  /* ============================ persistence ============================ */
   function persist(){
     if (!loaded) return;
-    if (window.Vitality) Vitality.save(state);
+    fresh();
+    Vitality.save(S);
+    pushReport();
+    render();
   }
-
-  function report(){
-    if (!loaded || !window.Vitality) return;
-    // Always kg. A ledger holding two units in one column cannot be read.
+  function pushReport(){
+    var k = today();
+    var v = dayVolume(k);
+    // ONE report call site. Always kg, never the display unit.
     Vitality.report({
-      key: 'lifting_volume',
-      label: 'Lifting volume',
-      value: Math.round(volumeKg(setsOn(today()))),
-      date: today(),
-      kind: 'measure',
-      goalDirection: 'up'
+      key:'lifting_volume', label:'Lifting volume', value: Math.round(v),
+      date: k, kind:'measure', goalDirection:'up'
     });
   }
-
-  // ── icons, drawn not typed ────────────────────────────────
-  function icoRepeat(){
-    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>' +
-      '<path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>';
-  }
-  function icoRemove(){
-    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">' +
-      '<line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>';
+  function buzz(ms){
+    // iOS Safari has no vibration API. This is for Android and is a no-op here.
+    try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {}
   }
 
-  // ── render ────────────────────────────────────────────────
+  /* ============================ poster ============================ */
+  var $ = function(id){ return document.getElementById(id); };
+
   function renderPoster(){
-    var hero = document.getElementById('posterHero');
-    if (!hero) return;
-    hero.innerHTML = '';
-    var sets = setsOn(today());
-    if (!sets.length) {
-      var e = document.createElement('span');
-      e.className = 'posterEmpty';
-      e.textContent = 'no session yet';
-      hero.appendChild(e);
-      return;
+    var k = today();
+    var v = dayVolume(k);
+    var sets = (S.days[k] || []).length;
+
+    // No number rather than a giant placeholder dash. An empty day is a
+    // sentence, not a fake figure.
+    $('pHeroRow').hidden = !(v > 0);
+    $('pHero').textContent = v > 0 ? num(fromKg(v)) : '';
+    $('pUnit').textContent = v > 0 ? unitLabel() : '';
+    $('pSub').textContent = !loaded ? (trouble || 'loading') :
+      sets ? (sets + (sets === 1 ? ' set today' : ' sets today')) : 'no set logged today';
+
+    var o = overallRank();
+    var pill = $('pPill');
+    if (o.g){
+      pill.hidden = false;
+      pill.textContent = 'LVL ' + levelFor(xpTotal());
+    } else pill.hidden = true;
+
+    var row = $('pRankRow');
+    if (o.g && loaded){
+      row.hidden = false;
+      $('pBadge').innerHTML = badgeSvg(o.g, 40);
+      $('pRankName').textContent = gradeName(o.g);
+      $('pRankMeta').textContent = o.g.lp + ' LP  /  ' + o.n + (o.n === 1 ? ' lift' : ' lifts');
+      $('pLpBar').style.transform = 'scaleX(' + (o.g.lp / 100) + ')';
+    } else row.hidden = true;
+
+    var sp = $('pSpark');
+    sp.innerHTML = '';
+    var max = 0, vals = [];
+    for (var i = 6; i >= 0; i--){
+      var kk = shift(k, -i);
+      var vv = dayVolume(kk);
+      vals.push({ k:kk, v:vv });
+      if (vv > max) max = vv;
     }
-    var num = document.createElement('span');
-    num.className = 'num hero';
-    num.textContent = fmtVolume(volumeKg(sets));
-    var unit = document.createElement('span');
-    unit.className = 'unit';
-    unit.textContent = state.unit + ' moved';
-    var pill = document.createElement('span');
-    pill.className = 'pill';
-    pill.textContent = sets.length + (sets.length === 1 ? ' set' : ' sets');
-    hero.appendChild(num);
-    hero.appendChild(unit);
-    hero.appendChild(pill);
-  }
-
-  function renderPageHero(){
-    var hero = document.getElementById('pageHero');
-    if (!hero) return;
-    hero.innerHTML = '';
-    var sets = setsOn(today());
-    if (!sets.length) {
-      var e = document.createElement('span');
-      e.className = 'posterEmpty';
-      e.textContent = 'no sets logged today';
-      hero.appendChild(e);
-      return;
-    }
-    var num = document.createElement('span');
-    num.className = 'num hero';
-    num.textContent = fmtVolume(volumeKg(sets));
-    var unit = document.createElement('span');
-    unit.className = 'unit';
-    unit.textContent = state.unit + ' moved';
-    var pill = document.createElement('span');
-    pill.className = 'pill';
-    pill.textContent = sets.length + (sets.length === 1 ? ' set' : ' sets');
-    hero.appendChild(num);
-    hero.appendChild(unit);
-    hero.appendChild(pill);
-  }
-
-  function renderToday(){
-    var list = document.getElementById('todayList');
-    if (!list) return;
-    list.innerHTML = '';
-    var sets = setsOn(today());
-    if (!sets.length) {
-      var none = document.createElement('p');
-      none.className = 'empty';
-      none.textContent = 'nothing logged today';
-      list.appendChild(none);
-      return;
-    }
-    sets.forEach(function (s) {
-      var row = document.createElement('div');
-      row.className = 'setRow';
-
-      var ex = document.createElement('div');
-      ex.className = 'setEx';
-      ex.textContent = s.ex;
-
-      var nums = document.createElement('div');
-      nums.className = 'setNums';
-      nums.textContent = fmtWeight(s.kg) + state.unit + ' x ' + s.reps;
-
-      var rpe = document.createElement('div');
-      rpe.className = 'setRpe';
-      rpe.textContent = (s.rpe == null || !isFinite(s.rpe)) ? '' : 'RPE ' + s.rpe;
-
-      var again = document.createElement('button');
-      again.className = 'iconBtn';
-      again.type = 'button';
-      again.setAttribute('aria-label', 'Log this set again');
-      again.innerHTML = icoRepeat();
-      again.addEventListener('click', function () { repeatSet(s); });
-
-      var del = document.createElement('button');
-      del.className = 'iconBtn ghost';
-      del.type = 'button';
-      del.setAttribute('aria-label', 'Remove this set');
-      del.innerHTML = icoRemove();
-      del.addEventListener('click', function () { removeSet(s.id); });
-
-      row.appendChild(ex);
-      row.appendChild(nums);
-      row.appendChild(rpe);
-      row.appendChild(again);
-      row.appendChild(del);
-      list.appendChild(row);
-    });
-  }
-
-  function bestSets(){
-    // Heaviest single set per exercise. A thing that happened, not a formula.
-    var best = {};
-    Object.keys(state.days).forEach(function (k) {
-      setsOn(k).forEach(function (s) {
-        if (!s.ex || !isFinite(s.kg)) return;
-        var cur = best[s.ex];
-        if (!cur || s.kg > cur.kg) best[s.ex] = { kg: s.kg, reps: s.reps, date: k };
-      });
-    });
-    return Object.keys(best).sort().map(function (ex) {
-      return { ex: ex, kg: best[ex].kg, reps: best[ex].reps, date: best[ex].date };
-    });
-  }
-
-  function renderPRs(){
-    var list = document.getElementById('prList');
-    if (!list) return;
-    list.innerHTML = '';
-    var best = bestSets();
-    if (!best.length) {
-      var none = document.createElement('p');
-      none.className = 'empty';
-      none.textContent = 'no sets logged yet';
-      list.appendChild(none);
-      return;
-    }
-    best.forEach(function (b) {
-      var row = document.createElement('div');
-      row.className = 'prRow';
-
-      var ex = document.createElement('div');
-      ex.className = 'prEx';
-      ex.textContent = b.ex;
-
-      var right = document.createElement('div');
-
-      var val = document.createElement('span');
-      val.className = 'prVal';
-      val.textContent = fmtWeight(b.kg) + state.unit + ' x ' + b.reps;
-
-      right.appendChild(val);
-
-      // Epley, and labelled as the estimate it is. Never presented as a max
-      // that was actually lifted.
-      if (isFinite(b.reps) && b.reps > 1) {
-        var est = document.createElement('span');
-        est.className = 'prEst';
-        var e1rm = b.kg * (1 + b.reps / 30);
-        est.textContent = '  est. 1RM ' + fmtWeight(e1rm) + state.unit;
-        right.appendChild(est);
-      }
-
-      row.appendChild(ex);
-      row.appendChild(right);
-      list.appendChild(row);
-    });
-  }
-
-  function renderChart(){
-    var wrap = document.getElementById('chartWrap');
-    if (!wrap) return;
-    wrap.innerHTML = '';
-
-    var days = [];
-    var max = 0;
-    for (var i = 6; i >= 0; i--) {
-      var d = new Date();
-      d.setDate(d.getDate() - i);
-      var key = dayKey(d);
-      var v = volumeKg(setsOn(key));
-      if (v > max) max = v;
-      days.push({ key: key, vol: v, date: d });
-    }
-
-    if (max <= 0) {
-      var none = document.createElement('p');
-      none.className = 'empty';
-      none.textContent = 'no sessions in the last 7 days';
-      wrap.appendChild(none);
-      return;
-    }
-
-    var chart = document.createElement('div');
-    chart.className = 'chart';
-    var labels = document.createElement('div');
-    labels.className = 'chartDays';
-    var t = today();
-
-    days.forEach(function (d) {
-      var bar = document.createElement('div');
-      bar.className = 'bar';
-      var fill = document.createElement('div');
-      // A rest day is a flat trace, never a zero-height bar pretending to be
-      // a session that went badly.
-      fill.className = 'barFill' + (d.key === t ? ' today' : '') + (d.vol <= 0 ? ' none' : '');
-      fill.style.height = d.vol <= 0 ? '3px' : Math.max(4, (d.vol / max) * 78) + 'px';
-      bar.appendChild(fill);
-      chart.appendChild(bar);
-
-      var lab = document.createElement('div');
-      lab.className = 'chartDay';
-      lab.textContent = ['S', 'M', 'T', 'W', 'T', 'F', 'S'][d.date.getDay()];
-      labels.appendChild(lab);
-    });
-
-    wrap.appendChild(chart);
-    wrap.appendChild(labels);
-  }
-
-  function renderExOptions(){
-    var dl = document.getElementById('exList');
-    if (!dl) return;
-    var seen = {};
-    Object.keys(state.days).forEach(function (k) {
-      setsOn(k).forEach(function (s) { if (s.ex) seen[s.ex] = true; });
-    });
-    dl.innerHTML = '';
-    Object.keys(seen).sort().forEach(function (ex) {
-      var o = document.createElement('option');
-      o.value = ex;
-      dl.appendChild(o);
-    });
-  }
-
-  function renderControls(){
-    var ids = ['ex', 'weight', 'reps', 'rpe', 'addBtn', 'unitToggle'];
-    ids.forEach(function (id) {
-      var el = document.getElementById(id);
-      if (el) el.disabled = !loaded;
-    });
-    var ut = document.getElementById('unitToggle');
-    if (ut) ut.textContent = state.unit;
-    var ul = document.getElementById('unitLabel');
-    if (ul) ul.textContent = state.unit;
-    var tr = document.getElementById('trouble');
-    if (tr) { tr.textContent = trouble; tr.hidden = !trouble; }
-  }
-
-  function renderAll(){
-    renderPoster();
-    renderPageHero();
-    renderControls();
-    renderToday();
-    renderPRs();
-    renderChart();
-    renderExOptions();
-  }
-
-  // ── actions ───────────────────────────────────────────────
-  function addSet(){
-    if (!loaded) return;
-    var exEl = document.getElementById('ex');
-    var wEl = document.getElementById('weight');
-    var rEl = document.getElementById('reps');
-    var pEl = document.getElementById('rpe');
-    if (!exEl || !wEl || !rEl) return;
-
-    var ex = exEl.value.trim();
-    var shown = parseFloat(wEl.value);
-    var reps = parseInt(rEl.value, 10);
-    var rpeRaw = pEl ? parseFloat(pEl.value) : NaN;
-
-    // Silence beats a wrong row. Nothing is logged from an incomplete set.
-    if (!ex || !isFinite(shown) || shown < 0 || !isFinite(reps) || reps < 1) return;
-
-    var key = today();
-    if (!Array.isArray(state.days[key])) state.days[key] = [];
-    state.days[key].push({
-      id: uid(),
-      ex: ex,
-      kg: toKg(shown),
-      reps: reps,
-      rpe: isFinite(rpeRaw) ? rpeRaw : null
-    });
-
-    persist();
-    report();
-    renderAll();
-
-    // Weight and exercise stay put: the next set is usually the same lift.
-    if (pEl) pEl.value = '';
-    rEl.focus();
-  }
-
-  function repeatSet(s){
-    if (!loaded) return;
-    var key = today();
-    if (!Array.isArray(state.days[key])) state.days[key] = [];
-    state.days[key].push({ id: uid(), ex: s.ex, kg: s.kg, reps: s.reps, rpe: s.rpe });
-    persist();
-    report();
-    renderAll();
-  }
-
-  function removeSet(id){
-    if (!loaded) return;
-    var key = today();
-    state.days[key] = setsOn(key).filter(function (s) { return s.id !== id; });
-    if (!state.days[key].length) delete state.days[key];
-    persist();
-    report();
-    renderAll();
-  }
-
-  function toggleUnit(){
-    if (!loaded) return;
-    state.unit = state.unit === 'kg' ? 'lb' : 'kg';
-
-    // Clear whatever was half typed. A 100 sitting in the box meant 100 kg a
-    // moment ago and would now be read as 100 lb, quietly logging 45.4 kg
-    // instead. Converting it would be guessing at intent; emptying it asks.
-    var wEl = document.getElementById('weight');
-    if (wEl) wEl.value = '';
-
-    // Only the display changed. Every stored weight is still kg, so nothing
-    // in the history or the ledger moved.
-    persist();
-    renderAll();
-  }
-
-  function wire(){
-    var add = document.getElementById('addBtn');
-    if (add) add.addEventListener('click', addSet);
-
-    var ut = document.getElementById('unitToggle');
-    if (ut) ut.addEventListener('click', toggleUnit);
-
-    ['ex', 'weight', 'reps', 'rpe'].forEach(function (id) {
-      var el = document.getElementById(id);
-      if (el) el.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') addSet();
-      });
-    });
-  }
-
-  function boot(){
-    wire();
-    if (!window.Vitality) { loaded = true; renderAll(); return; }
-
-    Vitality.onWriteError(function () {
-      trouble = 'Not saved. Check your connection.';
-      renderAll();
-    });
-
-    Vitality.load().then(function (res) {
-      if (res && res.ok) {
-        loaded = true;
-        var data = res.data;
-        if (data && data.days && typeof data.days === 'object') state.days = data.days;
-        if (data && (data.unit === 'kg' || data.unit === 'lb')) state.unit = data.unit;
+    vals.forEach(function(d){
+      var col = document.createElement('div'); col.className = 'col';
+      var bx = document.createElement('div');
+      if (d.v > 0 && max > 0){
+        bx.className = 'bx' + (d.k === k ? ' today' : '');
+        bx.style.height = Math.max(8, Math.round(84 * d.v / max)) + '%';
       } else {
-        trouble = 'Could not reach your vault. Nothing was changed.';
+        bx.className = 'flat';   // a rest day is flat, never a zero height bar
       }
-      renderAll();
+      col.appendChild(bx);
+      var lab = document.createElement('div'); lab.className = 'lab';
+      lab.textContent = shortDay(d.k).charAt(0);
+      col.appendChild(lab);
+      sp.appendChild(col);
     });
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
-    boot();
+  /* ============================ page: shared ============================ */
+  var NAV = [
+    { id:'home',     lb:'Home',     d:'M3 10.5 12 3l9 7.5M6 9.5V21h12V9.5' },
+    { id:'workouts', lb:'Workouts', d:'M3 12h2m14 0h2M7 7v10M17 7v10M9 12h6M7 9.5h0M5 9.5h0' },
+    { id:'ranks',    lb:'Ranks',    d:'M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 5.5 2 4 4 .5-3 2.8.8 4-3.8-2-3.8 2 .8-4-3-2.8 4-.5 2-4Z' },
+    { id:'profile',  lb:'Profile',  d:'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4.5 20a7.5 7.5 0 0 1 15 0' }
+  ];
+  function buildNav(){
+    var nav = $('nav');
+    nav.innerHTML = '';
+    NAV.forEach(function(n){
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('data-nav', n.id);
+      if (n.id === view) b.setAttribute('aria-current', 'page');
+      b.innerHTML = '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+        'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + n.d + '"/></svg>' +
+        '<span class="lb"></span>';
+      b.querySelector('.lb').textContent = n.lb;
+      nav.appendChild(b);
+    });
   }
+  function setView(v){
+    view = v;
+    var secs = document.querySelectorAll('[data-view]');
+    for (var i=0;i<secs.length;i++) secs[i].hidden = secs[i].getAttribute('data-view') !== v;
+    var btns = document.querySelectorAll('[data-nav]');
+    for (var j=0;j<btns.length;j++){
+      if (btns[j].getAttribute('data-nav') === v) btns[j].setAttribute('aria-current', 'page');
+      else btns[j].removeAttribute('aria-current');
+    }
+    var titles = { home:'Today', workouts:'Workouts', ranks:'Ranks', profile:'Profile' };
+    $('pgTitle').textContent = titles[v];
+    window.scrollTo(0, 0);
+    render();
+  }
+
+  function fillSelect(sel, keepValue){
+    var cur = keepValue ? sel.value : '';
+    sel.innerHTML = '';
+    var list = allEx();
+    var groups = {};
+    list.forEach(function(e){ (groups[e.cat] = groups[e.cat] || []).push(e); });
+    var order = ['push','pull','legs','core','custom'];
+    var names = { push:'Push', pull:'Pull', legs:'Legs', core:'Core', custom:'Yours' };
+    order.forEach(function(c){
+      if (!groups[c]) return;
+      var og = document.createElement('optgroup');
+      og.label = names[c];
+      groups[c].forEach(function(e){
+        var o = document.createElement('option');
+        o.value = e.name; o.textContent = e.name;
+        og.appendChild(o);
+      });
+      sel.appendChild(og);
+    });
+    if (cur) sel.value = cur;
+  }
+
+  function msg(text, ok){
+    var box = $('msg');
+    box.innerHTML = '';
+    if (!text) return;
+    var p = document.createElement('p');
+    p.className = 'toast' + (ok ? ' ok' : '');
+    p.textContent = text;
+    box.appendChild(p);
+  }
+
+  /* ============================ page: home ============================ */
+  function renderHome(){
+    var k = today();
+    var a = S.days[k] || [];
+
+    $('fUnit').textContent = unitLabel();
+
+    $('todayNote').textContent = a.length
+      ? a.length + (a.length === 1 ? ' set, ' : ' sets, ') + num(fromKg(dayVolume(k))) + ' ' + unitLabel() + ' moved'
+      : 'Nothing logged yet.';
+
+    var ul = $('todayList');
+    ul.innerHTML = '';
+    a.slice().reverse().forEach(function(s){
+      var li = document.createElement('li');
+      var e = findEx(s.ex);
+      var d = document.createElement('div'); d.className = 'grow';
+      var l1 = document.createElement('div'); l1.className = 'l1'; l1.textContent = s.ex;
+      var bits = [setLabel(s, e)];
+      if (s.rpe) bits.push('RPE ' + s.rpe);
+      if (e && e.bwf && !S.bw) bits.push('bodyweight not set, so it is not counted');
+      if (s.note) bits.push(s.note);
+      var l2 = document.createElement('div'); l2.className = 'l2'; l2.textContent = bits.join('  ·  ');
+      d.appendChild(l1); d.appendChild(l2);
+      li.appendChild(d);
+      var rep = document.createElement('button');
+      rep.className = 'btn small ghost'; rep.type = 'button';
+      rep.setAttribute('data-repeat', s.id); rep.textContent = 'Repeat';
+      li.appendChild(rep);
+      var del = document.createElement('button');
+      del.className = 'btn small ghost'; del.type = 'button';
+      del.setAttribute('data-del', s.id); del.textContent = 'Remove';
+      li.appendChild(del);
+      ul.appendChild(li);
+    });
+
+    if ($('fNote') !== document.activeElement) $('fNote').value = S.notes[k] || '';
+
+    // 14 day volume
+    var ch = $('volChart');
+    ch.innerHTML = '';
+    var max = 0, vals = [];
+    for (var i = 13; i >= 0; i--){
+      var kk = shift(k, -i);
+      var vv = dayVolume(kk);
+      vals.push({ k:kk, v:vv });
+      if (vv > max) max = vv;
+    }
+    vals.forEach(function(d){
+      var col = document.createElement('div'); col.className = 'col';
+      var bx = document.createElement('div');
+      if (d.v > 0 && max > 0){
+        bx.className = 'bx' + (d.k === k ? ' today' : '');
+        bx.style.height = Math.max(5, Math.round(76 * d.v / max)) + 'px';
+      } else bx.className = 'flat';
+      col.appendChild(bx);
+      var lab = document.createElement('div'); lab.className = 'lab';
+      lab.textContent = fromKey(d.k).getDate();
+      col.appendChild(lab);
+      ch.appendChild(col);
+    });
+
+    // quests
+    var wk = weekKey(k);
+    var st = weekStats(wk);
+    var ql = $('questList');
+    ql.innerHTML = '';
+    QUESTS.forEach(function(q){
+      var got = q.m === 'vol' ? st.vol : st[q.m];
+      var done = got >= q.target;
+      var key = wk + ':' + q.id;
+      var claimed = !!S.claimed[key];
+      var li = document.createElement('li');
+      var d = document.createElement('div'); d.className = 'grow';
+      var l1 = document.createElement('div'); l1.className = 'l1'; l1.textContent = q.label;
+      var l2 = document.createElement('div'); l2.className = 'l2';
+      // Capped: "3 of 1" reads like a bug. Done is done.
+      var shown = Math.min(got, q.target);
+      l2.textContent = (q.m === 'vol' ? num(shown) : Math.round(shown)) + ' of ' + num(q.target) + '  ·  ' + q.xp + ' XP';
+      d.appendChild(l1); d.appendChild(l2);
+      var bar = document.createElement('div'); bar.className = 'bar'; bar.style.marginTop = '7px';
+      var fill = document.createElement('i');
+      fill.style.transform = 'scaleX(' + Math.min(1, q.target ? got / q.target : 0) + ')';
+      bar.appendChild(fill); d.appendChild(bar);
+      li.appendChild(d);
+      if (claimed){
+        var s = document.createElement('span'); s.className = 'pill volt'; s.textContent = 'Claimed';
+        li.appendChild(s);
+      } else if (done){
+        var b = document.createElement('button');
+        b.className = 'btn small volt'; b.type = 'button';
+        b.setAttribute('data-claim', q.id); b.textContent = 'Claim';
+        li.appendChild(b);
+      }
+      ql.appendChild(li);
+    });
+  }
+
+  /* ============================ page: workouts ============================ */
+  function renderWorkouts(){
+    var btns = document.querySelectorAll('[data-wtab]');
+    for (var i=0;i<btns.length;i++)
+      btns[i].setAttribute('aria-pressed', btns[i].getAttribute('data-wtab') === wtab ? 'true' : 'false');
+    var bodies = document.querySelectorAll('[data-wtab-body]');
+    for (var j=0;j<bodies.length;j++)
+      bodies[j].hidden = bodies[j].getAttribute('data-wtab-body') !== wtab;
+
+    // plans
+    var pl = $('planList');
+    pl.innerHTML = '';
+    PLANS.forEach(function(p){
+      var li = document.createElement('li');
+      var d = document.createElement('div'); d.className = 'grow';
+      var l1 = document.createElement('div'); l1.className = 'l1'; l1.textContent = p.name;
+      var l2 = document.createElement('div'); l2.className = 'l2'; l2.textContent = p.why;
+      d.appendChild(l1); d.appendChild(l2);
+      li.appendChild(d);
+      var b = document.createElement('button');
+      b.className = 'btn small'; b.type = 'button';
+      b.setAttribute('data-plan', p.id); b.textContent = 'Load';
+      li.appendChild(b);
+      pl.appendChild(li);
+    });
+
+    // routines
+    var rl = $('routineList');
+    rl.innerHTML = '';
+    if (!S.routines.length){
+      var e = document.createElement('li');
+      e.innerHTML = '<span class="empty">No routine yet. Load a plan above or name one below.</span>';
+      rl.appendChild(e);
+    }
+    S.routines.forEach(function(r){
+      var li = document.createElement('li');
+      var d = document.createElement('div'); d.className = 'grow';
+      var l1 = document.createElement('div'); l1.className = 'l1'; l1.textContent = r.name;
+      var l2 = document.createElement('div'); l2.className = 'l2';
+      l2.textContent = r.items.length ? r.items.map(function(x){ return x.ex; }).join(', ') : 'empty';
+      d.appendChild(l1); d.appendChild(l2);
+      li.appendChild(d);
+      if (r.items.length){
+        var s = document.createElement('button');
+        s.className = 'btn small volt'; s.type = 'button';
+        s.setAttribute('data-start', r.id); s.textContent = 'Start';
+        li.appendChild(s);
+      }
+      var ed = document.createElement('button');
+      ed.className = 'btn small ghost'; ed.type = 'button';
+      ed.setAttribute('data-edit', r.id); ed.textContent = 'Edit';
+      li.appendChild(ed);
+      var dl = document.createElement('button');
+      dl.className = 'btn small ghost'; dl.type = 'button';
+      dl.setAttribute('data-rdel', r.id); dl.textContent = 'Remove';
+      li.appendChild(dl);
+      rl.appendChild(li);
+    });
+
+    // routine editor
+    var box = $('routineEdit');
+    var r = editRoutine ? S.routines.filter(function(x){ return x.id === editRoutine; })[0] : null;
+    box.hidden = !r;
+    if (r){
+      $('reTitle').textContent = r.name;
+      var el = $('reList'); el.innerHTML = '';
+      if (!r.items.length){
+        var li0 = document.createElement('li');
+        li0.innerHTML = '<span class="empty">Nothing in it yet.</span>';
+        el.appendChild(li0);
+      }
+      r.items.forEach(function(it, idx){
+        var li = document.createElement('li');
+        var d = document.createElement('div'); d.className = 'grow';
+        var l1 = document.createElement('div'); l1.className = 'l1'; l1.textContent = it.ex;
+        var l2 = document.createElement('div'); l2.className = 'l2';
+        l2.textContent = it.sets + ' x ' + it.reps + (it.kg ? '  ·  ' + showW(it.kg) + ' ' + unitLabel() : '');
+        d.appendChild(l1); d.appendChild(l2);
+        li.appendChild(d);
+        var x = document.createElement('button');
+        x.className = 'btn small ghost'; x.type = 'button';
+        x.setAttribute('data-idel', String(idx)); x.textContent = 'Remove';
+        li.appendChild(x);
+        el.appendChild(li);
+      });
+    }
+
+    // history
+    var hl = $('histList');
+    hl.innerHTML = '';
+    var ks = sortedDays().reverse();
+    $('histNote').textContent = ks.length
+      ? ks.length + (ks.length === 1 ? ' session logged.' : ' sessions logged. Newest first.')
+      : 'No session logged yet.';
+    ks.slice(0, 60).forEach(function(k){
+      var a = S.days[k];
+      var li = document.createElement('li');
+      var d = document.createElement('div'); d.className = 'grow';
+      var l1 = document.createElement('div'); l1.className = 'l1';
+      l1.textContent = niceDate(k) + '  ·  ' + shortDay(k);
+      var byEx = {};
+      a.forEach(function(s){ byEx[s.ex] = (byEx[s.ex] || 0) + 1; });
+      var l2 = document.createElement('div'); l2.className = 'l2';
+      l2.textContent = Object.keys(byEx).map(function(n){ return n + ' x' + byEx[n]; }).join(', ') +
+        (S.notes[k] ? '  ·  ' + S.notes[k] : '');
+      d.appendChild(l1); d.appendChild(l2);
+      li.appendChild(d);
+      var n = document.createElement('div'); n.className = 'num';
+      n.textContent = num(fromKg(dayVolume(k))) + ' ' + unitLabel();
+      li.appendChild(n);
+      hl.appendChild(li);
+    });
+
+    // library
+    var ll = $('libList'); ll.innerHTML = '';
+    var q = searchTerm.toLowerCase().trim();
+    var list = allEx().filter(function(e){
+      if (!q) return true;
+      if (e.name.toLowerCase().indexOf(q) >= 0) return true;
+      var ms = [e.pri].concat(e.sec).map(function(m){ return (MUSCLES[m] || m).toLowerCase(); }).join(' ');
+      return ms.indexOf(q) >= 0;
+    });
+    if (!list.length){
+      var le = document.createElement('li');
+      le.innerHTML = '<span class="empty">Nothing matches that.</span>';
+      ll.appendChild(le);
+    }
+    list.slice(0, 60).forEach(function(e){
+      var li = document.createElement('li');
+      var d = document.createElement('div'); d.className = 'grow';
+      var l1 = document.createElement('div'); l1.className = 'l1'; l1.textContent = e.name;
+      var l2 = document.createElement('div'); l2.className = 'l2';
+      l2.textContent = (MUSCLES[e.pri] || e.pri) + (e.sec.length ? '  ·  ' + e.sec.map(function(m){ return MUSCLES[m] || m; }).join(', ') : '');
+      d.appendChild(l1); d.appendChild(l2);
+      li.appendChild(d);
+      var b = document.createElement('button');
+      b.className = 'btn small ghost'; b.type = 'button';
+      b.setAttribute('data-lib', e.name); b.textContent = 'Open';
+      li.appendChild(b);
+      ll.appendChild(li);
+    });
+
+    var det = $('libDetail');
+    var pick = libPick ? findEx(libPick) : null;
+    det.hidden = !pick;
+    if (pick) renderLibDetail(det, pick);
+  }
+
+  function renderLibDetail(box, e){
+    box.innerHTML = '';
+    var h = document.createElement('h3'); h.textContent = e.name; box.appendChild(h);
+    var p = document.createElement('p'); p.className = 'note';
+    p.textContent = (MUSCLES[e.pri] || e.pri) +
+      (e.sec.length ? ', then ' + e.sec.map(function(m){ return (MUSCLES[m] || m).toLowerCase(); }).join(' and ') : '') +
+      '  ·  ' + (PATTERNS[e.pat] || e.pat);
+    box.appendChild(p);
+
+    var wrap = document.createElement('div');
+    wrap.style.display = 'flex'; wrap.style.gap = '16px'; wrap.style.flexWrap = 'wrap';
+    wrap.style.alignItems = 'flex-start';
+    var an = document.createElement('div');
+    an.style.flex = '0 0 auto';
+    an.innerHTML = patternSvg(e.pat);
+    wrap.appendChild(an);
+    var ul = document.createElement('ul'); ul.className = 'list'; ul.style.flex = '1 1 200px'; ul.style.minWidth = '0';
+    e.cues.forEach(function(c){
+      var li = document.createElement('li');
+      var d = document.createElement('div'); d.className = 'l1'; d.style.fontSize = '13px'; d.textContent = c;
+      li.appendChild(d); ul.appendChild(li);
+    });
+    wrap.appendChild(ul);
+    box.appendChild(wrap);
+
+    var pn = document.createElement('p'); pn.className = 'note'; pn.style.margin = '14px 0 0';
+    pn.textContent = 'The figure shows the movement pattern, not your form. It is drawn here, in this file, because a sealed tile cannot fetch a video.';
+    box.appendChild(pn);
+
+    if (e.bwf){
+      var bw = document.createElement('p'); bw.className = 'note'; bw.style.margin = '8px 0 0';
+      bw.textContent = e.bwf === 1
+        ? 'Log added weight only. Your full bodyweight is counted for you, once bodyweight is set.'
+        : 'Log added weight only. About ' + Math.round(e.bwf * 100) + ' percent of your bodyweight is counted for you.';
+      box.appendChild(bw);
+    }
+    if (!e.lad){
+      var nl = document.createElement('p'); nl.className = 'note'; nl.style.margin = '8px 0 0';
+      nl.textContent = 'No rank ladder. It logs and counts toward volume, but it will not be given a rank, because nobody has said what good looks like on it.';
+      box.appendChild(nl);
+    }
+  }
+
+  function patternSvg(pat){
+    var cls = 'anim ' + pat;
+    var body =
+      '<g class="mv">' +
+        '<circle class="hd" cx="60" cy="24" r="7"/>' +
+        '<path class="lim" d="M60 31 V62"/>' +
+        '<path class="lim" d="M60 38 L44 50 M60 38 L76 50"/>' +
+        '<path class="lim" d="M60 62 L48 86 M60 62 L72 86"/>' +
+        '<path class="bar2" d="M32 50 H88"/>' +
+      '</g>';
+    if (pat === 'pullV'){
+      body =
+        '<path class="bar2" d="M28 18 H92"/>' +
+        '<g class="mv">' +
+          '<circle class="hd" cx="60" cy="34" r="7"/>' +
+          '<path class="lim" d="M60 41 V70"/>' +
+          '<path class="lim" d="M60 41 L44 20 M60 41 L76 20"/>' +
+          '<path class="lim" d="M60 70 L50 92 M60 70 L70 92"/>' +
+        '</g>';
+    } else if (pat === 'rowH'){
+      body =
+        '<g>' +
+          '<circle class="hd" cx="44" cy="30" r="7"/>' +
+          '<path class="lim" d="M44 37 L74 52"/>' +
+          '<path class="lim" d="M74 52 L70 84 M74 52 L84 82"/>' +
+        '</g>' +
+        '<g class="mv"><path class="bar2" d="M40 62 H70"/><path class="lim" d="M55 45 L55 62"/></g>';
+    } else if (pat === 'hinge'){
+      body =
+        '<g class="mv" style="transform-origin:60px 62px">' +
+          '<circle class="hd" cx="60" cy="24" r="7"/>' +
+          '<path class="lim" d="M60 31 V62"/>' +
+          '<path class="lim" d="M60 38 L46 58 M60 38 L74 58"/>' +
+          '<path class="bar2" d="M34 60 H86"/>' +
+        '</g>' +
+        '<path class="lim" d="M60 62 L50 90 M60 62 L70 90"/>';
+    } else if (pat === 'squat'){
+      body =
+        '<g class="mv">' +
+          '<circle class="hd" cx="60" cy="22" r="7"/>' +
+          '<path class="lim" d="M60 29 V58"/>' +
+          '<path class="bar2" d="M36 34 H84"/>' +
+          '<path class="lim" d="M60 58 L46 74 M60 58 L74 74"/>' +
+        '</g>' +
+        '<path class="lim" d="M46 74 L46 92 M74 74 L74 92"/>';
+    } else if (pat === 'curl'){
+      body =
+        '<circle class="hd" cx="60" cy="22" r="7"/>' +
+        '<path class="lim" d="M60 29 V64"/>' +
+        '<path class="lim" d="M60 64 L50 90 M60 64 L70 90"/>' +
+        '<g class="mv"><path class="lim" d="M60 38 L44 54 M60 38 L76 54"/><path class="bar2" d="M38 56 H82"/></g>';
+    }
+    return '<svg class="' + cls + '" viewBox="0 0 120 100" width="150" height="125" aria-hidden="true">' + body + '</svg>';
+  }
+
+  /* ============================ page: ranks ============================ */
+  function renderRanks(){
+    var o = overallRank();
+    $('rBadge').innerHTML = badgeSvg(o.g, 54);
+    $('rName').textContent = o.g ? gradeName(o.g) : 'Unranked';
+    $('rLp').textContent = o.g ? o.g.lp + ' / 100 Lift Points' : '';
+    $('rBar').style.transform = 'scaleX(' + (o.g ? o.g.lp / 100 : 0) + ')';
+
+    if (!S.bw){
+      $('rNote').textContent = 'A rank is a ratio, so nothing can rank until your bodyweight is set. Profile, bodyweight.';
+    } else if (!o.g){
+      $('rNote').textContent = 'Log a set of 1 to 12 reps on a lift that has a ladder and this fills in.';
+    } else {
+      var t = 'Averaged across the ' + o.n + (o.n === 1 ? ' lift' : ' lifts') +
+        ' you have ranked, weighted so the big compounds count for more.';
+      if (o.missing.length) t += ' Not counted yet, because you have not logged them: ' + o.missing.join(', ') + '.';
+      $('rNote').textContent = t;
+    }
+
+    renderBody();
+
+    var r = exRanks();
+    var el = $('exRankList'); el.innerHTML = '';
+    if (!r.length){
+      var e0 = document.createElement('li');
+      e0.innerHTML = '<span class="empty">' + (S.bw ? 'Nothing ranked yet.' : 'Set your bodyweight in Profile first.') + '</span>';
+      el.appendChild(e0);
+    }
+    r.forEach(function(x){
+      var li = document.createElement('li');
+      var b = document.createElement('span'); b.innerHTML = badgeSvg(x.g, 30);
+      li.appendChild(b);
+      var d = document.createElement('div'); d.className = 'grow';
+      var l1 = document.createElement('div'); l1.className = 'l1'; l1.textContent = x.name;
+      var l2 = document.createElement('div'); l2.className = 'l2';
+      l2.textContent = gradeName(x.g) + '  ·  ' + x.g.lp + ' LP  ·  ' +
+        (Math.round(x.ratio * 100) / 100) + 'x bodyweight';
+      d.appendChild(l1); d.appendChild(l2);
+      var bar = document.createElement('div'); bar.className = 'bar'; bar.style.marginTop = '7px';
+      var fill = document.createElement('i');
+      fill.style.transform = 'scaleX(' + (x.g.lp / 100) + ')';
+      fill.style.background = gradeColor(x.g);
+      bar.appendChild(fill); d.appendChild(bar);
+      li.appendChild(d);
+      el.appendChild(li);
+    });
+
+    var b2 = bests().best;
+    var pl = $('prList'); pl.innerHTML = '';
+    var names = Object.keys(b2).sort();
+    if (!names.length){
+      var e1 = document.createElement('li');
+      e1.innerHTML = '<span class="empty">No set logged yet.</span>';
+      pl.appendChild(e1);
+    }
+    names.forEach(function(n){
+      var p = b2[n];
+      var li = document.createElement('li');
+      var d = document.createElement('div'); d.className = 'grow';
+      var l1 = document.createElement('div'); l1.className = 'l1'; l1.textContent = n;
+      var l2 = document.createElement('div'); l2.className = 'l2';
+      l2.textContent = showW(p.kg) + ' ' + unitLabel() + ' x ' + p.reps + '  ·  ' + niceDate(p.date) +
+        (p.e1 ? '  ·  est. 1RM ' + showW(p.e1) + ' ' + unitLabel() : '');
+      d.appendChild(l1); d.appendChild(l2);
+      li.appendChild(d);
+      pl.appendChild(li);
+    });
+
+    renderLadder();
+  }
+
+  function renderLadder(){
+    var sel = $('ladPick');
+    if (sel.options.length !== allEx().filter(function(e){ return e.lad; }).length){
+      sel.innerHTML = '';
+      allEx().filter(function(e){ return e.lad; }).forEach(function(e){
+        var o = document.createElement('option'); o.value = e.name; o.textContent = e.name;
+        sel.appendChild(o);
+      });
+    }
+    if (sel.value !== ladPick) sel.value = ladPick;
+    var e = findEx(ladPick);
+    var t = $('ladTable');
+    t.innerHTML = '';
+    if (!e || !e.lad){ t.innerHTML = '<tr><td class="empty">No ladder on this one.</td></tr>'; return; }
+    var head = document.createElement('tr');
+    head.innerHTML = '<th>Tier</th><th>Enters at</th><th>Est. 1RM' + (S.bw ? ' for you' : '') + '</th>';
+    t.appendChild(head);
+    var mine = null;
+    var b = bests().best[ladPick];
+    if (b && b.e1 && S.bw) mine = grade(e.lad, b.e1 / S.bw);
+    for (var i=0;i<9;i++){
+      var tr = document.createElement('tr');
+      var td1 = document.createElement('td'); td1.className = 'tier';
+      td1.textContent = TIERS[i].n;
+      td1.style.color = TIERS[i].c;
+      if (mine && mine.tier === i){
+        var here = document.createElement('span');
+        here.className = 'mono';
+        here.style.cssText = 'color:var(--volt);font-size:9px;letter-spacing:.14em;margin-left:8px';
+        here.textContent = 'YOU';
+        td1.appendChild(here);
+      }
+      var td2 = document.createElement('td'); td2.textContent = e.lad[i].toFixed(2) + 'x bw';
+      var td3 = document.createElement('td');
+      td3.textContent = S.bw ? showW(e.lad[i] * S.bw) + ' ' + unitLabel() : '-';
+      tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+      t.appendChild(tr);
+    }
+  }
+
+  /* ---- the bodygraph. Original artwork, plates not anatomy ---- */
+  var FRONT = [
+    ['head', 'ellipse', 60, 20, 12, 14, null],
+    ['traps', 'path', 'M40 42 L60 34 L80 42 L80 49 L60 43 L40 49 Z', null, null, null, 'traps'],
+    ['delts', 'ellipse', 31, 56, 11, 11, 'delts'],
+    ['delts', 'ellipse', 89, 56, 11, 11, 'delts'],
+    ['chest', 'rect', 41, 47, 17, 26, 'chest'],
+    ['chest', 'rect', 62, 47, 17, 26, 'chest'],
+    ['biceps', 'rect', 21, 69, 14, 30, 'biceps'],
+    ['biceps', 'rect', 85, 69, 14, 30, 'biceps'],
+    ['forearms', 'rect', 19, 101, 13, 32, 'forearms'],
+    ['forearms', 'rect', 88, 101, 13, 32, 'forearms'],
+    ['abs', 'rect', 50, 77, 20, 43, 'abs'],
+    ['obliques', 'rect', 41, 79, 8, 37, 'obliques'],
+    ['obliques', 'rect', 71, 79, 8, 37, 'obliques'],
+    ['quads', 'rect', 42, 126, 16, 57, 'quads'],
+    ['quads', 'rect', 62, 126, 16, 57, 'quads'],
+    ['calves', 'rect', 44, 189, 13, 43, 'calves'],
+    ['calves', 'rect', 63, 189, 13, 43, 'calves']
+  ];
+  var BACK = [
+    ['head', 'ellipse', 60, 20, 12, 14, null],
+    ['traps', 'path', 'M40 41 L60 33 L80 41 L72 67 L60 73 L48 67 Z', null, null, null, 'traps'],
+    ['reardelt', 'ellipse', 31, 56, 11, 11, 'reardelt'],
+    ['reardelt', 'ellipse', 89, 56, 11, 11, 'reardelt'],
+    ['lats', 'path', 'M42 58 L57 72 L55 106 L39 88 Z', null, null, null, 'lats'],
+    ['lats', 'path', 'M78 58 L63 72 L65 106 L81 88 Z', null, null, null, 'lats'],
+    ['triceps', 'rect', 21, 69, 14, 30, 'triceps'],
+    ['triceps', 'rect', 85, 69, 14, 30, 'triceps'],
+    ['forearms', 'rect', 19, 101, 13, 32, 'forearms'],
+    ['forearms', 'rect', 88, 101, 13, 32, 'forearms'],
+    ['lowerback', 'rect', 51, 96, 18, 22, 'lowerback'],
+    ['glutes', 'rect', 41, 121, 18, 26, 'glutes'],
+    ['glutes', 'rect', 61, 121, 18, 26, 'glutes'],
+    ['hams', 'rect', 42, 151, 16, 40, 'hams'],
+    ['hams', 'rect', 62, 151, 16, 40, 'hams'],
+    ['calves', 'rect', 44, 195, 13, 40, 'calves'],
+    ['calves', 'rect', 63, 195, 13, 40, 'calves']
+  ];
+
+  function shapeSvg(row, fill, muscle){
+    var cls = muscle ? 'mus' : 'frame';
+    var attr = muscle ? ' data-mus="' + muscle + '"' : '';
+    var style = muscle ? ' fill="' + fill + '"' : '';
+    if (row[1] === 'ellipse')
+      return '<ellipse class="' + cls + '"' + attr + style + ' cx="' + row[2] + '" cy="' + row[3] + '" rx="' + row[4] + '" ry="' + row[5] + '"/>';
+    if (row[1] === 'rect')
+      return '<rect class="' + cls + '"' + attr + style + ' x="' + row[2] + '" y="' + row[3] + '" width="' + row[4] + '" height="' + row[5] + '" rx="' + Math.min(9, row[4] / 2) + '"/>';
+    return '<path class="' + cls + '"' + attr + style + ' d="' + row[2] + '"/>';
+  }
+  function recoveryColor(pct){
+    // mint when it is ready, amber when it is not. Never red: this is a person.
+    if (pct >= 85) return 'rgba(110,231,183,.85)';
+    if (pct >= 60) return 'rgba(110,231,183,.45)';
+    if (pct >= 35) return 'rgba(252,211,77,.5)';
+    return 'rgba(252,211,77,.85)';
+  }
+  function renderBody(){
+    var mr = muscleRanks();
+    var rec = bgMode === 'recovery' ? muscleRecovery() : null;
+    function fillFor(m){
+      if (bgMode === 'recovery'){
+        if (!rec) return 'rgba(148,163,158,.16)';
+        return rec[m] && rec[m].seen ? recoveryColor(rec[m].pct) : 'rgba(148,163,158,.16)';
+      }
+      return mr[m] ? gradeColor(mr[m]) : 'rgba(148,163,158,.16)';
+    }
+    function build(rows){
+      var out = '';
+      rows.forEach(function(r){
+        var m = r[6] || (r[0] !== 'head' ? r[0] : null);
+        if (r[0] === 'head') m = null;
+        out += shapeSvg(r, m ? fillFor(m) : '', m);
+      });
+      return '<svg viewBox="0 0 120 242" aria-hidden="true">' + out + '</svg>';
+    }
+    $('bodyWrap').innerHTML = build(FRONT) + build(BACK);
+
+    var lg = $('bgLegend'); lg.innerHTML = '';
+    if (bgMode === 'rank'){
+      TIERS.forEach(function(t){
+        var i = document.createElement('i');
+        i.innerHTML = '<b style="background:' + t.c + '"></b>';
+        i.appendChild(document.createTextNode(t.n));
+        lg.appendChild(i);
+      });
+      var u = document.createElement('i');
+      u.innerHTML = '<b style="background:rgba(148,163,158,.16)"></b>';
+      u.appendChild(document.createTextNode('no lift logged'));
+      lg.appendChild(u);
+      $('bgNote').textContent = 'A muscle takes the best rank you hold on a lift that trains it directly. A muscle a lift only helps with stays grey, because a big bench is not a triceps rank.';
+    } else {
+      [['ready','rgba(110,231,183,.85)'],['most of the way','rgba(110,231,183,.45)'],['still working','rgba(252,211,77,.5)'],['fresh off a session','rgba(252,211,77,.85)'],['nothing logged','rgba(148,163,158,.16)']].forEach(function(p){
+        var i = document.createElement('i');
+        i.innerHTML = '<b style="background:' + p[1] + '"></b>';
+        i.appendChild(document.createTextNode(p[0]));
+        lg.appendChild(i);
+      });
+      $('bgNote').textContent = S.bw
+        ? 'Estimated from the volume you logged and nothing else. It has never seen your sleep, your heart rate or how you actually feel. Check in is where that lives.'
+        : 'Needs your bodyweight before it can scale volume to you. Profile, bodyweight.';
+    }
+
+    var pick = $('bgPick');
+    if (!bgPick) { pick.textContent = 'Tap a muscle for its number.'; return; }
+    var label = MUSCLES[bgPick] || bgPick;
+    if (bgMode === 'rank'){
+      var g = mr[bgPick];
+      if (g){
+        var from = exRanks().filter(function(x){ return x.ex.pri === bgPick; })
+          .map(function(x){ return x.name; }).slice(0, 3).join(', ');
+        pick.textContent = label + ': ' + gradeName(g) + ', ' + g.lp + ' LP. From ' + from + '.';
+      } else {
+        pick.textContent = label + ': no lift logged that trains it directly.';
+      }
+    } else {
+      if (!rec) { pick.textContent = label + ': needs your bodyweight first.'; return; }
+      var r2 = rec[bgPick];
+      pick.textContent = r2 && r2.seen
+        ? label + ': about ' + r2.pct + ' percent recovered, estimated from volume in the last ' + (BIG_MUSCLES[bgPick] ? '72' : '48') + ' hours.'
+        : label + ': nothing logged recently, so there is nothing to estimate from.';
+    }
+  }
+
+  /* ============================ page: profile ============================ */
+  function renderProfile(){
+    var xp = xpTotal();
+    var L = levelFor(xp);
+    var lo = xpForLevel(L), hi = xpForLevel(L + 1);
+    $('pgLevel').textContent = 'LVL ' + L;
+    $('xpNote').textContent = 'Level ' + L + '. ' + num(xp) + ' XP total, ' + num(hi - xp) + ' to level ' + (L + 1) + '.';
+    $('xpBar').style.transform = 'scaleX(' + (hi > lo ? (xp - lo) / (hi - lo) : 0) + ')';
+
+    var h = history();
+    var setXp = 0;
+    for (var i=0;i<h.length;i++) setXp += 10 + Math.floor(setVolume(h[i].s) / 100);
+    var prXp = bests().prEvents * 50;
+    var qXp = xp - setXp - prXp;
+    var br = $('xpBreak'); br.innerHTML = '';
+    [['Sets logged', h.length + ' sets', setXp, '10 XP a set, plus 1 for every 100 kg it moved'],
+     ['Records', bests().prEvents + ' records', prXp, '50 XP each time a lift beat its own best'],
+     ['Quests', Object.keys(S.claimed).length + ' claimed', qXp, 'whatever the quest was worth']].forEach(function(r){
+      var li = document.createElement('li');
+      var d = document.createElement('div'); d.className = 'grow';
+      var l1 = document.createElement('div'); l1.className = 'l1'; l1.textContent = r[0];
+      var l2 = document.createElement('div'); l2.className = 'l2'; l2.textContent = r[1] + '  ·  ' + r[3];
+      d.appendChild(l1); d.appendChild(l2);
+      li.appendChild(d);
+      var n = document.createElement('div'); n.className = 'num'; n.textContent = num(r[2]) + ' XP';
+      li.appendChild(n);
+      br.appendChild(li);
+    });
+
+    if ($('fBw') !== document.activeElement)
+      $('fBw').value = S.bw ? Math.round(fromKg(S.bw) * 10) / 10 : '';
+    $('fBw').placeholder = unitLabel();
+    if ($('fTarget') !== document.activeElement) $('fTarget').value = S.weekTarget;
+    if ($('fRest') !== document.activeElement) $('fRest').value = S.rest;
+
+    var st = streakWeeks();
+    var wk = weekStats(weekKey(today()));
+    $('streakNote').textContent = sortedDays().length
+      ? st + (st === 1 ? ' week' : ' weeks') + ' running at ' + S.weekTarget + ' or more sessions. ' +
+        wk.days + ' logged so far this week. The week in progress never breaks the run.'
+      : 'Nothing logged yet, so there is no streak to report.';
+
+    var tl = $('titleList'); tl.innerHTML = '';
+    TITLES.forEach(function(t){
+      var got = L >= t.lvl;
+      var li = document.createElement('li');
+      var d = document.createElement('div'); d.className = 'grow';
+      var l1 = document.createElement('div'); l1.className = 'l1'; l1.textContent = t.n;
+      if (!got) l1.style.color = 'var(--faint)';
+      var l2 = document.createElement('div'); l2.className = 'l2'; l2.textContent = got ? t.d : 'Locked until level ' + t.lvl;
+      d.appendChild(l1); d.appendChild(l2);
+      li.appendChild(d);
+      if (got){ var s = document.createElement('span'); s.className = 'pill volt'; s.textContent = 'Held'; li.appendChild(s); }
+      tl.appendChild(li);
+    });
+
+    var us = document.querySelectorAll('[data-unit]');
+    for (var j=0;j<us.length;j++)
+      us[j].setAttribute('aria-pressed', us[j].getAttribute('data-unit') === S.unit ? 'true' : 'false');
+  }
+
+  /* ============================ celebration ============================ */
+  var celShown = false;
+  function checkMilestones(){
+    if (!loaded || mode !== 'page' || celShown) return;
+    var L = levelFor(xpTotal());
+    if (L > (S.lvlSeen || 1)){
+      celebrate('Level ' + L, 'Level up', 'Earned off ' + history().length + ' logged sets and every record inside them.');
+      S.lvlSeen = L;
+      Vitality.save(S);
+      buzz([18, 60, 30]);
+      return;
+    }
+    var r = exRanks();
+    for (var i=0;i<r.length;i++){
+      var prev = S.rankSeen[r[i].name];
+      var now = rankIndex(r[i].g);
+      if (prev === undefined){ S.rankSeen[r[i].name] = now; continue; }
+      if (now > prev){
+        celebrate(gradeName(r[i].g), r[i].name, 'Estimated one rep max of ' + showW(r[i].e1) + ' ' + unitLabel() +
+          ', which is ' + (Math.round(r[i].ratio * 100) / 100) + ' times your bodyweight.');
+        S.rankSeen[r[i].name] = now;
+        Vitality.save(S);
+        buzz([18, 60, 30]);
+        return;
+      }
+      S.rankSeen[r[i].name] = now;
+    }
+  }
+  function celebrate(value, kicker, detail){
+    celShown = true;
+    var d = document.createElement('div');
+    d.className = 'cel';
+    d.innerHTML = '<div class="ring"></div><div class="in"><div class="k"></div><div class="v"></div><div class="d"></div></div>';
+    d.querySelector('.k').textContent = kicker;
+    d.querySelector('.v').textContent = value;
+    d.querySelector('.d').textContent = detail;
+    document.body.appendChild(d);
+    var off = function(){ if (d.parentNode) d.parentNode.removeChild(d); celShown = false; };
+    d.addEventListener('click', off);
+    setTimeout(off, 4200);
+  }
+
+  /* ============================ rest timer ============================ */
+  function startRest(){
+    stopRest();
+    restTotal = S.rest;
+    restLeft = S.rest;
+    $('restBox').hidden = false;
+    $('restBox').classList.remove('done');
+    tickRest();
+    restTimer = setInterval(tickRest, 1000);
+  }
+  function tickRest(){
+    var m = Math.floor(restLeft / 60), s = restLeft % 60;
+    $('restT').textContent = m + ':' + pad(s);
+    $('restBar').style.transform = 'scaleX(' + (restTotal ? restLeft / restTotal : 0) + ')';
+    if (restLeft <= 0){
+      clearInterval(restTimer); restTimer = null;
+      $('restBox').classList.add('done');
+      $('restT').textContent = 'go';
+      buzz([30, 80, 30, 80, 30]);
+      return;
+    }
+    restLeft--;
+  }
+  function stopRest(){
+    if (restTimer) clearInterval(restTimer);
+    restTimer = null;
+    $('restBox').hidden = true;
+    $('restBox').classList.remove('done');
+  }
+
+  /* ============================ actions ============================ */
+  function logSet(){
+    var ex = $('fEx').value;
+    var kgRaw = parseFloat($('fKg').value);
+    var reps = parseInt($('fReps').value, 10);
+    var rpe = parseFloat($('fRpe').value);
+    if (!ex) { msg('Pick an exercise first.'); return; }
+    if (!isFinite(reps) || reps < 1) { msg('Reps first. An incomplete set logs nothing rather than half a row.'); return; }
+    if (!isFinite(kgRaw) || kgRaw < 0) kgRaw = 0;
+    var e = findEx(ex);
+    if (!kgRaw && (!e || !e.bwf)) { msg('Weight first. An incomplete set logs nothing rather than half a row.'); return; }
+
+    var k = today();
+    S.days[k] = S.days[k] || [];
+    S.days[k].push({
+      id: 's' + Date.now() + Math.floor(Math.random() * 1000),
+      ex: ex, kg: toKg(kgRaw), reps: reps,
+      rpe: isFinite(rpe) ? rpe : null, note: ''
+    });
+    $('fReps').value = '';
+    $('fRpe').value = '';
+    msg('', true);
+    buzz(12);
+    persist();
+    checkMilestones();
+    startRest();
+  }
+
+  function loadPlan(id){
+    var p = PLANS.filter(function(x){ return x.id === id; })[0];
+    if (!p) return;
+    var clash = S.routines.filter(function(r){
+      return p.routines.some(function(pr){ return pr.name === r.name; });
+    });
+    if (clash.length){
+      msg('You already have a routine called ' + clash.map(function(c){ return c.name; }).join(', ') +
+          '. Rename or remove it first, so nothing of yours gets written over.');
+      return;
+    }
+    p.routines.forEach(function(pr){
+      S.routines.push({
+        id: 'r' + Date.now() + Math.floor(Math.random() * 10000) + S.routines.length,
+        name: pr.name,
+        items: pr.items.map(function(it){ return { ex: it[0], sets: it[1], reps: it[2], kg: it[3] }; })
+      });
+    });
+    msg(p.name + ' added as ' + p.routines.length + ' routines. Nothing of yours was touched.', true);
+    persist();
+  }
+
+  /* ============================ render ============================ */
+  function render(){
+    fresh();
+    if (mode === 'grid'){ renderPoster(); return; }
+    renderPoster();
+    // The level rides the header on every view, not just Profile.
+    $('pgLevel').textContent = 'LVL ' + levelFor(xpTotal());
+    if (view === 'home') renderHome();
+    else if (view === 'workouts') renderWorkouts();
+    else if (view === 'ranks') renderRanks();
+    else if (view === 'profile') renderProfile();
+  }
+
+  function enable(on){
+    var ids = ['fEx','fKg','fReps','fRpe','bLog','bRest','fNote','fRoutine','bAddRoutine',
+               'fSearch','cName','cMus','cPat','bAddCustom','fBw','bBw','fTarget','fRest','ladPick'];
+    ids.forEach(function(id){ var el = $(id); if (el) el.disabled = !on; });
+  }
+
+  /* ============================ wiring ============================ */
+  if (mode === 'page'){
+    buildNav();
+
+    document.addEventListener('click', function(ev){
+      var t = ev.target.closest ? ev.target.closest('button') : null;
+      if (!t) return;
+      var a;
+
+      if ((a = t.getAttribute('data-nav'))) { setView(a); return; }
+      if ((a = t.getAttribute('data-wtab'))) { wtab = a; libPick = ''; render(); return; }
+      if ((a = t.getAttribute('data-bg'))) { bgMode = a; render(); return; }
+      if ((a = t.getAttribute('data-unit'))) {
+        if (a === S.unit) return;
+        S.unit = a;
+        // Clearing beats converting: a 100 in the box meant kg a second ago and
+        // would silently log as 45.4. Guessing at intent is worse than asking.
+        $('fKg').value = '';
+        msg('Display is now ' + a + '. Everything stays stored in kg, so nothing in your history changed. The weight box was cleared rather than converted.', true);
+        persist();
+        return;
+      }
+      if (t === $('bLog')) { logSet(); return; }
+      if (t === $('bRest')) { startRest(); return; }
+      if (t === $('bRestStop')) { stopRest(); return; }
+
+      if ((a = t.getAttribute('data-repeat'))) {
+        var k = today(), list = S.days[k] || [];
+        var src = list.filter(function(s){ return s.id === a; })[0];
+        if (!src) return;
+        list.push({ id:'s' + Date.now() + Math.floor(Math.random()*1000), ex:src.ex, kg:src.kg, reps:src.reps, rpe:src.rpe, note:'' });
+        buzz(12); persist(); checkMilestones(); startRest();
+        return;
+      }
+      if ((a = t.getAttribute('data-del'))) {
+        var k2 = today();
+        S.days[k2] = (S.days[k2] || []).filter(function(s){ return s.id !== a; });
+        if (!S.days[k2].length) delete S.days[k2];
+        persist();
+        return;
+      }
+      if ((a = t.getAttribute('data-claim'))) {
+        S.claimed[weekKey(today()) + ':' + a] = true;
+        buzz([12, 40, 12]);
+        persist();
+        checkMilestones();
+        return;
+      }
+      if ((a = t.getAttribute('data-plan'))) { loadPlan(a); return; }
+      if ((a = t.getAttribute('data-start'))) {
+        var r = S.routines.filter(function(x){ return x.id === a; })[0];
+        if (!r || !r.items.length) return;
+        $('fEx').value = r.items[0].ex;
+        if (r.items[0].kg) $('fKg').value = Math.round(fromKg(r.items[0].kg) * 10) / 10;
+        if (r.items[0].reps) $('fReps').value = r.items[0].reps;
+        setView('home');
+        msg(r.name + ' loaded. First exercise is in the form, the rest is on you.', true);
+        return;
+      }
+      if ((a = t.getAttribute('data-edit'))) { editRoutine = a; wtab = 'routines'; fillSelect($('reEx'), false); render(); return; }
+      if (t === $('bReClose')) { editRoutine = null; render(); return; }
+      if ((a = t.getAttribute('data-rdel'))) {
+        S.routines = S.routines.filter(function(x){ return x.id !== a; });
+        if (editRoutine === a) editRoutine = null;
+        persist();
+        return;
+      }
+      if ((a = t.getAttribute('data-idel'))) {
+        var rr = S.routines.filter(function(x){ return x.id === editRoutine; })[0];
+        if (rr) rr.items.splice(parseInt(a, 10), 1);
+        persist();
+        return;
+      }
+      if (t === $('bReAdd')) {
+        var re = S.routines.filter(function(x){ return x.id === editRoutine; })[0];
+        if (!re) return;
+        var name = $('reEx').value;
+        if (!name) return;
+        var sets = parseInt($('reSets').value, 10) || 3;
+        var reps = parseInt($('reReps').value, 10) || 8;
+        var kg = parseFloat($('reKg').value);
+        re.items.push({ ex:name, sets:sets, reps:reps, kg: isFinite(kg) ? toKg(kg) : 0 });
+        $('reKg').value = '';
+        persist();
+        return;
+      }
+      if (t === $('bAddRoutine')) {
+        var nm = $('fRoutine').value.trim();
+        if (!nm) return;
+        if (S.routines.some(function(x){ return x.name.toLowerCase() === nm.toLowerCase(); })){
+          msg('You already have a routine called ' + nm + '. Rename this one or remove the old one.');
+          return;
+        }
+        var id = 'r' + Date.now();
+        S.routines.push({ id:id, name:nm, items:[] });
+        $('fRoutine').value = '';
+        editRoutine = id;
+        fillSelect($('reEx'), false);
+        persist();
+        return;
+      }
+      if ((a = t.getAttribute('data-lib'))) { libPick = a; render(); return; }
+      if (t === $('bAddCustom')) {
+        var cn = $('cName').value.trim();
+        if (!cn) return;
+        if (findEx(cn)){
+          msg('There is already an exercise called ' + cn + '. Pick another name so the two never get mixed up.');
+          return;
+        }
+        S.custom.push({ id:'c' + Date.now(), name:cn, pri:$('cMus').value, sec:[],
+                        cat:'custom', pat:$('cPat').value, bwf:0, w:1, lad:null, cues:['Yours.'] });
+        $('cName').value = '';
+        fillSelect($('fEx'), true);
+        fillSelect($('reEx'), true);
+        msg(cn + ' added. It logs and counts toward volume. No rank, because no ladder was set for it.', true);
+        persist();
+        return;
+      }
+      if (t === $('bBw')) {
+        var v = parseFloat($('fBw').value);
+        if (!isFinite(v) || v <= 0) { msg('Bodyweight needs a real number.'); return; }
+        S.bw = toKg(v);
+        msg('Bodyweight set. Ranks are ratios, so they all just recomputed.', true);
+        persist();
+        checkMilestones();
+        return;
+      }
+    });
+
+    document.addEventListener('click', function(ev){
+      var m = ev.target && ev.target.getAttribute ? ev.target.getAttribute('data-mus') : null;
+      if (m) { bgPick = m; renderBody(); }
+    });
+
+    $('fNote').addEventListener('input', function(){
+      var k = today();
+      var v = this.value;
+      if (v) S.notes[k] = v; else delete S.notes[k];
+      if (loaded) { Vitality.save(S); }
+    });
+    $('fSearch').addEventListener('input', function(){ searchTerm = this.value; libPick = ''; renderWorkouts(); });
+    $('ladPick').addEventListener('change', function(){ ladPick = this.value; renderLadder(); });
+    $('fTarget').addEventListener('change', function(){
+      var v = parseInt(this.value, 10);
+      if (!isFinite(v) || v < 1 || v > 7) { this.value = S.weekTarget; return; }
+      S.weekTarget = v; persist();
+    });
+    $('fRest').addEventListener('change', function(){
+      var v = parseInt(this.value, 10);
+      if (!isFinite(v) || v < 10 || v > 600) { this.value = S.rest; return; }
+      S.rest = v; persist();
+    });
+    $('fEx').addEventListener('change', function(){
+      var e = findEx(this.value);
+      if (e && e.lad) ladPick = this.value;   // only lifts with a ladder appear in that picker
+    });
+
+    fillSelect($('fEx'), false);
+    fillSelect($('reEx'), false);
+    var cm = $('cMus');
+    for (var mk in MUSCLES){
+      var o = document.createElement('option'); o.value = mk; o.textContent = MUSCLES[mk]; cm.appendChild(o);
+    }
+    var cp = $('cPat');
+    for (var pk in PATTERNS){
+      var o2 = document.createElement('option'); o2.value = pk; o2.textContent = PATTERNS[pk]; cp.appendChild(o2);
+    }
+  }
+
+  Vitality.onWriteError(function (type, reason) {
+    trouble = type === 'save:error'
+      ? 'That did not save. ' + (reason || 'The vault refused the write.')
+      : 'That set logged, but it did not reach your ledger. ' + (reason || '');
+    if (mode === 'page') msg(trouble);
+    renderPoster();
+  });
+
+  /* ============================ boot ============================ */
+  enable(false);
+  render();
+
+  Vitality.load().then(function (res) {
+    if (!res.ok){
+      // An unanswered load is NOT an empty slot. Stay read only rather than let
+      // the next save write that emptiness over real history.
+      trouble = 'Could not reach your vault. Nothing is saving until it answers, so nothing gets written over.';
+      if (mode === 'page') msg(trouble);
+      renderPoster();
+      return;
+    }
+    var d = res.data;
+    if (d && typeof d === 'object'){
+      if (d.v === 2){
+        S.unit = d.unit === 'lb' ? 'lb' : 'kg';
+        S.bw = typeof d.bw === 'number' ? d.bw : null;
+        S.weekTarget = d.weekTarget || 3;
+        S.rest = d.rest || 120;
+        S.days = d.days || {};
+        S.notes = d.notes || {};
+        S.routines = d.routines || [];
+        S.custom = d.custom || [];
+        S.claimed = d.claimed || {};
+        S.lvlSeen = d.lvlSeen || 1;
+        S.rankSeen = d.rankSeen || {};
+      } else if (d.days){
+        // A v1 blob. Ruben asked for a clean start on 2026-07-30, so only the
+        // display unit carries over and the log begins empty.
+        S.unit = d.unit === 'lb' ? 'lb' : 'kg';
+      }
+    }
+    loaded = true;
+    enable(true);
+    render();
+    pushReport();
+    // Seed the rank snapshot on first ever load so an existing lifter is not
+    // ambushed by nine celebrations at once.
+    var seeded = Object.keys(S.rankSeen).length > 0;
+    if (!seeded){
+      exRanks().forEach(function(x){ S.rankSeen[x.name] = rankIndex(x.g); });
+      S.lvlSeen = levelFor(xpTotal());
+      Vitality.save(S);
+    } else {
+      checkMilestones();
+    }
+  });
 })();
 </script>
 </body>

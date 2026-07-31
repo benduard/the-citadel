@@ -50,6 +50,47 @@ templates.
 The code input has no fixed length on purpose. Supabase's OTP length is a
 project setting, and hardcoding six characters silently truncated a longer one.
 
+## Lifting is a ranked gym log, and the ladder is a published scale
+
+Decided 2026-07-30.
+
+Ruben asked for the LiftOff app rebuilt in the Lifting tile. It was, with
+original branding, original artwork and an original rank ladder: Wood, Stone,
+Bronze, Iron, Steel, Silver, Gold, Titan, Olympian, three divisions each, 0 to
+100 Lift Points inside a division.
+
+He was offered carrying the old sets forward and chose a clean start. A v1 blob
+is read once for the display unit and nothing else. Do not "restore" it later.
+
+The ratios behind every rank are an editorial calibration, not a measurement.
+That is why all nine per exercise are printed on the Ranks page beside what
+they mean in kilograms for him. If a future session tunes a ladder, the table
+has to stay honest about being a scale somebody chose. Never present a rank as
+a fact about his body.
+
+Four parts of his brief could not be built as asked and are answered on screen
+rather than quietly dropped:
+
+- AI generated plans. No key in the app, ever. Four plans are written by hand
+  and shipped with the tile. New ones get written in Claude Code and added.
+- Exercise animations. A sealed tile cannot fetch a video. Seven movement
+  patterns are drawn in SVG and labelled as patterns, not form demonstrations.
+- Muscle recovery. Estimated from logged volume alone, decayed over 72 hours
+  for large muscles and 48 for small. It says so in the card. It is not a
+  physiological reading and must never be dressed as one.
+- Haptics. navigator.vibrate does not exist in iOS Safari, so it is dead on his
+  phone. Wired for Android, and the Profile page says it plainly.
+
+Electric blue was his request and it conflicts with the board's design law.
+Resolved by scope, not by overruling either: blue is the game layer only, ranks
+and Lift Points and XP and the bodygraph. Anything judging how he is doing
+stays mint and amber, and nothing is ever red. A rank is a scoreboard,
+recovery is a person.
+
+Bodyweight lives in this tile for the rank maths and is deliberately NOT
+reported to the ledger. Body owns body_weight, one row per key per date, and
+two tiles writing it would overwrite each other every morning.
+
 ## Supabase sync was wired up now, not left for a later episode
 
 Decided 2026-07-29.

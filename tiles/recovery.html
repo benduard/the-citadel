@@ -1,0 +1,804 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Recovery</title>
+<!--
+  Vitality tile: recovery
+  The four numbers you read off a wearable each morning, typed in by hand.
+
+  store shape via Vitality.save/load:
+    { days: { "YYYY-MM-DD": {
+        sleepH,   // hours slept, decimal, e.g. 7.5
+        hrv,      // ms, integer
+        rhr,      // resting heart rate, bpm, integer
+        resp      // respiratory rate, breaths/min, decimal
+    } } }
+
+  Every field is optional on a given day. A morning with sleep and no HRV is a
+  real morning. A missing field is stored as absent, never as zero.
+
+  THIS TILE NEVER FETCHES. It is sealed: no network, no key, no wearable API.
+  Every number here was read off a watch or a ring and typed in.
+
+  reports one stream:
+    key   "sleep_hours"
+    kind  "duration"
+    value hours slept that night, the one number here that is raw,
+          self-explanatory, and true from the very first morning.
+
+  WHY THE READINESS BAND IS NOT THE REPORTED STREAM, and why it stays quiet for
+  a week: HRV and resting heart rate mean nothing in absolute terms. An HRV of
+  60 is strong for one person and poor for another. They only carry information
+  against that person's own baseline. So the band is computed from each metric's
+  deviation from the trailing 14 mornings, needs at least 7 of them before it
+  says anything at all, and always shows the inputs that produced it. Below that
+  threshold it says it does not know yet. A readiness score in the ledger would
+  be a population guess wearing a mint dot.
+
+  It is worded as an observation about your own numbers. Never instruction,
+  never diagnosis. Mint is good, amber is caution, and nothing here is red:
+  this is a person's body, not a failing build.
+-->
+<style>
+  :root{
+    --bg:#050505;
+    --card:rgba(9,13,12,0.72);
+    --border:rgba(148,163,158,0.16);
+    --text:#E7ECEA;
+    --muted:#94A39E;
+    --faint:#5C6B66;
+    --mint:#6EE7B7;
+    --amber:#FCD34D;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    min-height:100vh;
+    background:transparent;
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    accent-color:var(--mint);
+    padding-top:env(safe-area-inset-top);
+    padding-right:env(safe-area-inset-right);
+    padding-bottom:env(safe-area-inset-bottom);
+    padding-left:env(safe-area-inset-left);
+    overflow-x:hidden;
+  }
+  html[data-mode="page"] body{ background:var(--bg); }
+
+  ::selection{ background:rgba(110,231,183,.28); }
+
+  .eyebrow{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin:0;
+  }
+  .hero{ font-family:Georgia,"Times New Roman",serif; font-weight:400; line-height:1; }
+  .pill{
+    display:inline-flex; align-items:center;
+    border-radius:999px;
+    border:1px solid rgba(110,231,183,.35);
+    padding:4px 10px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px; letter-spacing:.08em;
+    color:var(--mint); white-space:nowrap;
+  }
+  .pill.quiet{ border-color:var(--border); color:var(--muted); }
+  .pill.warm{ border-color:rgba(252,211,77,.4); color:var(--amber); }
+
+  /* poster */
+  .posterView{
+    display:flex; flex-direction:column; justify-content:center;
+    gap:10px; height:100%; min-height:100vh; padding:20px;
+    opacity:0; animation:rise .6s ease forwards;
+  }
+  .posterHero{ display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; }
+  .posterHero .num{ font-size:46px; }
+  .posterHero .unit{ font-size:13px; color:var(--muted); }
+  .posterEmpty{ font-size:13px; color:var(--faint); }
+
+  /* page */
+  .pageView{ display:none; }
+  html[data-mode="page"] .pageView{
+    display:block; min-height:100vh;
+    padding:28px 20px calc(40px + env(safe-area-inset-bottom));
+    max-width:560px; margin:0 auto;
+  }
+  html[data-mode="page"] .posterView{ display:none; }
+
+  .pageHero{ display:flex; align-items:baseline; gap:12px; margin:10px 0 22px; flex-wrap:wrap; }
+  .pageHero .num{ font-size:56px; }
+  .pageHero .unit{ font-size:14px; color:var(--muted); }
+
+  .trouble{
+    margin:0 0 16px; padding:10px 14px;
+    border:1px solid rgba(252,211,77,.32); border-radius:12px;
+    background:rgba(252,211,77,.06); color:var(--amber); font-size:13px;
+  }
+
+  .block{
+    background:var(--card); border:1px solid var(--border);
+    border-radius:18px; padding:18px; margin-bottom:12px;
+  }
+  .blockTitle{ margin:0 0 12px; }
+
+  .field{ margin-bottom:10px; }
+  .fieldLabel{
+    display:block; margin-bottom:6px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
+  }
+  input[type="number"]{
+    width:100%; min-height:46px;
+    background:transparent; border:1px solid var(--border); border-radius:12px;
+    padding:10px 12px; color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif; font-size:15px;
+  }
+  input::placeholder{ color:var(--faint); }
+  input:disabled{ opacity:.4; }
+
+  .pair{ display:flex; gap:8px; }
+  .pair .field{ flex:1; }
+
+  .saveBtn{
+    width:100%; margin-top:4px;
+    background:var(--mint); color:#04120c;
+    border:0; border-radius:999px; min-height:50px;
+    font-size:15px; font-weight:600;
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    cursor:pointer; transition:transform .14s ease, opacity .2s ease;
+  }
+  .saveBtn:active{ transform:scale(.97); }
+  .saveBtn:disabled{ opacity:.45; cursor:not-allowed; }
+
+  /* readiness */
+  .bandRow{ display:flex; align-items:center; gap:11px; flex-wrap:wrap; }
+  .bandGlyph{ flex:none; display:flex; align-items:center; justify-content:center; color:var(--muted); }
+  .bandGlyph svg{ width:19px; height:19px; }
+  .bandGlyph.good{ color:var(--mint); }
+  .bandGlyph.warm{ color:var(--amber); }
+  .bandName{ font-size:30px; }
+  .bandName.good{ color:var(--mint); }
+  .bandName.warm{ color:var(--amber); }
+  .bandNote{ font-size:13px; color:var(--muted); }
+
+  .reads{ margin-top:14px; }
+  .readRow{
+    display:flex; align-items:baseline; justify-content:space-between;
+    gap:10px; padding:9px 0; border-top:1px solid var(--border);
+  }
+  .readRow:first-child{ border-top:0; }
+  .readName{ font-size:13px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .readRight{ display:flex; align-items:baseline; gap:9px; white-space:nowrap; }
+  .readVal{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:12px; color:var(--text); font-variant-numeric:tabular-nums;
+  }
+  .readBase{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10px; color:var(--faint); }
+  .readDelta{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10px; color:var(--muted); }
+  .readDelta.good{ color:var(--mint); }
+  .readDelta.warm{ color:var(--amber); }
+
+  .fine{ margin:14px 0 0; font-size:11.5px; line-height:1.5; color:var(--faint); }
+  .empty{ color:var(--faint); font-size:13px; }
+  .waiting{ font-size:13px; color:var(--muted); line-height:1.5; margin:0; }
+
+  /* 7 day sleep */
+  .chart{ display:flex; align-items:flex-end; gap:7px; height:78px; margin-top:14px; }
+  .bar{ flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; }
+  .barFill{ width:100%; border-radius:5px; background:rgba(110,231,183,.5); min-height:3px; }
+  .barFill.today{ background:var(--mint); }
+  .barFill.none{ background:rgba(148,163,158,.16); }
+  .chartDays{ display:flex; gap:7px; margin-top:7px; }
+  .chartDay{
+    flex:1; text-align:center;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:9.5px; letter-spacing:.06em; color:var(--faint);
+  }
+
+  @keyframes rise{
+    from{ opacity:0; transform:translateY(8px); }
+    to{ opacity:1; transform:translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce){
+    .posterView{ animation:none; opacity:1; }
+    .saveBtn{ transition:none; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="posterView" id="posterView">
+    <p class="eyebrow">Recovery</p>
+    <div class="posterHero" id="posterHero"></div>
+  </div>
+
+  <div class="pageView" id="pageView">
+    <p class="eyebrow">Recovery</p>
+    <div class="pageHero" id="pageHero"></div>
+
+    <p class="trouble" id="trouble" hidden></p>
+
+    <div class="block">
+      <p class="eyebrow blockTitle">Readiness</p>
+      <div id="readyWrap"></div>
+    </div>
+
+    <div class="block">
+      <p class="eyebrow blockTitle">This morning</p>
+      <div class="pair">
+        <div class="field">
+          <label class="fieldLabel" for="sleepH">Sleep, hours</label>
+          <input type="number" id="sleepH" inputmode="decimal" step="0.1" min="0" max="24" placeholder="7.5" disabled>
+        </div>
+        <div class="field">
+          <label class="fieldLabel" for="hrv">HRV, ms</label>
+          <input type="number" id="hrv" inputmode="numeric" step="1" min="0" placeholder="58" disabled>
+        </div>
+      </div>
+      <div class="pair">
+        <div class="field">
+          <label class="fieldLabel" for="rhr">Resting HR, bpm</label>
+          <input type="number" id="rhr" inputmode="numeric" step="1" min="0" placeholder="52" disabled>
+        </div>
+        <div class="field">
+          <label class="fieldLabel" for="resp">Breaths, per min</label>
+          <input type="number" id="resp" inputmode="decimal" step="0.1" min="0" placeholder="14.2" disabled>
+        </div>
+      </div>
+      <button class="saveBtn" id="saveBtn" type="button" disabled>Save this morning</button>
+      <p class="fine">Leave anything you did not read blank. A blank field is stored as
+      nothing, not as a zero.</p>
+    </div>
+
+    <div class="block">
+      <p class="eyebrow blockTitle">Sleep, last 7 days</p>
+      <div id="chartWrap"></div>
+    </div>
+
+    <p class="fine" id="sourceNote">These four numbers are read off your wearable each morning and typed in
+    here by hand. This tile is sealed: it holds no key and cannot reach a watch,
+    a ring, or any API, so nothing appears here that you did not enter.</p>
+  </div>
+
+<script>
+// The Vitality bridge. postMessage only: a sealed tile has no storage of its
+// own, so save/load/report all travel to the host and back.
+(function(){
+  'use strict';
+
+  var seq = 0;
+  var pending = {};
+  var writeErrorHandlers = [];
+
+  window.addEventListener('message', function (e) {
+    var msg = e.data;
+    if (!msg || msg.source !== 'vitality-host') return;
+    if (msg.type === 'load:result') {
+      var p = pending[msg.id];
+      if (p) { delete pending[msg.id]; p.resolve({ ok: true, data: msg.data }); }
+      return;
+    }
+    if (msg.type === 'save:error' || msg.type === 'report:error') {
+      writeErrorHandlers.forEach(function (fn) { fn(msg.type, msg.reason); });
+    }
+  });
+
+  function post(type, payload) {
+    var msg = { source: 'vitality-tile', type: type };
+    for (var k in payload) { if (Object.prototype.hasOwnProperty.call(payload, k)) msg[k] = payload[k]; }
+    parent.postMessage(msg, '*');
+    return msg;
+  }
+
+  window.Vitality = {
+    save: function (data) { post('save', { data: data }); },
+
+    /**
+     * Resolves { ok, data }. ok:false means the host never answered, NOT that
+     * the slot is empty. Treating an unanswered load as "you have nothing"
+     * lets the next save write that emptiness over real data.
+     */
+    load: function () {
+      var id = 'l' + (++seq);
+      return new Promise(function (resolve) {
+        pending[id] = { resolve: resolve };
+        post('load', { id: id });
+        var tries = 0;
+        var retry = setInterval(function () {
+          if (!pending[id]) { clearInterval(retry); return; }
+          if (++tries > 12) {
+            clearInterval(retry);
+            delete pending[id];
+            resolve({ ok: false, data: null });
+            return;
+          }
+          post('load', { id: id });
+        }, 800);
+      });
+    },
+
+    report: function (stream) { post('report', { stream: stream }); },
+    onWriteError: function (fn) { writeErrorHandlers.push(fn); }
+  };
+})();
+</script>
+
+<script>
+(function(){
+  'use strict';
+
+  var mode = location.hash === '#page' ? 'page' : 'grid';
+  document.documentElement.setAttribute('data-mode', mode);
+
+  var state = { days: {} };
+  var loaded = false;
+  var trouble = '';
+
+  // dir is the direction that reads as recovered FOR THAT METRIC. Higher HRV
+  // and more sleep are the good side, a lower resting heart rate and a lower
+  // respiratory rate are the good side. Nothing here is compared to anyone
+  // else's numbers, only to this person's own trailing baseline.
+  var METRICS = [
+    { k: 'sleepH', name: 'Sleep',      unit: 'h',      dir: 'up',   dec: 1 },
+    { k: 'hrv',    name: 'HRV',        unit: 'ms',     dir: 'up',   dec: 0 },
+    { k: 'rhr',    name: 'Resting HR', unit: 'bpm',    dir: 'down', dec: 0 },
+    { k: 'resp',   name: 'Breaths',    unit: 'br/min', dir: 'down', dec: 1 }
+  ];
+
+  var BASELINE_WINDOW = 14;   // look back this many mornings
+  var MIN_BASELINE = 7;       // and say nothing until this many of them exist
+  var BAND_EDGE = 0.5;        // half a spread away from your own usual
+
+  var draft = { sleepH: '', hrv: '', rhr: '', resp: '' };
+
+  function pad(n){ n = String(n); return n.length < 2 ? '0' + n : n; }
+  function dayKey(d){
+    // Local getters, never toISOString: that is UTC and drifts a day.
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+  function today(){ return dayKey(new Date()); }
+  function daysAgo(n){ var d = new Date(); d.setDate(d.getDate() - n); return d; }
+
+  function num(v){
+    if (v === null || v === undefined || v === '') return null;
+    var n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+  function fmt(v, dec){
+    if (v == null || !isFinite(v)) return '';
+    var p = Math.pow(10, dec);
+    return String(Math.round(v * p) / p);
+  }
+
+  function entryOn(key){
+    var e = state.days[key];
+    return (e && typeof e === 'object') ? e : null;
+  }
+  function valueOn(key, k){
+    var e = entryOn(key);
+    return e ? num(e[k]) : null;
+  }
+  function todaysEntry(){ return entryOn(today()); }
+
+  function hasAnything(e){
+    if (!e) return false;
+    for (var i = 0; i < METRICS.length; i++) {
+      if (num(e[METRICS[i].k]) != null) return true;
+    }
+    return false;
+  }
+
+  function morningsLogged(){
+    var n = 0;
+    Object.keys(state.days).forEach(function (k) {
+      if (hasAnything(entryOn(k))) n++;
+    });
+    return n;
+  }
+
+  function persist(){
+    if (!loaded) return;
+    if (window.Vitality) Vitality.save(state);
+  }
+
+  function report(){
+    if (!loaded || !window.Vitality) return;
+    var h = valueOn(today(), 'sleepH');
+    // No sleep figure means no stream. An unlogged night is not a zero night.
+    if (h == null) return;
+    Vitality.report({
+      key: 'sleep_hours',
+      label: 'Sleep',
+      value: Math.round(h * 10) / 10,
+      date: today(),
+      kind: 'duration',
+      goalDirection: 'up'
+    });
+  }
+
+  // baseline and the readiness band
+  function baselineFor(k){
+    var vals = [];
+    for (var i = 1; i <= BASELINE_WINDOW; i++) {
+      var v = valueOn(dayKey(daysAgo(i)), k);
+      if (v != null) vals.push(v);
+    }
+    // Under seven mornings there is no baseline, only a rumour.
+    if (vals.length < MIN_BASELINE) return null;
+    var sum = 0, i2;
+    for (i2 = 0; i2 < vals.length; i2++) sum += vals[i2];
+    var mean = sum / vals.length;
+    var ss = 0;
+    for (i2 = 0; i2 < vals.length; i2++) ss += (vals[i2] - mean) * (vals[i2] - mean);
+    var sd = Math.sqrt(ss / vals.length);
+    return { mean: mean, sd: sd, n: vals.length };
+  }
+
+  function metricRead(m){
+    var v = valueOn(today(), m.k);
+    if (v == null) return null;
+    var b = baselineFor(m.k);
+    if (!b) return null;
+    // A perfectly flat fortnight has no spread to measure against, and dividing
+    // by it would turn a rounding wobble into a verdict. Floor the spread at a
+    // small share of this person's own mean.
+    var spread = Math.max(b.sd, Math.abs(b.mean) * 0.04, 0.000001);
+    var z = (v - b.mean) / spread;
+    if (m.dir === 'down') z = -z;
+    return { m: m, value: v, mean: b.mean, n: b.n, z: z, delta: v - b.mean };
+  }
+
+  function readiness(){
+    var reads = [];
+    METRICS.forEach(function (m) {
+      var r = metricRead(m);
+      if (r) reads.push(r);
+    });
+    if (!reads.length) return null;
+    var z = 0;
+    reads.forEach(function (r) { z += r.z; });
+    z = z / reads.length;
+    var band = z >= BAND_EDGE ? 'High' : (z <= -BAND_EDGE ? 'Low' : 'Moderate');
+    return { band: band, z: z, reads: reads };
+  }
+
+  // glyphs, drawn not typed
+  function icoUp(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 3h6v6"/></svg>';
+  }
+  function icoLevel(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M3 12h18"/></svg>';
+  }
+  function icoDown(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M3 7l6 6 4-4 8 8"/><path d="M15 21h6v-6"/></svg>';
+  }
+
+  // render
+  function sleepHeroInto(el, emptyText){
+    if (!el) return;
+    el.innerHTML = '';
+    var h = valueOn(today(), 'sleepH');
+    if (h == null) {
+      var e = document.createElement('span');
+      e.className = 'posterEmpty';
+      e.textContent = emptyText;
+      el.appendChild(e);
+      return;
+    }
+    var numEl = document.createElement('span');
+    numEl.className = 'num hero';
+    numEl.textContent = fmt(h, 1);
+    var unit = document.createElement('span');
+    unit.className = 'unit';
+    unit.textContent = 'hours slept';
+    el.appendChild(numEl);
+    el.appendChild(unit);
+  }
+
+  function renderPoster(){
+    sleepHeroInto(document.getElementById('posterHero'), 'no morning logged');
+  }
+
+  function renderPageHero(){
+    var el = document.getElementById('pageHero');
+    sleepHeroInto(el, 'no morning logged yet');
+    if (!el) return;
+    var h = valueOn(today(), 'sleepH');
+    if (h == null) return;
+    var b = baselineFor('sleepH');
+    var pill = document.createElement('span');
+    if (b) {
+      pill.className = 'pill quiet';
+      pill.textContent = 'usual ' + fmt(b.mean, 1) + 'h';
+    } else {
+      pill.className = 'pill';
+      pill.textContent = 'last night';
+    }
+    el.appendChild(pill);
+  }
+
+  function deltaWords(r){
+    var d = Math.abs(r.delta);
+    var rounded = Math.round(d * Math.pow(10, r.m.dec)) / Math.pow(10, r.m.dec);
+    if (rounded === 0) return 'at your usual';
+    var side = r.delta > 0 ? 'above' : 'below';
+    return fmt(rounded, r.m.dec) + ' ' + side + ' usual';
+  }
+
+  function renderReadiness(){
+    var wrap = document.getElementById('readyWrap');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+
+    var t = todaysEntry();
+    if (!hasAnything(t)) {
+      var p0 = document.createElement('p');
+      p0.className = 'waiting';
+      p0.textContent = 'Nothing logged this morning yet. Readiness reads today against your own recent mornings, so it needs today first.';
+      wrap.appendChild(p0);
+      return;
+    }
+
+    var r = readiness();
+    if (!r) {
+      var have = morningsLogged();
+      var p = document.createElement('p');
+      p.className = 'waiting';
+      p.textContent = 'This needs about a week of mornings before it means anything. ' +
+        'HRV and resting heart rate carry no information on their own, only against ' +
+        'your own baseline, so there is nothing honest to show yet.';
+      wrap.appendChild(p);
+
+      var count = document.createElement('span');
+      count.className = 'pill quiet';
+      count.style.marginTop = '12px';
+      count.textContent = have + (have === 1 ? ' morning logged' : ' mornings logged') + ' of ' + MIN_BASELINE;
+      wrap.appendChild(count);
+      return;
+    }
+
+    var tone = r.band === 'High' ? 'good' : (r.band === 'Low' ? 'warm' : '');
+    var glyphHtml = r.band === 'High' ? icoUp() : (r.band === 'Low' ? icoDown() : icoLevel());
+    var note = r.band === 'High'
+      ? 'above your usual range this morning'
+      : (r.band === 'Low' ? 'below your usual range this morning' : 'in line with your usual range');
+
+    var row = document.createElement('div');
+    row.className = 'bandRow';
+
+    var g = document.createElement('span');
+    g.className = 'bandGlyph' + (tone ? ' ' + tone : '');
+    g.innerHTML = glyphHtml;
+
+    var name = document.createElement('span');
+    name.className = 'bandName hero' + (tone ? ' ' + tone : '');
+    name.textContent = r.band;
+
+    var noteEl = document.createElement('span');
+    noteEl.className = 'bandNote';
+    noteEl.textContent = note;
+
+    row.appendChild(g);
+    row.appendChild(name);
+    row.appendChild(noteEl);
+    wrap.appendChild(row);
+
+    // The inputs that produced the band, always. It is never a box you have to
+    // take on trust.
+    var reads = document.createElement('div');
+    reads.className = 'reads';
+    r.reads.forEach(function (rd) {
+      var line = document.createElement('div');
+      line.className = 'readRow';
+
+      var nm = document.createElement('div');
+      nm.className = 'readName';
+      nm.textContent = rd.m.name;
+
+      var right = document.createElement('div');
+      right.className = 'readRight';
+
+      var val = document.createElement('span');
+      val.className = 'readVal';
+      val.textContent = fmt(rd.value, rd.m.dec) + ' ' + rd.m.unit;
+
+      var base = document.createElement('span');
+      base.className = 'readBase';
+      base.textContent = 'usual ' + fmt(rd.mean, rd.m.dec);
+
+      var del = document.createElement('span');
+      del.className = 'readDelta' + (rd.z >= BAND_EDGE ? ' good' : (rd.z <= -BAND_EDGE ? ' warm' : ''));
+      del.textContent = deltaWords(rd);
+
+      right.appendChild(val);
+      right.appendChild(base);
+      right.appendChild(del);
+      line.appendChild(nm);
+      line.appendChild(right);
+      reads.appendChild(line);
+    });
+    wrap.appendChild(reads);
+
+    var fine = document.createElement('p');
+    fine.className = 'fine';
+    fine.textContent = 'Read against your own last ' + BASELINE_WINDOW + ' mornings, never a population norm. ' +
+      'An observation about your numbers, nothing more. It is not advice and not a diagnosis.';
+    wrap.appendChild(fine);
+  }
+
+  function renderChart(){
+    var wrap = document.getElementById('chartWrap');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+
+    var days = [];
+    var max = 0;
+    for (var i = 6; i >= 0; i--) {
+      var d = daysAgo(i);
+      var key = dayKey(d);
+      var v = valueOn(key, 'sleepH');
+      if (v != null && v > max) max = v;
+      days.push({ key: key, h: v, date: d });
+    }
+
+    var any = days.some(function (d) { return d.h != null; });
+    if (!any) {
+      var none = document.createElement('p');
+      none.className = 'empty';
+      none.textContent = 'no sleep logged in the last 7 days';
+      wrap.appendChild(none);
+      return;
+    }
+
+    // A sane ceiling so a steady 7 to 8 hour week still reads as a shape and
+    // not as seven full bars.
+    var ceil = Math.max(9, max);
+
+    var chart = document.createElement('div');
+    chart.className = 'chart';
+    var labels = document.createElement('div');
+    labels.className = 'chartDays';
+    var t = today();
+
+    days.forEach(function (d) {
+      var bar = document.createElement('div');
+      bar.className = 'bar';
+      var fill = document.createElement('div');
+      // A morning with no entry gets a flat trace, never a zero bar. Zero hours
+      // slept is a real and alarming number, and drawing "did not log" that way
+      // would be inventing one.
+      fill.className = 'barFill' + (d.key === t ? ' today' : '') + (d.h == null ? ' none' : '');
+      fill.style.height = d.h == null ? '3px' : Math.max(4, (d.h / ceil) * 78) + 'px';
+      bar.appendChild(fill);
+      chart.appendChild(bar);
+
+      var lab = document.createElement('div');
+      lab.className = 'chartDay';
+      lab.textContent = ['S', 'M', 'T', 'W', 'T', 'F', 'S'][d.date.getDay()];
+      labels.appendChild(lab);
+    });
+
+    wrap.appendChild(chart);
+    wrap.appendChild(labels);
+  }
+
+  function renderControls(){
+    METRICS.forEach(function (m) {
+      var el = document.getElementById(m.k);
+      if (!el) return;
+      el.disabled = !loaded;
+      if (document.activeElement !== el) el.value = draft[m.k];
+    });
+
+    var save = document.getElementById('saveBtn');
+    if (save) {
+      save.disabled = !loaded;
+      save.textContent = hasAnything(todaysEntry()) ? 'Update this morning' : 'Save this morning';
+    }
+
+    var tr = document.getElementById('trouble');
+    if (tr) { tr.textContent = trouble; tr.hidden = !trouble; }
+  }
+
+  function renderAll(){
+    renderPoster();
+    renderPageHero();
+    renderControls();
+    renderReadiness();
+    renderChart();
+  }
+
+  // actions
+  function save(){
+    if (!loaded) return;
+    var entry = {};
+    var any = false;
+    METRICS.forEach(function (m) {
+      var el = document.getElementById(m.k);
+      var v = el ? num(el.value) : null;
+      if (v == null || v < 0) return;
+      entry[m.k] = m.dec === 0 ? Math.round(v) : Math.round(v * 10) / 10;
+      any = true;
+    });
+
+    // Silence beats a wrong row. An empty form writes nothing and erases
+    // nothing.
+    if (!any) return;
+
+    state.days[today()] = entry;
+    draft = { sleepH: '', hrv: '', rhr: '', resp: '' };
+    METRICS.forEach(function (m) {
+      draft[m.k] = entry[m.k] == null ? '' : String(entry[m.k]);
+    });
+
+    persist();
+    report();
+    renderAll();
+  }
+
+  function loadDraftFromToday(){
+    var e = todaysEntry();
+    if (!e) return;
+    METRICS.forEach(function (m) {
+      var v = num(e[m.k]);
+      draft[m.k] = v == null ? '' : String(v);
+    });
+  }
+
+  function wire(){
+    METRICS.forEach(function (m) {
+      var el = document.getElementById(m.k);
+      if (!el) return;
+      el.addEventListener('input', function () { draft[m.k] = el.value; });
+      el.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') save();
+      });
+    });
+    var btn = document.getElementById('saveBtn');
+    if (btn) btn.addEventListener('click', save);
+  }
+
+  function boot(){
+    wire();
+    if (!window.Vitality) { loaded = true; renderAll(); return; }
+
+    Vitality.onWriteError(function () {
+      trouble = 'Not saved. Check your connection.';
+      renderAll();
+    });
+
+    Vitality.load().then(function (res) {
+      if (res && res.ok) {
+        loaded = true;
+        var data = res.data;
+        if (data && data.days && typeof data.days === 'object') state.days = data.days;
+        loadDraftFromToday();
+      } else {
+        // The vault never answered. Staying read-only is the only safe move:
+        // an empty form saved over real mornings would wipe them.
+        trouble = 'Could not reach your vault. Nothing was changed, and this stays read only until it answers.';
+      }
+      renderAll();
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>
+</body>
+</html>

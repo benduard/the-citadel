@@ -1,0 +1,971 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Progress</title>
+<!--
+  Vitality tile: progress
+  Quests, XP, levels and streaks. Everything here is earned by hand, in this
+  tile. A sealed tile can only read its own slot, so it cannot see workouts,
+  check ins or the ledger, and it never awards XP from them.
+
+  store shape via Vitality.save/load:
+    {
+      quests:   [ { id, title, target, done, createdAt, doneAt } ],
+                  // target = how many ticks finish the quest, 1 or more.
+                  // target 10 or more is shown as a boss.
+      progress: { "<questId>": n },   // ticks logged against that quest
+      log:      { "YYYY-MM-DD": n },  // ticks made that local day, drives the streak
+      xp:       n,                    // total XP earned, never goes down
+      retired:  n                     // finished quests that were later removed.
+                                      // Kept so deleting a finished quest does not
+                                      // rewrite history in the ledger.
+    }
+
+  XP, stated in the tile so nothing is hidden:
+    one tick            = 10 XP
+    finishing a quest   = 25 XP plus 5 XP per target tick
+    level L starts at     50 * L * (L - 1) XP, so each level costs 100 more
+                          than the one before it
+
+  reports one stream:
+    key   "quests_done"
+    kind  "count"
+    value quests finished, including finished ones that were removed
+-->
+<style>
+  :root{
+    --bg:#050505;
+    --card:rgba(9,13,12,0.72);
+    --border:rgba(148,163,158,0.16);
+    --text:#E7ECEA;
+    --muted:#94A39E;
+    --faint:#5C6B66;
+    --mint:#6EE7B7;
+    --amber:#FCD34D;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    min-height:100vh;
+    background:transparent;
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    accent-color:var(--mint);
+    padding-top:env(safe-area-inset-top);
+    padding-right:env(safe-area-inset-right);
+    padding-bottom:env(safe-area-inset-bottom);
+    padding-left:env(safe-area-inset-left);
+    overflow-x:hidden;
+  }
+  html[data-mode="page"] body{ background:var(--bg); }
+
+  ::selection{ background:rgba(110,231,183,.28); }
+
+  .eyebrow{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin:0;
+  }
+  .hero{
+    font-family:Georgia,"Times New Roman",serif;
+    font-weight:400;
+    line-height:1;
+  }
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+    border-radius:999px;
+    border:1px solid rgba(110,231,183,.35);
+    padding:4px 10px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px;
+    letter-spacing:.08em;
+    color:var(--mint);
+    white-space:nowrap;
+  }
+  .pill.quiet{ border-color:var(--border); color:var(--muted); }
+  .pill svg{ width:10px; height:10px; flex:0 0 auto; }
+
+  /* poster */
+  .posterView{
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    gap:10px;
+    height:100%;
+    min-height:100vh;
+    padding:20px;
+    opacity:0;
+    animation:rise .6s ease forwards;
+  }
+  .posterHero{ display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; }
+  .posterHero .num{ font-size:46px; }
+  .posterHero .unit{ font-size:13px; color:var(--muted); }
+  .posterPills{ display:flex; gap:6px; flex-wrap:wrap; }
+  .posterEmpty{ font-size:13px; color:var(--faint); }
+
+  /* page */
+  .pageView{ display:none; }
+  html[data-mode="page"] .pageView{
+    display:block;
+    min-height:100vh;
+    padding:28px 20px calc(40px + env(safe-area-inset-bottom));
+    max-width:560px;
+    margin:0 auto;
+  }
+  html[data-mode="page"] .posterView{ display:none; }
+
+  .pageHero{ display:flex; align-items:baseline; gap:12px; margin:10px 0 22px; flex-wrap:wrap; }
+  .pageHero .num{ font-size:56px; }
+  .pageHero .unit{ font-size:14px; color:var(--muted); }
+
+  .trouble{
+    margin:0 0 16px;
+    padding:10px 14px;
+    border:1px solid rgba(252,211,77,.32);
+    border-radius:12px;
+    background:rgba(252,211,77,.06);
+    color:var(--amber);
+    font-size:13px;
+  }
+
+  .block{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:18px;
+    padding:18px;
+    margin-bottom:12px;
+  }
+
+  .rowBetween{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+  .rowLabel{ font-size:14px; }
+  .mono{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:12px;
+    color:var(--mint);
+    font-variant-numeric:tabular-nums;
+  }
+  .mono.quiet{ color:var(--muted); }
+  .hint{ margin:8px 0 0; font-size:12px; color:var(--faint); }
+
+  .track{
+    height:6px;
+    border-radius:999px;
+    background:rgba(148,163,158,.16);
+    overflow:hidden;
+    margin-top:10px;
+  }
+  .track.thin{ height:4px; margin-top:8px; }
+  .fill{
+    height:100%;
+    background:var(--mint);
+    transform:scaleX(0);
+    transform-origin:left center;
+    transition:transform .35s ease;
+  }
+
+  /* stats */
+  .stats{ display:flex; gap:14px; }
+  .stat{ flex:1; }
+  .statNum{
+    font-family:Georgia,"Times New Roman",serif;
+    font-weight:400;
+    font-size:30px;
+    line-height:1.1;
+    margin-top:6px;
+    display:flex;
+    align-items:baseline;
+    gap:6px;
+  }
+  .statUnit{ font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif; font-size:12px; color:var(--muted); }
+  .statNum.warm{ color:var(--amber); }
+
+  /* add row */
+  .addRow{ display:flex; gap:8px; margin-bottom:8px; }
+  .addRow input{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:12px 14px;
+    color:var(--text);
+    font-size:14px;
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    min-height:44px;
+  }
+  .addRow input#newTitle{ flex:1; min-width:0; }
+  .addRow input#newTarget{ width:74px; text-align:center; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .addRow input::placeholder{ color:var(--faint); }
+  .addBtn{
+    background:var(--mint);
+    color:#04120c;
+    border:0;
+    border-radius:999px;
+    padding:0 20px;
+    font-size:14px;
+    font-weight:600;
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    cursor:pointer;
+    min-height:44px;
+    transition:transform .15s ease, opacity .2s ease;
+  }
+  .addBtn:active{ transform:scale(.97); }
+  .addRow input:disabled, .addBtn:disabled{ opacity:.45; cursor:not-allowed; }
+
+  .section{ margin:24px 0; }
+  .sectionTitle{ margin:0 0 12px; }
+  .list{ display:flex; flex-direction:column; gap:8px; }
+
+  .quest{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:16px;
+    padding:12px 14px;
+    opacity:0;
+    animation:rise .5s ease forwards;
+  }
+  .qMain{ flex:1; min-width:0; }
+  .qHead{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .qTitle{
+    font-size:15px;
+    font-weight:500;
+    letter-spacing:-0.01em;
+    overflow-wrap:anywhere;
+  }
+  .quest.done .qTitle{ color:var(--muted); text-decoration:line-through; }
+  .qMeta{
+    margin-top:6px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10.5px;
+    letter-spacing:.06em;
+    color:var(--faint);
+  }
+
+  .tick{
+    flex:0 0 auto;
+    width:44px; height:44px;
+    border-radius:999px;
+    border:1px solid rgba(110,231,183,.45);
+    background:transparent;
+    color:var(--mint);
+    cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    transition:transform .15s ease, background .2s ease, border-color .2s ease;
+  }
+  .tick:active{ transform:scale(.9); }
+  .tick:hover{ background:rgba(110,231,183,.12); }
+  .tick:disabled{ opacity:.4; cursor:not-allowed; }
+  .tick svg{ width:18px; height:18px; }
+
+  .doneMark{
+    flex:0 0 auto;
+    width:44px; height:44px;
+    border-radius:999px;
+    background:var(--mint);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .doneMark svg{ width:16px; height:16px; }
+
+  .removeBtn{
+    flex:0 0 auto;
+    width:38px; height:38px;
+    background:transparent;
+    border:0;
+    color:var(--faint);
+    cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    transition:transform .15s ease, color .2s ease;
+  }
+  .removeBtn:hover{ color:var(--muted); }
+  .removeBtn:active{ transform:scale(.9); }
+  .removeBtn:disabled{ opacity:.4; cursor:not-allowed; }
+  .removeBtn svg{ width:13px; height:13px; }
+
+  .empty{ color:var(--faint); font-size:13px; padding:8px 2px; }
+
+  .rules{ margin-top:24px; }
+  .rules p{ margin:0 0 10px; font-size:12.5px; line-height:1.55; color:var(--muted); }
+  .rules p:last-child{ margin-bottom:0; color:var(--faint); }
+
+  @keyframes rise{
+    from{ opacity:0; transform:translateY(8px); }
+    to{ opacity:1; transform:translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .posterView, .quest{ animation:none; opacity:1; }
+    .fill, .tick, .addBtn, .removeBtn{ transition:none; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="posterView" id="posterView">
+    <p class="eyebrow">Progress</p>
+    <div class="posterHero" id="posterHero"></div>
+    <div class="posterPills" id="posterPills"></div>
+  </div>
+
+  <div class="pageView" id="pageView">
+    <p class="eyebrow">Progress</p>
+    <div class="pageHero" id="pageHero"></div>
+
+    <p class="trouble" id="trouble" hidden></p>
+
+    <div class="block">
+      <div class="rowBetween">
+        <span class="rowLabel" id="levelLabel">Level</span>
+        <span class="mono" id="levelXp">0 XP</span>
+      </div>
+      <div class="track"><div class="fill" id="levelFill"></div></div>
+      <p class="hint" id="levelHint"></p>
+    </div>
+
+    <div class="block">
+      <div class="stats">
+        <div class="stat">
+          <p class="eyebrow">Streak</p>
+          <div class="statNum" id="streakNum"></div>
+        </div>
+        <div class="stat">
+          <p class="eyebrow">Best</p>
+          <div class="statNum" id="bestNum"></div>
+        </div>
+      </div>
+      <p class="hint" id="streakHint"></p>
+    </div>
+
+    <!-- Everything starts disabled and only wakes once the vault has answered.
+         Live during that gap, a tick would be built on a state this tile only
+         guessed at, and the next save would write that guess over real data. -->
+    <div class="section">
+      <p class="eyebrow sectionTitle">New quest</p>
+      <div class="addRow">
+        <input id="newTitle" type="text" placeholder="What are you chasing" maxlength="80" disabled>
+        <input id="newTarget" type="number" min="1" max="999" step="1" value="1" aria-label="Ticks to finish" disabled>
+        <button class="addBtn" id="addBtn" type="button" disabled>Add</button>
+      </div>
+      <p class="hint">Ticks to finish. Set 10 or more and it counts as a boss.</p>
+    </div>
+
+    <div class="section">
+      <p class="eyebrow sectionTitle">Active</p>
+      <div class="list" id="activeList"></div>
+    </div>
+
+    <div class="section">
+      <p class="eyebrow sectionTitle">Finished</p>
+      <div class="list" id="doneList"></div>
+    </div>
+
+    <div class="block rules">
+      <p class="eyebrow">How XP works</p>
+      <p>Every tick is 10 XP. Finishing a quest pays 25 XP plus 5 XP for each tick it asked for, so a bigger target is worth more.</p>
+      <p>Level 1 starts at 0 XP. Each level costs 100 XP more than the one before: 100 to reach level 2, another 200 to reach level 3, and on from there.</p>
+      <p>A streak is a day you ticked at least once. Miss a whole day and it starts again from your next tick. Your XP and your best streak stay exactly where they were.</p>
+      <p>Ticks do not undo. Removing a quest keeps the XP it earned, and a quest you already finished still counts in your finished total.</p>
+      <p>XP comes only from quests you tick here. This tile is sealed, it cannot read your other tiles or your ledger, so nothing is ever awarded automatically.</p>
+    </div>
+  </div>
+
+<script>
+// The Vitality bridge. postMessage only: a sealed tile has no storage of its
+// own, so save/load/report all travel to the host and back.
+(function(){
+  'use strict';
+
+  var seq = 0;
+  var pending = {};
+  var writeErrorHandlers = [];
+
+  window.addEventListener('message', function (e) {
+    var msg = e.data;
+    if (!msg || msg.source !== 'vitality-host') return;
+    if (msg.type === 'load:result') {
+      var p = pending[msg.id];
+      if (p) { delete pending[msg.id]; p.resolve({ ok: true, data: msg.data }); }
+      return;
+    }
+    // The host says a write did not land. Never let the tile go on showing it
+    // as saved: hand it to whoever is listening so it can say so.
+    if (msg.type === 'save:error' || msg.type === 'report:error') {
+      writeErrorHandlers.forEach(function (fn) { fn(msg.type, msg.reason); });
+    }
+  });
+
+  function post(type, payload) {
+    var msg = { source: 'vitality-tile', type: type };
+    for (var k in payload) { if (Object.prototype.hasOwnProperty.call(payload, k)) msg[k] = payload[k]; }
+    parent.postMessage(msg, '*');
+    return msg;
+  }
+
+  window.Vitality = {
+    save: function (data) { post('save', { data: data }); },
+
+    /**
+     * Resolves { ok, data }. ok:false means the host never answered - NOT that
+     * the slot is empty. The difference is the whole ballgame: treating an
+     * unanswered load as "you have nothing" lets the next save write that
+     * emptiness over real data. A tile must refuse to save until it knows.
+     */
+    load: function () {
+      var id = 'l' + (++seq);
+      return new Promise(function (resolve) {
+        pending[id] = { resolve: resolve };
+        post('load', { id: id });
+        // The host may not have registered this frame on the very first ask.
+        // Keep asking: a slow vault (a cold remote read) is not an empty one.
+        var tries = 0;
+        var retry = setInterval(function () {
+          if (!pending[id]) { clearInterval(retry); return; }
+          if (++tries > 12) { // ~10s, then admit we do not know
+            clearInterval(retry);
+            delete pending[id];
+            resolve({ ok: false, data: null });
+            return;
+          }
+          post('load', { id: id });
+        }, 800);
+      });
+    },
+
+    report: function (stream) { post('report', { stream: stream }); },
+    onWriteError: function (fn) { writeErrorHandlers.push(fn); }
+  };
+})();
+</script>
+
+<script>
+(function(){
+  'use strict';
+
+  var mode = location.hash === '#page' ? 'page' : 'grid';
+  document.documentElement.setAttribute('data-mode', mode);
+
+  var XP_PER_TICK = 10;
+  var FINISH_BASE = 25;
+  var FINISH_PER_TARGET = 5;
+  var BOSS_AT = 10;
+
+  var state = { quests: [], progress: {}, log: {}, xp: 0, retired: 0 };
+  // Until the vault has actually answered, this tile does not know what it
+  // holds, so it must not write. Saving an assumed-empty board would delete
+  // every quest and every point of XP that is really there.
+  var loaded = false;
+  var trouble = '';
+
+  // ── dates ─────────────────────────────────────────────────
+  function pad(n){ n = String(n); return n.length < 2 ? '0' + n : n; }
+  function dayKey(d){
+    // Local getters, never toISOString: that is UTC and drifts a day.
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+  function today(){ return dayKey(new Date()); }
+  function fromKey(k){
+    var p = String(k).split('-');
+    return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+  }
+
+  function uid(){
+    return 'q_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+  }
+
+  function fmt(n){
+    var s = String(Math.round(n)), out = '', c = 0;
+    for (var i = s.length - 1; i >= 0; i--) {
+      out = s.charAt(i) + out;
+      if (++c % 3 === 0 && i > 0) out = ',' + out;
+    }
+    return out;
+  }
+
+  // ── the rules, in one place ───────────────────────────────
+  function xpForLevel(L){ return 50 * L * (L - 1); }
+
+  function levelInfo(){
+    var xp = state.xp;
+    var L = 1;
+    while (L < 400 && xpForLevel(L + 1) <= xp) L++;
+    var base = xpForLevel(L);
+    var next = xpForLevel(L + 1);
+    return { level: L, into: xp - base, need: next - base, left: next - xp };
+  }
+
+  function finishBonus(target){ return FINISH_BASE + FINISH_PER_TARGET * target; }
+  function questXp(q){ return XP_PER_TICK * q.target + finishBonus(q.target); }
+
+  function ticksOn(key){ return Number(state.log[key]) > 0; }
+
+  function streaks(){
+    var keys = [];
+    for (var k in state.log) {
+      if (Object.prototype.hasOwnProperty.call(state.log, k) && Number(state.log[k]) > 0) keys.push(k);
+    }
+    if (!keys.length) return { current: 0, best: 0 };
+    keys.sort();
+
+    var best = 1, run = 1;
+    for (var i = 1; i < keys.length; i++) {
+      var prev = fromKey(keys[i - 1]);
+      prev.setDate(prev.getDate() + 1);
+      run = dayKey(prev) === keys[i] ? run + 1 : 1;
+      if (run > best) best = run;
+    }
+
+    // Count back from today. A day with no tick yet is not a broken streak
+    // until it is over, so start from yesterday when today is still blank.
+    var d = new Date();
+    if (!ticksOn(dayKey(d))) d.setDate(d.getDate() - 1);
+    var cur = 0;
+    while (cur < 4000 && ticksOn(dayKey(d))) { cur++; d.setDate(d.getDate() - 1); }
+
+    return { current: cur, best: Math.max(best, cur) };
+  }
+
+  function progressOf(q){ return Number(state.progress[q.id]) || 0; }
+  function findQuest(id){
+    for (var i = 0; i < state.quests.length; i++) { if (state.quests[i].id === id) return state.quests[i]; }
+    return null;
+  }
+  function doneQuests(){ return state.quests.filter(function (q) { return q.done; }); }
+  function activeQuests(){ return state.quests.filter(function (q) { return !q.done; }); }
+  // Finished quests that were removed still count. Deleting a row on your own
+  // board should not quietly un-finish something you actually finished.
+  function doneCount(){ return doneQuests().length + (Number(state.retired) || 0); }
+
+  function everStarted(){
+    if (state.quests.length) return true;
+    if (Number(state.xp) > 0) return true;
+    for (var k in state.log) { if (Object.prototype.hasOwnProperty.call(state.log, k)) return true; }
+    return false;
+  }
+
+  // ── vault ─────────────────────────────────────────────────
+  function persist(){
+    if (!loaded) return;
+    if (window.Vitality) Vitality.save(state);
+  }
+
+  function reportDone(){
+    if (!loaded || !window.Vitality) return;
+    Vitality.report({
+      key: 'quests_done',
+      label: 'Quests done',
+      value: doneCount(),
+      date: today(),
+      kind: 'count',
+      goalDirection: 'up'
+    });
+  }
+
+  // ── glyphs, drawn not typed ───────────────────────────────
+  function plusIcon(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+  }
+  function checkIcon(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="#04120c" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"></polyline></svg>';
+  }
+  function closeIcon(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"></line><line x1="19" y1="5" x2="5" y2="19"></line></svg>';
+  }
+  function boltIcon(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><polygon points="13 2 4 14 11 14 10 22 20 9 13 9"></polygon></svg>';
+  }
+  function shieldIcon(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3 20 6.2 20 11.4 C20 16.2 16.4 19.6 12 21 C7.6 19.6 4 16.2 4 11.4 L4 6.2 Z"></path></svg>';
+  }
+
+  // ── render ────────────────────────────────────────────────
+  function renderPoster(){
+    var hero = document.getElementById('posterHero');
+    var pills = document.getElementById('posterPills');
+    if (!hero || !pills) return;
+    hero.innerHTML = '';
+    pills.innerHTML = '';
+
+    if (!everStarted()) {
+      var e = document.createElement('span');
+      e.className = 'posterEmpty';
+      e.textContent = loaded ? 'no quests yet' : 'reading your vault';
+      hero.appendChild(e);
+      return;
+    }
+
+    var info = levelInfo();
+    var num = document.createElement('span');
+    num.className = 'num hero';
+    num.textContent = String(info.level);
+    var unit = document.createElement('span');
+    unit.className = 'unit';
+    unit.textContent = 'level';
+    hero.appendChild(num);
+    hero.appendChild(unit);
+
+    var xpPill = document.createElement('span');
+    xpPill.className = 'pill';
+    xpPill.textContent = fmt(state.xp) + ' XP';
+    pills.appendChild(xpPill);
+
+    var s = streaks();
+    if (s.current > 0) {
+      var st = document.createElement('span');
+      st.className = 'pill quiet';
+      st.innerHTML = boltIcon();
+      var label = document.createElement('span');
+      label.textContent = s.current + (s.current === 1 ? ' day' : ' days');
+      st.appendChild(label);
+      pills.appendChild(st);
+    }
+  }
+
+  function renderPageHero(){
+    var hero = document.getElementById('pageHero');
+    if (!hero) return;
+    hero.innerHTML = '';
+
+    if (!everStarted()) {
+      var e = document.createElement('span');
+      e.className = 'posterEmpty';
+      e.textContent = loaded ? 'no quests yet, add the first one below' : 'reading your vault';
+      hero.appendChild(e);
+      return;
+    }
+
+    var info = levelInfo();
+    var num = document.createElement('span');
+    num.className = 'num hero';
+    num.textContent = String(info.level);
+    var unit = document.createElement('span');
+    unit.className = 'unit';
+    unit.textContent = 'level';
+    var pill = document.createElement('span');
+    pill.className = 'pill';
+    pill.textContent = doneCount() + (doneCount() === 1 ? ' quest done' : ' quests done');
+    hero.appendChild(num);
+    hero.appendChild(unit);
+    hero.appendChild(pill);
+  }
+
+  function renderLevel(){
+    var info = levelInfo();
+    var label = document.getElementById('levelLabel');
+    var xpEl = document.getElementById('levelXp');
+    var fill = document.getElementById('levelFill');
+    var hint = document.getElementById('levelHint');
+
+    if (label) label.textContent = 'Level ' + info.level;
+    if (xpEl) xpEl.textContent = fmt(state.xp) + ' XP total';
+    if (fill) {
+      var pct = info.need > 0 ? Math.min(1, info.into / info.need) : 0;
+      fill.style.transform = 'scaleX(' + pct + ')';
+    }
+    if (hint) {
+      hint.textContent = fmt(info.into) + ' of ' + fmt(info.need) + ' XP into this level. '
+        + fmt(info.left) + ' to go for level ' + (info.level + 1) + '.';
+    }
+  }
+
+  function renderStreak(){
+    var s = streaks();
+    var cur = document.getElementById('streakNum');
+    var best = document.getElementById('bestNum');
+    var hint = document.getElementById('streakHint');
+
+    if (cur) {
+      cur.innerHTML = '';
+      cur.className = 'statNum' + (s.current === 0 && s.best > 0 ? ' warm' : '');
+      var n1 = document.createElement('span');
+      n1.textContent = String(s.current);
+      var u1 = document.createElement('span');
+      u1.className = 'statUnit';
+      u1.textContent = s.current === 1 ? 'day' : 'days';
+      cur.appendChild(n1);
+      cur.appendChild(u1);
+    }
+    if (best) {
+      best.innerHTML = '';
+      var n2 = document.createElement('span');
+      n2.textContent = String(s.best);
+      var u2 = document.createElement('span');
+      u2.className = 'statUnit';
+      u2.textContent = s.best === 1 ? 'day' : 'days';
+      best.appendChild(n2);
+      best.appendChild(u2);
+    }
+    // Warm and plain. A streak that ended is information, not a telling off.
+    if (hint) {
+      if (s.best === 0) hint.textContent = 'Tick anything today and the count starts.';
+      else if (s.current === 0) hint.textContent = 'The run ended. Your best of ' + s.best + ' still stands, and one tick today starts the next one.';
+      else if (s.current >= s.best) hint.textContent = 'This is your best run so far.';
+      else hint.textContent = 'Your best is ' + s.best + ' days.';
+    }
+  }
+
+  function renderQuest(q){
+    var row = document.createElement('div');
+    row.className = 'quest' + (q.done ? ' done' : '');
+
+    var main = document.createElement('div');
+    main.className = 'qMain';
+
+    var head = document.createElement('div');
+    head.className = 'qHead';
+    var title = document.createElement('span');
+    title.className = 'qTitle';
+    title.textContent = q.title;
+    head.appendChild(title);
+    if (q.target >= BOSS_AT) {
+      var boss = document.createElement('span');
+      boss.className = 'pill quiet';
+      boss.innerHTML = shieldIcon();
+      var bl = document.createElement('span');
+      bl.textContent = 'BOSS';
+      boss.appendChild(bl);
+      head.appendChild(boss);
+    }
+    main.appendChild(head);
+
+    var have = q.done ? q.target : Math.min(progressOf(q), q.target);
+
+    if (!q.done) {
+      var track = document.createElement('div');
+      track.className = 'track thin';
+      var fill = document.createElement('div');
+      fill.className = 'fill';
+      fill.style.transform = 'scaleX(' + (q.target > 0 ? Math.min(1, have / q.target) : 0) + ')';
+      track.appendChild(fill);
+      main.appendChild(track);
+    }
+
+    var meta = document.createElement('div');
+    meta.className = 'qMeta';
+    meta.textContent = q.done
+      ? (q.doneAt ? 'finished ' + q.doneAt : 'finished') + ', ' + fmt(questXp(q)) + ' XP'
+      : have + ' of ' + q.target + ' ticks, ' + fmt(questXp(q)) + ' XP when it lands';
+    main.appendChild(meta);
+
+    row.appendChild(main);
+
+    if (q.done) {
+      var mark = document.createElement('div');
+      mark.className = 'doneMark';
+      mark.innerHTML = checkIcon();
+      row.appendChild(mark);
+    } else {
+      var tick = document.createElement('button');
+      tick.className = 'tick';
+      tick.type = 'button';
+      tick.setAttribute('aria-label', 'Log one tick on ' + q.title);
+      tick.innerHTML = plusIcon();
+      tick.disabled = !loaded;
+      tick.addEventListener('click', function () { tickQuest(q.id); });
+      row.appendChild(tick);
+    }
+
+    var rm = document.createElement('button');
+    rm.className = 'removeBtn';
+    rm.type = 'button';
+    rm.setAttribute('aria-label', 'Remove ' + q.title);
+    rm.innerHTML = closeIcon();
+    rm.disabled = !loaded;
+    rm.addEventListener('click', function () { removeQuest(q.id); });
+    row.appendChild(rm);
+
+    return row;
+  }
+
+  function renderLists(){
+    var activeList = document.getElementById('activeList');
+    var doneList = document.getElementById('doneList');
+    if (!activeList || !doneList) return;
+
+    activeList.innerHTML = '';
+    doneList.innerHTML = '';
+
+    var act = activeQuests();
+    var fin = doneQuests();
+
+    if (!act.length) {
+      var e1 = document.createElement('div');
+      e1.className = 'empty';
+      e1.textContent = 'no quests yet';
+      activeList.appendChild(e1);
+    } else {
+      act.forEach(function (q) { activeList.appendChild(renderQuest(q)); });
+    }
+
+    if (!fin.length) {
+      var e2 = document.createElement('div');
+      e2.className = 'empty';
+      e2.textContent = (Number(state.retired) || 0) > 0
+        ? state.retired + ' finished and removed'
+        : 'none finished yet';
+      doneList.appendChild(e2);
+    } else {
+      fin.forEach(function (q) { doneList.appendChild(renderQuest(q)); });
+    }
+  }
+
+  function renderControls(){
+    var input = document.getElementById('newTitle');
+    var target = document.getElementById('newTarget');
+    var addBtn = document.getElementById('addBtn');
+    if (input) input.disabled = !loaded;
+    if (target) target.disabled = !loaded;
+    if (addBtn) addBtn.disabled = !loaded;
+
+    var note = document.getElementById('trouble');
+    if (note) { note.textContent = trouble; note.hidden = !trouble; }
+  }
+
+  function renderAll(){
+    renderPoster();
+    renderPageHero();
+    renderLevel();
+    renderStreak();
+    renderLists();
+    renderControls();
+  }
+
+  // ── actions ───────────────────────────────────────────────
+  function tickQuest(id){
+    if (!loaded) return;
+    var q = findQuest(id);
+    if (!q || q.done) return;
+
+    var have = progressOf(q) + 1;
+    state.progress[q.id] = have;
+    state.xp = (Number(state.xp) || 0) + XP_PER_TICK;
+
+    var t = today();
+    state.log[t] = (Number(state.log[t]) || 0) + 1;
+
+    if (have >= q.target) {
+      q.done = true;
+      q.doneAt = t;
+      state.xp += finishBonus(q.target);
+    }
+
+    persist();
+    reportDone();
+    renderAll();
+  }
+
+  function removeQuest(id){
+    if (!loaded) return;
+    var q = findQuest(id);
+    if (!q) return;
+    // XP already earned stays earned, and the day log stays intact so the
+    // streak keeps telling the truth about days you actually showed up.
+    if (q.done) state.retired = (Number(state.retired) || 0) + 1;
+    state.quests = state.quests.filter(function (x) { return x.id !== id; });
+    delete state.progress[id];
+    persist();
+    reportDone();
+    renderAll();
+  }
+
+  function addQuest(){
+    if (!loaded) return;
+    var input = document.getElementById('newTitle');
+    var targetEl = document.getElementById('newTarget');
+    if (!input) return;
+    var title = input.value.trim();
+    if (!title) { input.focus(); return; }
+
+    var target = targetEl ? Math.floor(Number(targetEl.value)) : 1;
+    if (!isFinite(target) || target < 1) target = 1;
+    if (target > 999) target = 999;
+
+    var id = uid();
+    state.quests.unshift({
+      id: id, title: title, target: target,
+      done: false, createdAt: today(), doneAt: null
+    });
+    state.progress[id] = 0;
+
+    input.value = '';
+    if (targetEl) targetEl.value = '1';
+    persist();
+    renderAll();
+    input.focus();
+  }
+
+  function wire(){
+    var addBtn = document.getElementById('addBtn');
+    var input = document.getElementById('newTitle');
+    var targetEl = document.getElementById('newTarget');
+    if (addBtn) addBtn.addEventListener('click', addQuest);
+    if (input) input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') addQuest();
+    });
+    if (targetEl) targetEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') addQuest();
+    });
+  }
+
+  function adopt(data){
+    if (!data || typeof data !== 'object') return;
+    if (Array.isArray(data.quests)) {
+      state.quests = data.quests.filter(function (q) { return q && q.id; }).map(function (q) {
+        var t = Math.floor(Number(q.target));
+        if (!isFinite(t) || t < 1) t = 1;
+        return {
+          id: q.id,
+          title: typeof q.title === 'string' ? q.title : 'Quest',
+          target: t,
+          done: !!q.done,
+          createdAt: q.createdAt || null,
+          doneAt: q.doneAt || null
+        };
+      });
+    }
+    if (data.progress && typeof data.progress === 'object') state.progress = data.progress;
+    if (data.log && typeof data.log === 'object') state.log = data.log;
+    if (isFinite(Number(data.xp))) state.xp = Math.max(0, Number(data.xp));
+    if (isFinite(Number(data.retired))) state.retired = Math.max(0, Number(data.retired));
+  }
+
+  function boot(){
+    wire();
+    renderAll();
+    if (!window.Vitality) { loaded = true; renderAll(); return; }
+
+    Vitality.onWriteError(function () {
+      trouble = 'Not saved. Check your connection.';
+      renderAll();
+    });
+
+    Vitality.load().then(function (res) {
+      if (res && res.ok) {
+        loaded = true;
+        adopt(res.data);
+      } else {
+        // The vault never answered. Say so and stay read-only rather than
+        // pretending the board is empty and writing over a real one.
+        trouble = 'Could not reach your vault. Nothing was changed.';
+      }
+      renderAll();
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>
+</body>
+</html>

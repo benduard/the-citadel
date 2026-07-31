@@ -1,0 +1,698 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Body</title>
+<!--
+  Vitality tile: body
+  Body weight, one number a day, read as a trend and not as a verdict.
+
+  store shape via Vitality.save/load:
+    {
+      unit: "kg" | "lb",              // DISPLAY only. see below.
+      days: { "YYYY-MM-DD": kg }      // one number per day, always kilograms
+    }
+
+  WEIGHT IS ALWAYS STORED IN KG, whatever the display unit says. Storing what
+  was typed alongside its unit means the day someone flips the toggle their
+  whole history changes meaning, and the ledger ends up holding two units in
+  one column with no way to tell them apart. One canonical unit in, converted
+  at the edges, is the only version of this that survives a preference change.
+  1 kg = 2.2046226218 lb.
+
+  reports one stream:
+    key   "body_weight"
+    kind  "measure"
+    value that day's weight in KG, never the display unit.
+    goalDirection "neutral" on purpose. This tile does not know whether the
+          person is cutting, bulking or holding, and calling a direction good
+          would be inventing a fact about their intent.
+
+  A single morning reading is water, food and timing as much as it is body
+  mass, so the trend draws the raw weigh ins AND a 7 day rolling average, with
+  the average clearly labelled. The average is only drawn where a week
+  actually holds at least 4 weigh ins; below that it would be an average of
+  two points wearing a week's name. A day with no entry is a gap, never a
+  zero, because zero is a real number and nobody weighed zero.
+-->
+<style>
+  :root{
+    --bg:#050505;
+    --card:rgba(9,13,12,0.72);
+    --border:rgba(148,163,158,0.16);
+    --text:#E7ECEA;
+    --muted:#94A39E;
+    --faint:#5C6B66;
+    --mint:#6EE7B7;
+    --amber:#FCD34D;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    min-height:100vh;
+    background:transparent;
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    accent-color:var(--mint);
+    padding-top:env(safe-area-inset-top);
+    padding-right:env(safe-area-inset-right);
+    padding-bottom:env(safe-area-inset-bottom);
+    padding-left:env(safe-area-inset-left);
+    overflow-x:hidden;
+  }
+  html[data-mode="page"] body{ background:var(--bg); }
+
+  ::selection{ background:rgba(110,231,183,.28); }
+
+  .eyebrow{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin:0;
+  }
+  .hero{ font-family:Georgia,"Times New Roman",serif; font-weight:400; line-height:1; }
+  .pill{
+    display:inline-flex; align-items:center;
+    border-radius:999px;
+    border:1px solid rgba(110,231,183,.35);
+    padding:4px 10px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px; letter-spacing:.08em;
+    color:var(--mint); white-space:nowrap;
+  }
+  .pill.quiet{ border-color:var(--border); color:var(--muted); }
+
+  /* poster */
+  .posterView{
+    display:flex; flex-direction:column; justify-content:center;
+    gap:10px; height:100%; min-height:100vh; padding:20px;
+    opacity:0; animation:rise .6s ease forwards;
+  }
+  .posterHero{ display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; }
+  .posterHero .num{ font-size:46px; }
+  .posterHero .unit{ font-size:13px; color:var(--muted); }
+  .posterEmpty{ font-size:13px; color:var(--faint); }
+
+  /* page */
+  .pageView{ display:none; }
+  html[data-mode="page"] .pageView{
+    display:block; min-height:100vh;
+    padding:28px 20px calc(40px + env(safe-area-inset-bottom));
+    max-width:560px; margin:0 auto;
+  }
+  html[data-mode="page"] .posterView{ display:none; }
+
+  .pageHead{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  .pageHero{ display:flex; align-items:baseline; gap:12px; margin:10px 0 22px; flex-wrap:wrap; }
+  .pageHero .num{ font-size:56px; }
+  .pageHero .unit{ font-size:14px; color:var(--muted); }
+
+  .unitToggle{
+    border:1px solid var(--border); background:transparent;
+    color:var(--muted); border-radius:999px;
+    padding:6px 12px; min-height:36px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+    cursor:pointer; flex:none;
+    transition:color .2s ease, border-color .2s ease;
+  }
+  .unitToggle:hover{ color:var(--mint); border-color:rgba(110,231,183,.5); }
+  .unitToggle:disabled{ opacity:.4; cursor:not-allowed; }
+
+  .trouble{
+    margin:0 0 16px; padding:10px 14px;
+    border:1px solid rgba(252,211,77,.32); border-radius:12px;
+    background:rgba(252,211,77,.06); color:var(--amber); font-size:13px;
+  }
+
+  .block{
+    background:var(--card); border:1px solid var(--border);
+    border-radius:18px; padding:18px; margin-bottom:12px;
+  }
+  .blockTitle{ margin:0 0 12px; }
+
+  .field{ margin-bottom:10px; }
+  .fieldLabel{
+    display:block; margin-bottom:6px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
+  }
+  input[type="number"]{
+    width:100%; min-height:46px;
+    background:transparent; border:1px solid var(--border); border-radius:12px;
+    padding:10px 12px; color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif; font-size:15px;
+  }
+  input::placeholder{ color:var(--faint); }
+  input:disabled{ opacity:.4; }
+
+  .saveBtn{
+    width:100%; margin-top:12px;
+    background:var(--mint); color:#04120c;
+    border:0; border-radius:999px; min-height:50px;
+    font-size:15px; font-weight:600;
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    cursor:pointer; transition:transform .14s ease, opacity .2s ease;
+  }
+  .saveBtn:active{ transform:scale(.97); }
+  .saveBtn:disabled{ opacity:.45; cursor:not-allowed; }
+
+  .hint{ margin:8px 0 0; font-size:11.5px; color:var(--faint); }
+
+  /* trend */
+  .chartSvg{ width:100%; height:auto; display:block; margin-top:6px; }
+  .chartDays{ display:flex; justify-content:space-between; margin-top:6px; }
+  .chartDay{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:9.5px; letter-spacing:.06em; color:var(--faint);
+  }
+  .legend{ display:flex; flex-wrap:wrap; gap:14px; margin-top:12px; }
+  .legendItem{ display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:var(--muted); }
+  .swatchLine{ width:18px; height:6px; flex:none; }
+  .swatchDot{ width:8px; height:8px; flex:none; }
+
+  .delta{ margin:14px 0 0; font-size:13.5px; color:var(--mint); }
+  .delta.caution{ color:var(--amber); }
+  .deltaNote{ margin:5px 0 0; font-size:11.5px; color:var(--faint); }
+
+  .entryRow{
+    display:flex; align-items:baseline; justify-content:space-between;
+    gap:10px; padding:9px 0; border-top:1px solid var(--border);
+  }
+  .entryRow:first-child{ border-top:0; }
+  .entryDate{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:11px; letter-spacing:.06em; color:var(--muted); white-space:nowrap;
+  }
+  .entryVal{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:12px; color:var(--mint); font-variant-numeric:tabular-nums; white-space:nowrap;
+  }
+  .empty{ color:var(--faint); font-size:13px; }
+
+  @keyframes rise{
+    from{ opacity:0; transform:translateY(8px); }
+    to{ opacity:1; transform:translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce){
+    .posterView{ animation:none; opacity:1; }
+    .saveBtn, .unitToggle{ transition:none; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="posterView" id="posterView">
+    <p class="eyebrow">Body</p>
+    <div class="posterHero" id="posterHero"></div>
+  </div>
+
+  <div class="pageView" id="pageView">
+    <div class="pageHead">
+      <p class="eyebrow">Body</p>
+      <button class="unitToggle" id="unitToggle" type="button" disabled>kg</button>
+    </div>
+    <div class="pageHero" id="pageHero"></div>
+
+    <p class="trouble" id="trouble" hidden></p>
+
+    <div class="block">
+      <p class="eyebrow blockTitle">Weigh in</p>
+      <div class="field">
+        <label class="fieldLabel" for="weight">Weight <span id="unitLabel">kg</span></label>
+        <input type="number" id="weight" inputmode="decimal" step="0.1" min="0" placeholder="80.0" autocomplete="off" disabled>
+      </div>
+      <button class="saveBtn" id="saveBtn" type="button" disabled>Save today</button>
+      <p class="hint">One entry a day. Saving again replaces today.</p>
+    </div>
+
+    <div class="block">
+      <p class="eyebrow blockTitle">Last 30 days</p>
+      <div id="trendWrap"></div>
+      <div class="legend">
+        <span class="legendItem">
+          <svg class="swatchLine" viewBox="0 0 18 6" aria-hidden="true"><line x1="1" y1="3" x2="17" y2="3" stroke="#6EE7B7" stroke-width="1.7" stroke-linecap="round"/></svg>
+          7 day average
+        </span>
+        <span class="legendItem">
+          <svg class="swatchDot" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="2.4" fill="rgba(110,231,183,.45)"/></svg>
+          weigh ins
+        </span>
+      </div>
+      <div id="deltaWrap"></div>
+    </div>
+
+    <div class="block">
+      <p class="eyebrow blockTitle">Recent</p>
+      <div id="recentList"></div>
+    </div>
+  </div>
+
+<script>
+// The Vitality bridge. postMessage only: a sealed tile has no storage of its
+// own, so save/load/report all travel to the host and back.
+(function(){
+  'use strict';
+
+  var seq = 0;
+  var pending = {};
+  var writeErrorHandlers = [];
+
+  window.addEventListener('message', function (e) {
+    var msg = e.data;
+    if (!msg || msg.source !== 'vitality-host') return;
+    if (msg.type === 'load:result') {
+      var p = pending[msg.id];
+      if (p) { delete pending[msg.id]; p.resolve({ ok: true, data: msg.data }); }
+      return;
+    }
+    if (msg.type === 'save:error' || msg.type === 'report:error') {
+      writeErrorHandlers.forEach(function (fn) { fn(msg.type, msg.reason); });
+    }
+  });
+
+  function post(type, payload) {
+    var msg = { source: 'vitality-tile', type: type };
+    for (var k in payload) { if (Object.prototype.hasOwnProperty.call(payload, k)) msg[k] = payload[k]; }
+    parent.postMessage(msg, '*');
+    return msg;
+  }
+
+  window.Vitality = {
+    save: function (data) { post('save', { data: data }); },
+
+    /**
+     * Resolves { ok, data }. ok:false means the host never answered, NOT that
+     * the slot is empty. Treating an unanswered load as "you have nothing"
+     * lets the next save write that emptiness over real data.
+     */
+    load: function () {
+      var id = 'l' + (++seq);
+      return new Promise(function (resolve) {
+        pending[id] = { resolve: resolve };
+        post('load', { id: id });
+        var tries = 0;
+        var retry = setInterval(function () {
+          if (!pending[id]) { clearInterval(retry); return; }
+          if (++tries > 12) {
+            clearInterval(retry);
+            delete pending[id];
+            resolve({ ok: false, data: null });
+            return;
+          }
+          post('load', { id: id });
+        }, 800);
+      });
+    },
+
+    report: function (stream) { post('report', { stream: stream }); },
+    onWriteError: function (fn) { writeErrorHandlers.push(fn); }
+  };
+})();
+</script>
+
+<script>
+(function(){
+  'use strict';
+
+  var mode = location.hash === '#page' ? 'page' : 'grid';
+  document.documentElement.setAttribute('data-mode', mode);
+
+  var state = { unit: 'kg', days: {} };
+  var loaded = false;
+  var trouble = '';
+
+  var LB_PER_KG = 2.2046226218;
+  var WINDOW = 7;        // days in the rolling average
+  var MIN_IN_WINDOW = 4; // weigh ins a week must hold before an average is honest
+  var SPAN = 30;         // days drawn in the trend
+  var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  function pad(n){ n = String(n); return n.length < 2 ? '0' + n : n; }
+  function dayKey(d){
+    // Local getters, never toISOString: that is UTC and drifts a day.
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+  function today(){ return dayKey(new Date()); }
+  function shiftKey(key, delta){
+    var p = key.split('-');
+    var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+    d.setDate(d.getDate() + delta);
+    return dayKey(d);
+  }
+  function dateOf(key){
+    var p = key.split('-');
+    return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+  }
+  function shortDate(key){
+    var d = dateOf(key);
+    return d.getDate() + ' ' + MONTHS[d.getMonth()];
+  }
+  function daysAgo(key){
+    var a = dateOf(today()).getTime();
+    var b = dateOf(key).getTime();
+    return Math.round((a - b) / 86400000);
+  }
+
+  function toDisplay(kg){ return state.unit === 'lb' ? kg * LB_PER_KG : kg; }
+  function toKg(shown){ return state.unit === 'lb' ? shown / LB_PER_KG : shown; }
+  function fmt(kg){ return (Math.round(toDisplay(kg) * 10) / 10).toFixed(1); }
+  function fmtDelta(kgDiff){
+    var v = Math.round(Math.abs(toDisplay(kgDiff)) * 10) / 10;
+    return (kgDiff < 0 ? '-' : '+') + v.toFixed(1);
+  }
+
+  // Reads never rewrite the slot. An entry that is not a positive number is
+  // ignored here rather than deleted, so nothing a future save could erase.
+  function entryOf(key){
+    var v = Number(state.days[key]);
+    return (isFinite(v) && v > 0) ? v : null;
+  }
+  function loggedKeys(){
+    return Object.keys(state.days).filter(function (k) { return entryOf(k) != null; }).sort();
+  }
+  function latestKey(){
+    var keys = loggedKeys();
+    return keys.length ? keys[keys.length - 1] : null;
+  }
+
+  // Mean of the weigh ins in the 7 day window ending on key. Null unless the
+  // window actually holds enough of them: an average of two points is not a
+  // week, and labelling it as one would be inventing a number.
+  function avgAt(key){
+    var sum = 0, n = 0;
+    for (var i = 0; i < WINDOW; i++) {
+      var v = entryOf(shiftKey(key, -i));
+      if (v != null) { sum += v; n++; }
+    }
+    return n >= MIN_IN_WINDOW ? sum / n : null;
+  }
+
+  function persist(){
+    if (!loaded) return;
+    if (window.Vitality) Vitality.save(state);
+  }
+
+  function report(key){
+    if (!loaded || !window.Vitality) return;
+    var kg = entryOf(key);
+    if (kg == null) return;
+    // Always kg. A ledger holding two units in one column cannot be read.
+    Vitality.report({
+      key: 'body_weight',
+      label: 'Body weight',
+      value: Math.round(kg * 100) / 100,
+      date: key,
+      kind: 'measure',
+      goalDirection: 'neutral'
+    });
+  }
+
+  // render
+  function fillHero(el, big){
+    if (!el) return;
+    el.innerHTML = '';
+    var key = latestKey();
+    if (!key) {
+      var e = document.createElement('span');
+      e.className = 'posterEmpty';
+      e.textContent = 'not logged yet';
+      el.appendChild(e);
+      return;
+    }
+    var num = document.createElement('span');
+    num.className = 'num hero';
+    num.textContent = fmt(entryOf(key));
+    var unit = document.createElement('span');
+    unit.className = 'unit';
+    unit.textContent = state.unit;
+    var pill = document.createElement('span');
+    var ago = daysAgo(key);
+    if (ago <= 0) {
+      pill.className = 'pill';
+      pill.textContent = 'today';
+    } else {
+      pill.className = 'pill quiet';
+      pill.textContent = ago === 1 ? '1 day ago' : ago + ' days ago';
+    }
+    el.appendChild(num);
+    el.appendChild(unit);
+    if (big || ago > 0) el.appendChild(pill);
+  }
+
+  function renderTrend(){
+    var wrap = document.getElementById('trendWrap');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+
+    var series = [];
+    for (var i = SPAN - 1; i >= 0; i--) {
+      var key = shiftKey(today(), -i);
+      series.push({ key: key, kg: entryOf(key), avg: avgAt(key) });
+    }
+
+    var drawn = series.filter(function (p) { return p.kg != null; });
+    if (!drawn.length) {
+      var none = document.createElement('p');
+      none.className = 'empty';
+      none.textContent = 'no weigh ins in the last 30 days';
+      wrap.appendChild(none);
+      return;
+    }
+
+    var vals = [];
+    series.forEach(function (p) {
+      if (p.kg != null) vals.push(p.kg);
+      if (p.avg != null) vals.push(p.avg);
+    });
+    var lo = Math.min.apply(null, vals);
+    var hi = Math.max.apply(null, vals);
+    if (hi - lo < 0.4) { lo -= 0.4; hi += 0.4; }
+    var padY = (hi - lo) * 0.12;
+    lo -= padY; hi += padY;
+
+    var X0 = 36, X1 = 314, Y0 = 12, Y1 = 104;
+    function px(i){ return X0 + (i / (SPAN - 1)) * (X1 - X0); }
+    function py(v){ return Y1 - ((v - lo) / (hi - lo)) * (Y1 - Y0); }
+    function r2(n){ return Math.round(n * 100) / 100; }
+
+    var parts = [];
+    parts.push('<svg class="chartSvg" viewBox="0 0 320 120" role="img" aria-label="Body weight over the last 30 days">');
+    parts.push('<line x1="' + X0 + '" y1="' + Y1 + '" x2="' + X1 + '" y2="' + Y1 + '" stroke="rgba(148,163,158,0.16)" stroke-width="1"/>');
+    parts.push('<text x="2" y="' + (Y0 + 4) + '" fill="#5C6B66" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="8">' + fmt(hi) + '</text>');
+    parts.push('<text x="2" y="' + (Y1 + 2) + '" fill="#5C6B66" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="8">' + fmt(lo) + '</text>');
+
+    // The average, broken wherever a week is too thin to average. A gap says
+    // "not enough data here", a joined line would say something untrue.
+    var run = [];
+    var segs = [];
+    series.forEach(function (p, i) {
+      if (p.avg == null) { if (run.length > 1) segs.push(run); run = []; return; }
+      run.push(r2(px(i)) + ',' + r2(py(p.avg)));
+    });
+    if (run.length > 1) segs.push(run);
+    segs.forEach(function (s) {
+      parts.push('<polyline points="' + s.join(' ') + '" fill="none" stroke="#6EE7B7" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>');
+    });
+
+    // The raw weigh ins. A day with no entry gets no dot at all, never a dot
+    // on the floor: zero is a real weight and nobody weighed zero.
+    var t = today();
+    series.forEach(function (p, i) {
+      if (p.kg == null) return;
+      var isToday = p.key === t;
+      parts.push('<circle cx="' + r2(px(i)) + '" cy="' + r2(py(p.kg)) + '" r="' + (isToday ? 3 : 2.2) + '" fill="' + (isToday ? '#6EE7B7' : 'rgba(110,231,183,.45)') + '"/>');
+    });
+    parts.push('</svg>');
+
+    var svgWrap = document.createElement('div');
+    svgWrap.innerHTML = parts.join('');
+    wrap.appendChild(svgWrap);
+
+    var labels = document.createElement('div');
+    labels.className = 'chartDays';
+    var left = document.createElement('span');
+    left.className = 'chartDay';
+    left.textContent = shortDate(series[0].key);
+    var right = document.createElement('span');
+    right.className = 'chartDay';
+    right.textContent = 'today';
+    labels.appendChild(left);
+    labels.appendChild(right);
+    wrap.appendChild(labels);
+
+    var avgPts = series.filter(function (p) { return p.avg != null; }).length;
+    if (!avgPts) {
+      var n = loggedKeys().length;
+      var note = document.createElement('p');
+      note.className = 'hint';
+      note.textContent = n + (n === 1 ? ' weigh in' : ' weigh ins') +
+        ' so far. The 7 day average is drawn once a week holds at least 4 of them.';
+      wrap.appendChild(note);
+    }
+  }
+
+  function renderDelta(){
+    var wrap = document.getElementById('deltaWrap');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+
+    var anchor = latestKey();
+    if (!anchor) return;
+    var now = avgAt(anchor);
+    var before = avgAt(shiftKey(anchor, -WINDOW));
+    if (now == null || before == null) return;
+
+    var diff = now - before;
+    var pct = Math.abs(diff) / now * 100;
+    var fast = pct > 1;
+
+    var line = document.createElement('p');
+    line.className = 'delta' + (fast ? ' caution' : '');
+    line.textContent = fmtDelta(diff) + ' ' + state.unit + ' on the 7 day average, versus the week before.';
+    wrap.appendChild(line);
+
+    if (fast) {
+      var note = document.createElement('p');
+      note.className = 'deltaNote';
+      note.textContent = 'That is more than 1 percent of body weight in a week.';
+      wrap.appendChild(note);
+    }
+  }
+
+  function renderRecent(){
+    var list = document.getElementById('recentList');
+    if (!list) return;
+    list.innerHTML = '';
+    var keys = loggedKeys().slice(-7).reverse();
+    if (!keys.length) {
+      var none = document.createElement('p');
+      none.className = 'empty';
+      none.textContent = 'no weigh ins yet';
+      list.appendChild(none);
+      return;
+    }
+    keys.forEach(function (k) {
+      var row = document.createElement('div');
+      row.className = 'entryRow';
+      var d = document.createElement('span');
+      d.className = 'entryDate';
+      d.textContent = k === today() ? 'today' : shortDate(k);
+      var v = document.createElement('span');
+      v.className = 'entryVal';
+      v.textContent = fmt(entryOf(k)) + ' ' + state.unit;
+      row.appendChild(d);
+      row.appendChild(v);
+      list.appendChild(row);
+    });
+  }
+
+  function renderControls(){
+    ['weight', 'saveBtn', 'unitToggle'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.disabled = !loaded;
+    });
+    var ut = document.getElementById('unitToggle');
+    if (ut) ut.textContent = state.unit;
+    var ul = document.getElementById('unitLabel');
+    if (ul) ul.textContent = state.unit;
+    var sb = document.getElementById('saveBtn');
+    if (sb) sb.textContent = entryOf(today()) != null ? 'Update today' : 'Save today';
+    var tr = document.getElementById('trouble');
+    if (tr) { tr.textContent = trouble; tr.hidden = !trouble; }
+  }
+
+  function renderAll(){
+    fillHero(document.getElementById('posterHero'), false);
+    fillHero(document.getElementById('pageHero'), true);
+    renderControls();
+    renderTrend();
+    renderDelta();
+    renderRecent();
+  }
+
+  // actions
+  function save(){
+    if (!loaded) return;
+    var el = document.getElementById('weight');
+    if (!el) return;
+    var shown = parseFloat(el.value);
+    // Silence beats a wrong row. Nothing is logged from an empty or impossible box.
+    if (!isFinite(shown) || shown <= 0) return;
+
+    var key = today();
+    state.days[key] = toKg(shown);
+
+    persist();
+    report(key);
+    renderAll();
+    el.blur();
+  }
+
+  function toggleUnit(){
+    if (!loaded) return;
+    state.unit = state.unit === 'kg' ? 'lb' : 'kg';
+
+    // Clear whatever was half typed. An 80 sitting in the box meant 80 kg a
+    // moment ago and would now be read as 80 lb, quietly logging 36.3 kg
+    // instead. Converting it would be guessing at intent; emptying it asks.
+    var el = document.getElementById('weight');
+    if (el) el.value = '';
+
+    // Only the display changed. Every stored weight is still kg, so nothing
+    // in the history or the ledger moved.
+    persist();
+    renderAll();
+  }
+
+  function wire(){
+    var sb = document.getElementById('saveBtn');
+    if (sb) sb.addEventListener('click', save);
+
+    var ut = document.getElementById('unitToggle');
+    if (ut) ut.addEventListener('click', toggleUnit);
+
+    var el = document.getElementById('weight');
+    if (el) el.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') save();
+    });
+  }
+
+  function boot(){
+    wire();
+    if (!window.Vitality) { loaded = true; renderAll(); return; }
+
+    Vitality.onWriteError(function () {
+      trouble = 'Not saved. Check your connection.';
+      renderAll();
+    });
+
+    Vitality.load().then(function (res) {
+      if (res && res.ok) {
+        loaded = true;
+        var data = res.data;
+        if (data && data.days && typeof data.days === 'object') state.days = data.days;
+        if (data && (data.unit === 'kg' || data.unit === 'lb')) state.unit = data.unit;
+      } else {
+        // Never assume empty. Staying read only is what stops the next save
+        // from writing that assumption over a real history.
+        trouble = 'Could not reach your vault. Nothing was changed.';
+      }
+      renderAll();
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>
+</body>
+</html>

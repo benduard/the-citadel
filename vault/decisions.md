@@ -2,6 +2,55 @@
 
 What you decided and why, so a future session never re-litigates it.
 
+## Projects became Lists, and it sits at the top of the board
+
+Decided 2026-07-31.
+
+He asked for a Lists tile at the top holding a daily to do list, a grocery
+list, a pending project list, and whatever else made sense for him.
+
+THE ID IS STILL 'projects'. The file is `tiles/lists.html` and the board says
+Lists, but the registry id did not change and must never change. The id is the
+vault storage key: renaming it points the tile at an empty slot, orphans every
+project already saved, and breaks `projects_done` in the ledger along with its
+weight in weights.ts and its row in lib/rank.js. The name is free, the id is
+not. Both files say so at the top.
+
+Five lists. Three he named, two recommended, and the recommendations exist to
+protect the daily list rather than to pad the tile:
+
+- Daily, rolls each day
+- Weekly, rolls each Monday. The shop, meal prep, laundry, admin - things with
+  a weekly rhythm that clog Daily and are not projects.
+- Grocery, rolls never. Tick while shopping, clear when home.
+- Projects, rolls never. The only list that reaches the ledger.
+- Someday, rolls never. Capture, with one action: send it to Daily. A daily
+  list you scroll past is a daily list you stop reading, and this is what keeps
+  it short.
+
+Things to not undo:
+
+- ONLY the projects list reports, and it reports `projects_done` counting
+  exactly what v1 counted. A daily to do is not a project finished. Folding
+  both into that key would make every ledger row written before today a lie
+  about what it counted. A daily-tasks number in the ledger is a real decision
+  - its own key, its own weight in weights.ts, its own row in rank.js - not a
+  side effect of this tile.
+- ROLLING NEVER DELETES. A finished one-off leaves the live list but keeps its
+  text and its date in `archive` (capped at 200, newest first). A list that
+  quietly eats what you finished is a list you stop trusting.
+- A blank roll marker rolls NOTHING and only sets itself. Without that, the
+  first ever run would archive work finished minutes earlier.
+- Clear finished is not offered on Projects, because it would walk
+  projects_done backwards for a bookkeeping action. Same law the Progress tile
+  already follows for retired quests.
+- Repeating items uncheck rather than archive, so a daily habit and a one-off
+  task can share the list without either behaving wrongly.
+
+v1's `{ projects: [...] }` migrates into `lists.projects` untouched.
+`tiles/lists.test.js` covers the migration, every roll rule, the first-run
+trap, and that groceries can never inflate projects_done.
+
 ## Lifting knows Ruben's three way split, and the picker follows it
 
 Decided 2026-07-31. His split, in his words: legs, then chest and shoulders

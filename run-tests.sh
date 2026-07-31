@@ -7,4 +7,5 @@ node lib/rank.test.js
 node lib/shell.test.js
 node tiles/lifting.lasttime.test.js
 node tiles/lifting.splits.test.js
+node tiles/lists.test.js
 echo "All suites passed."

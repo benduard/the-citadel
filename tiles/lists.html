@@ -1,0 +1,803 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lists</title>
+<!--
+  Vitality tile: projects  (shown as "Lists")
+
+  THE ID IS STILL 'projects' AND MUST STAY THAT WAY. The id is the vault
+  storage key. Renaming it to 'lists' would point this tile at an empty slot,
+  orphan every project already logged under 'projects', and break the
+  projects_done history in the ledger along with the weight in weights.ts and
+  the rank in lib/rank.js. The FILE and the display NAME changed on
+  2026-07-31; the id did not, and there is no version of this worth undoing.
+
+  store shape saved via Vitality.save/load:
+    {
+      v: 2,
+      lists: {
+        daily:    [ { id, title, done, repeat, createdAt, doneAt } ],
+        weekly:   [ { id, title, done, repeat, createdAt, doneAt } ],
+        grocery:  [ { id, title, done, createdAt, doneAt } ],
+        projects: [ { id, title, done, createdAt, doneAt } ],
+        someday:  [ { id, title, done, createdAt, doneAt } ]
+      },
+      archive: [ { title, list, doneAt } ],   // last 200 finished, newest first
+      rolledOn: "YYYY-MM-DD",                 // day the daily list last rolled
+      rolledWeek: "YYYY-MM-DD"                // Monday the weekly list last rolled
+    }
+
+  v1 was { projects: [ ... ] } with the same item shape. It migrates: those
+  items become lists.projects untouched, so nothing logged before today moves
+  or disappears.
+
+  reports ONE stream, unchanged from v1 on purpose:
+    key   "projects_done"
+    kind  "measure"
+    value count of DONE items in the projects list. Cumulative, exactly what it
+          counted before, so the ledger's history keeps meaning the same thing.
+
+  The daily and grocery lists deliberately do NOT report. A daily to do is not
+  a project finished, and folding both into one key would make every row
+  logged before today a lie about what it counted. If a daily-tasks number is
+  wanted in the ledger it needs its own key, its own weight in weights.ts and
+  its own entry in lib/rank.js - a decision, not a side effect of this file.
+
+  ROLLING. On a new day the daily list rolls: repeating items uncheck, one-off
+  items that were finished move to `archive`. On a new week the weekly list
+  does the same. Nothing is deleted - a finished item keeps its text and its
+  date in the archive, because a list that quietly eats what you did is a list
+  that cannot be trusted.
+-->
+<style>
+  :root{
+    --bg:#050505;
+    --card:rgba(9,13,12,0.72);
+    --card2:rgba(14,19,18,0.55);
+    --border:rgba(148,163,158,0.16);
+    --text:#E7ECEA;
+    --muted:#94A39E;
+    --faint:#5C6B66;
+    --mint:#6EE7B7;
+    --amber:#FCD34D;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    min-height:100vh;
+    background:transparent;
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    accent-color:var(--mint);
+    padding-top:env(safe-area-inset-top);
+    padding-right:env(safe-area-inset-right);
+    padding-bottom:env(safe-area-inset-bottom);
+    padding-left:env(safe-area-inset-left);
+    overflow-x:hidden;
+  }
+  html[data-mode="page"] body{ background:var(--bg); }
+  ::selection{ background:rgba(110,231,183,.28); }
+
+  .eyebrow{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px; letter-spacing:0.16em; text-transform:uppercase;
+    color:var(--muted); margin:0;
+  }
+  .hero{ font-family:Georgia,"Times New Roman",serif; font-weight:400; line-height:1; }
+  .pill{
+    display:inline-flex; align-items:center; border-radius:999px;
+    border:1px solid rgba(110,231,183,.35); padding:4px 10px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px; letter-spacing:.08em; color:var(--mint); white-space:nowrap;
+  }
+  .pill.flat{ border-color:var(--border); color:var(--muted); }
+
+  /* ---------- poster ---------- */
+  .posterView{ height:100%; padding:16px; display:flex; flex-direction:column; gap:10px; }
+  html[data-mode="page"] .posterView{ display:none; }
+  .pTop{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .pMain{ display:flex; align-items:baseline; gap:8px; }
+  .pNum{ font-size:clamp(30px,9vw,46px); color:var(--text); }
+  .pOf{ font-size:13px; color:var(--muted); }
+  .pBar{ height:5px; border-radius:3px; background:rgba(148,163,158,.14); overflow:hidden; }
+  .pBar > i{ display:block; height:100%; border-radius:3px; background:var(--mint); }
+  .pRows{ display:flex; flex-direction:column; gap:5px; margin-top:auto; }
+  .pRow{
+    display:flex; align-items:center; gap:7px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10.5px; color:var(--muted);
+  }
+  .pRow b{ margin-left:auto; color:var(--text); font-weight:500; }
+  .pRow .dot{ width:5px; height:5px; border-radius:50%; background:var(--faint); flex:none; }
+  .pRow.has .dot{ background:var(--mint); }
+
+  /* ---------- page ---------- */
+  .pageView{ display:none; }
+  html[data-mode="page"] .pageView{
+    display:block; max-width:640px; margin:0 auto; padding:22px 18px 40px;
+  }
+  .head{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:16px; }
+  .headNum{ font-size:34px; }
+
+  .tabs{ display:flex; gap:6px; overflow-x:auto; padding-bottom:4px; margin-bottom:14px; }
+  .tabs::-webkit-scrollbar{ display:none; }
+  .tab{
+    flex:none; min-height:40px; padding:8px 13px; cursor:pointer; white-space:nowrap;
+    border:1px solid var(--border); border-radius:10px;
+    background:var(--card2); color:var(--muted);
+    font-size:12.5px; font-weight:600; letter-spacing:-.01em; font-family:inherit;
+    transition:border-color .16s,color .16s,background .16s;
+  }
+  .tab:hover{ color:var(--text); }
+  .tab.on{ border-color:rgba(110,231,183,.4); color:var(--mint); background:rgba(110,231,183,.08); }
+  .tab .c{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10px; opacity:.75; margin-left:5px; }
+
+  .why{ font-size:12px; color:var(--muted); line-height:1.5; margin:0 0 12px; }
+
+  .addRow{ display:flex; gap:8px; margin-bottom:8px; }
+  .addRow input{
+    flex:1; min-width:0; min-height:44px; padding:11px 13px;
+    border:1px solid var(--border); border-radius:11px;
+    background:var(--card); color:var(--text); font-size:15px; font-family:inherit;
+  }
+  .addRow input::placeholder{ color:var(--faint); }
+  .addRow input:focus{ outline:none; border-color:rgba(110,231,183,.5); }
+  .addBtn{
+    flex:none; min-height:44px; padding:0 18px; cursor:pointer;
+    border:0; border-radius:11px; background:var(--mint); color:#04120c;
+    font-size:14px; font-weight:700; font-family:inherit;
+  }
+  .addBtn:disabled{ opacity:.4; cursor:default; }
+  .repToggle{
+    display:flex; align-items:center; gap:7px; margin-bottom:14px;
+    font-size:12px; color:var(--muted); cursor:pointer; user-select:none;
+  }
+  .repToggle input{ width:16px; height:16px; }
+
+  .secLabel{
+    display:flex; align-items:center; gap:8px; margin:18px 0 8px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
+  }
+  .secLabel .c{ margin-left:auto; opacity:.7; }
+  .secLabel button{
+    margin-left:auto; background:none; border:1px solid var(--border); border-radius:8px;
+    color:var(--muted); font-size:10.5px; padding:5px 10px; cursor:pointer; font-family:inherit;
+    letter-spacing:0; text-transform:none;
+  }
+  .secLabel button:hover{ color:var(--text); border-color:var(--muted); }
+
+  .list{ display:flex; flex-direction:column; }
+  .item{
+    display:flex; align-items:center; gap:11px; padding:11px 2px;
+    border-top:1px solid rgba(148,163,158,.1);
+  }
+  .item:first-child{ border-top:0; }
+  .check{
+    flex:none; width:24px; height:24px; border-radius:7px; cursor:pointer;
+    border:1.5px solid rgba(148,163,158,.4); background:transparent; padding:0;
+    display:grid; place-items:center;
+  }
+  .check svg{ width:14px; height:14px; opacity:0; }
+  .item.done .check{ background:var(--mint); border-color:var(--mint); }
+  .item.done .check svg{ opacity:1; }
+  .txt{ flex:1; min-width:0; font-size:14.5px; line-height:1.35; word-break:break-word; }
+  .item.done .txt{ color:var(--faint); text-decoration:line-through; }
+  .tag{
+    flex:none; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:9px; letter-spacing:.06em; color:var(--faint);
+    border:1px solid var(--border); border-radius:5px; padding:2px 5px;
+  }
+  .iconBtn{
+    flex:none; width:32px; height:32px; border-radius:8px; cursor:pointer;
+    background:none; border:0; color:var(--faint); display:grid; place-items:center;
+  }
+  .iconBtn:hover{ color:var(--text); }
+  .iconBtn svg{ width:14px; height:14px; }
+
+  .empty{ padding:24px 2px; color:var(--faint); font-size:13px; line-height:1.5; }
+  .trouble{
+    margin:0 0 12px; padding:10px 12px; border-radius:10px;
+    border:1px solid rgba(252,211,77,.36); background:rgba(252,211,77,.07);
+    color:var(--text); font-size:12.5px; line-height:1.45;
+  }
+  .rolled{ margin:0 0 12px; font-size:11.5px; color:var(--muted); line-height:1.45; }
+</style>
+</head>
+<body>
+
+<!-- ---------- poster: what the board shows ---------- -->
+<div class="posterView" id="posterView">
+  <div class="pTop">
+    <p class="eyebrow">Lists</p>
+    <span class="pill flat" id="posterPill">today</span>
+  </div>
+  <div class="pMain">
+    <span class="hero pNum" id="posterNum">0</span>
+    <span class="pOf" id="posterOf">nothing on today</span>
+  </div>
+  <div class="pBar"><i id="posterBar" style="width:0%"></i></div>
+  <div class="pRows" id="posterRows"></div>
+</div>
+
+<!-- ---------- page: the full thing ---------- -->
+<div class="pageView" id="pageView">
+  <div class="head">
+    <div>
+      <p class="eyebrow">Lists</p>
+      <span class="hero headNum" id="pageNum">0</span>
+      <span class="pOf" id="pageOf"></span>
+    </div>
+    <span class="pill flat" id="pagePill">0 done</span>
+  </div>
+
+  <p class="trouble" id="trouble" hidden></p>
+  <p class="rolled" id="rolled" hidden></p>
+
+  <div class="tabs" id="tabs"></div>
+  <p class="why" id="why"></p>
+
+  <div class="addRow">
+    <input id="newTitle" type="text" placeholder="Add" maxlength="120" disabled>
+    <button class="addBtn" id="addBtn" type="button" disabled>Add</button>
+  </div>
+  <label class="repToggle" id="repWrap" hidden>
+    <input type="checkbox" id="repeats" disabled> Repeats every day
+  </label>
+
+  <div class="list" id="openList"></div>
+  <div id="doneWrap" hidden>
+    <div class="secLabel"><span>Done</span><button type="button" id="clearDone">Clear finished</button></div>
+    <div class="list" id="doneList"></div>
+  </div>
+  <div id="archWrap" hidden>
+    <div class="secLabel"><span>Recently finished</span><span class="c" id="archCount"></span></div>
+    <div class="list" id="archList"></div>
+  </div>
+</div>
+
+<script>
+// ---- The Vitality bridge. Verbatim: this is the protocol, not this tile's
+// own invention. A sealed frame has no localStorage of its own, so save/load/
+// report all travel to the host and back.
+(function(){
+  'use strict';
+
+  var seq = 0;
+  var pending = {};
+  var writeErrorHandlers = [];
+
+  window.addEventListener('message', function (e) {
+    var msg = e.data;
+    if (!msg || msg.source !== 'vitality-host') return;
+    if (msg.type === 'load:result') {
+      var p = pending[msg.id];
+      if (p) { delete pending[msg.id]; p.resolve({ ok: true, data: msg.data }); }
+      return;
+    }
+    // The host says a write did not land. Never let the tile go on showing it
+    // as saved: hand it to whoever is listening so it can say so.
+    if (msg.type === 'save:error' || msg.type === 'report:error') {
+      writeErrorHandlers.forEach(function (fn) { fn(msg.type, msg.reason); });
+    }
+  });
+
+  function post(type, payload) {
+    var msg = { source: 'vitality-tile', type: type };
+    for (var k in payload) { if (Object.prototype.hasOwnProperty.call(payload, k)) msg[k] = payload[k]; }
+    parent.postMessage(msg, '*');
+    return msg;
+  }
+
+  window.Vitality = {
+    save: function (data) { post('save', { data: data }); },
+
+    /**
+     * Resolves { ok, data }. ok:false means the host never answered - NOT that
+     * the slot is empty. The difference is the whole ballgame: treating an
+     * unanswered load as "you have nothing" lets the next save write that
+     * emptiness over real data. A tile must refuse to save until it knows.
+     */
+    load: function () {
+      var id = 'l' + (++seq);
+      return new Promise(function (resolve) {
+        pending[id] = { resolve: resolve };
+        post('load', { id: id });
+        // The host may not have registered this frame on the very first ask.
+        // Keep asking: a slow vault (a cold remote read) is not an empty one.
+        var tries = 0;
+        var retry = setInterval(function () {
+          if (!pending[id]) { clearInterval(retry); return; }
+          if (++tries > 12) { // ~10s, then admit we do not know
+            clearInterval(retry);
+            delete pending[id];
+            resolve({ ok: false, data: null });
+            return;
+          }
+          post('load', { id: id });
+        }, 800);
+      });
+    },
+
+    report: function (stream) { post('report', { stream: stream }); },
+    onWriteError: function (fn) { writeErrorHandlers.push(fn); }
+  };
+})();
+</script>
+
+<script>
+(function(){
+  'use strict';
+
+  var mode = location.hash === '#page' ? 'page' : 'grid';
+  document.documentElement.setAttribute('data-mode', mode);
+
+  /**
+   * THE LISTS. Ruben asked for daily, grocery and pending projects, and for a
+   * recommendation on top. The two added ones are Weekly and Someday, and both
+   * are here to protect the daily list rather than to pad the tile:
+   *
+   *   Weekly   is for things with a weekly rhythm rather than a daily one (the
+   *            shop, meal prep, laundry, admin). They clog Daily and they are
+   *            not projects, so they had nowhere honest to live.
+   *   Someday  is the capture list. Anything that is not today's problem goes
+   *            here instead of sitting in Daily looking like a failure. A
+   *            daily list you scroll past is a daily list you stop reading.
+   *
+   * Delete either from this array if they are not earning their place.
+   * `roll` decides behaviour, not decoration:
+   *   'day'   unchecks repeats and archives finished one-offs each new day
+   *   'week'  the same, each new Monday
+   *   null    stays until you clear it yourself
+   */
+  var LISTS = [
+    { id:'daily',    name:'Daily',    roll:'day',  repeatable:true,
+      why:'Today only. Finished one-offs move to Recently finished overnight, and anything marked repeating just unchecks itself.' },
+    { id:'weekly',   name:'Weekly',   roll:'week', repeatable:true,
+      why:'The weekly rhythm: the shop, meal prep, laundry, admin. Rolls every Monday, same rules as Daily.' },
+    { id:'grocery',  name:'Grocery',  roll:null,   repeatable:false,
+      why:'Tick things off as you shop, then Clear finished when you are home. Nothing here rolls on its own.' },
+    { id:'projects', name:'Projects', roll:null,   repeatable:false, counts:true,
+      why:'The pending list. Finished projects stay ticked here, and this is the only list that reaches your ledger and counts toward your goals.' },
+    { id:'someday',  name:'Someday',  roll:null,   repeatable:false,
+      why:'Capture. Anything you do not want to forget but are not doing now. Send one to Daily when it becomes today’s problem.' }
+  ];
+  function listById(id){
+    for (var i=0;i<LISTS.length;i++) if (LISTS[i].id === id) return LISTS[i];
+    return LISTS[0];
+  }
+
+  var ARCHIVE_CAP = 200;
+
+  var state = {
+    v: 2,
+    lists: { daily:[], weekly:[], grocery:[], projects:[], someday:[] },
+    archive: [],
+    rolledOn: '',
+    rolledWeek: ''
+  };
+  // Until the vault has actually answered, this tile does not know what it
+  // holds, so it must not write. Saving an assumed-empty list would delete
+  // whatever is really there.
+  var loaded = false;
+  var trouble = '';
+  var rolledNote = '';
+  var tab = 'daily';
+
+  /* ---------------- dates ---------------- */
+  function todayLocal(){
+    var d = new Date();
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1); if (m.length < 2) m = '0' + m;
+    var day = String(d.getDate()); if (day.length < 2) day = '0' + day;
+    return y + '-' + m + '-' + day;
+  }
+  // Monday of the current week, as a date key, so the weekly list rolls once a
+  // week rather than once a day.
+  function weekKey(){
+    var d = new Date();
+    var off = (d.getDay() + 6) % 7;         // 0 = Monday
+    d.setDate(d.getDate() - off);
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1); if (m.length < 2) m = '0' + m;
+    var day = String(d.getDate()); if (day.length < 2) day = '0' + day;
+    return y + '-' + m + '-' + day;
+  }
+  function uid(){
+    return 'p_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+  }
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  /* ---------------- counts ---------------- */
+  function items(id){ return state.lists[id] || []; }
+  function openOf(id){ return items(id).filter(function(x){ return !x.done; }); }
+  function doneOf(id){ return items(id).filter(function(x){ return x.done; }); }
+  // Unchanged from v1 and it must stay that way: this is what projects_done
+  // has always counted, and the ledger's history depends on it.
+  function doneCount(){ return doneOf('projects').length; }
+
+  function persist(){
+    if (!loaded) return;
+    if (window.Vitality) Vitality.save(state);
+  }
+
+  function reportDone(){
+    if (!window.Vitality) return;
+    Vitality.report({
+      key: 'projects_done',
+      label: 'Projects Done',
+      value: doneCount(),
+      date: todayLocal(),
+      kind: 'measure',
+      goalDirection: 'up'
+    });
+  }
+
+  /**
+   * Roll the day and the week.
+   *
+   * Nothing is deleted. A finished one-off leaves the live list but keeps its
+   * text and the date it was done in `archive`, because a list that quietly
+   * eats what you finished is a list you stop trusting. Repeating items simply
+   * uncheck.
+   *
+   * Guarded on `loaded`: rolling before the vault answers would roll an empty
+   * list and then save that emptiness over the real one. And a blank marker
+   * rolls NOTHING - it only sets itself - or a first ever run would archive
+   * work finished minutes ago.
+   */
+  function roll(){
+    if (!loaded) return false;
+    var changed = false;
+    var moved = 0, reset = 0;
+    var t = todayLocal(), wk = weekKey();
+
+    LISTS.forEach(function(L){
+      if (!L.roll) return;
+      var due = L.roll === 'day'
+        ? (state.rolledOn && state.rolledOn !== t)
+        : (state.rolledWeek && state.rolledWeek !== wk);
+      if (!due) return;
+      var keep = [];
+      items(L.id).forEach(function(x){
+        if (x.done && x.repeat){ x.done = false; x.doneAt = null; reset++; keep.push(x); return; }
+        if (x.done){
+          state.archive.unshift({ title:x.title, list:L.id, doneAt:x.doneAt || t });
+          moved++;
+          return;                              // archived, never deleted
+        }
+        keep.push(x);                          // unfinished carries over
+      });
+      state.lists[L.id] = keep;
+      changed = true;
+    });
+
+    if (state.rolledOn !== t){ state.rolledOn = t; changed = true; }
+    if (state.rolledWeek !== wk){ state.rolledWeek = wk; changed = true; }
+
+    if (state.archive.length > ARCHIVE_CAP) state.archive.length = ARCHIVE_CAP;
+
+    if (moved || reset){
+      var bits = [];
+      if (moved) bits.push(moved + (moved === 1 ? ' finished item' : ' finished items') + ' moved to Recently finished');
+      if (reset) bits.push(reset + ' repeating ' + (reset === 1 ? 'item' : 'items') + ' unchecked');
+      rolledNote = 'New day: ' + bits.join(', ') + '.';
+    }
+    return changed;
+  }
+
+  /* ---------------- icons ---------------- */
+  function checkIcon(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="#04120c" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"></polyline></svg>';
+  }
+  function removeIcon(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"></line><line x1="19" y1="5" x2="5" y2="19"></line></svg>';
+  }
+  function upIcon(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg>';
+  }
+
+  /* ---------------- poster ---------------- */
+  function renderPoster(){
+    var num = document.getElementById('posterNum');
+    if (!num) return;
+    var all = items('daily');
+    var done = all.length - openOf('daily').length;
+    var of = document.getElementById('posterOf');
+    var bar = document.getElementById('posterBar');
+    var pill = document.getElementById('posterPill');
+    var rows = document.getElementById('posterRows');
+
+    if (!all.length){
+      num.textContent = '0';
+      of.textContent = 'nothing on today';
+      bar.style.width = '0%';
+    } else {
+      num.textContent = String(done);
+      of.textContent = 'of ' + all.length + ' today';
+      bar.style.width = Math.round(done / all.length * 100) + '%';
+    }
+    var clear = all.length > 0 && done === all.length;
+    pill.textContent = clear ? 'day clear' : 'today';
+    pill.className = 'pill' + (clear ? '' : ' flat');
+
+    rows.innerHTML = '';
+    ['weekly','grocery','projects'].forEach(function(id){
+      var n = openOf(id).length;
+      var d = document.createElement('div');
+      d.className = 'pRow' + (n ? ' has' : '');
+      d.innerHTML = '<span class="dot"></span>' + esc(listById(id).name) + '<b>' + n + '</b>';
+      rows.appendChild(d);
+    });
+  }
+
+  /* ---------------- page ---------------- */
+  function renderItem(x, L, archived){
+    var row = document.createElement('div');
+    row.className = 'item' + (x.done || archived ? ' done' : '');
+
+    if (archived){
+      var sp = document.createElement('span');
+      sp.className = 'check';
+      sp.style.opacity = '.5';
+      sp.style.background = 'var(--mint)';
+      sp.style.borderColor = 'var(--mint)';
+      sp.innerHTML = checkIcon();
+      sp.querySelector('svg').style.opacity = '1';
+      row.appendChild(sp);
+    } else {
+      var check = document.createElement('button');
+      check.className = 'check'; check.type = 'button';
+      check.setAttribute('aria-label', (x.done ? 'Mark not done: ' : 'Mark done: ') + x.title);
+      check.setAttribute('aria-pressed', x.done ? 'true' : 'false');
+      check.innerHTML = checkIcon();
+      check.addEventListener('click', function(){ toggle(L.id, x.id); });
+      row.appendChild(check);
+    }
+
+    var txt = document.createElement('div');
+    txt.className = 'txt';
+    txt.textContent = x.title;
+    row.appendChild(txt);
+
+    if (archived){
+      var when = document.createElement('span');
+      when.className = 'tag';
+      when.textContent = x.doneAt || '';
+      row.appendChild(when);
+      return row;
+    }
+
+    if (x.repeat){
+      var rp = document.createElement('span');
+      rp.className = 'tag'; rp.textContent = L.roll === 'week' ? 'weekly' : 'daily';
+      row.appendChild(rp);
+    }
+
+    // Someday is a holding pen, so its one useful action is getting out of it.
+    if (L.id === 'someday' && !x.done){
+      var up = document.createElement('button');
+      up.className = 'iconBtn'; up.type = 'button';
+      up.setAttribute('aria-label', 'Move to Daily: ' + x.title);
+      up.title = 'Move to Daily';
+      up.innerHTML = upIcon();
+      up.addEventListener('click', function(){ promote(x.id); });
+      row.appendChild(up);
+    }
+
+    var rm = document.createElement('button');
+    rm.className = 'iconBtn'; rm.type = 'button';
+    rm.setAttribute('aria-label', 'Remove: ' + x.title);
+    rm.innerHTML = removeIcon();
+    rm.addEventListener('click', function(){ remove(L.id, x.id); });
+    row.appendChild(rm);
+
+    return row;
+  }
+
+  function renderTabs(){
+    var wrap = document.getElementById('tabs');
+    wrap.innerHTML = '';
+    LISTS.forEach(function(L){
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'tab' + (tab === L.id ? ' on' : '');
+      b.setAttribute('aria-pressed', tab === L.id ? 'true' : 'false');
+      var n = openOf(L.id).length;
+      b.innerHTML = esc(L.name) + (n ? '<span class="c">' + n + '</span>' : '');
+      b.disabled = !loaded;
+      b.addEventListener('click', function(){ tab = L.id; renderPage(); });
+      wrap.appendChild(b);
+    });
+  }
+
+  function renderPage(){
+    if (mode !== 'page') return;
+    var L = listById(tab);
+
+    var tEl = document.getElementById('trouble');
+    tEl.hidden = !trouble; tEl.textContent = trouble;
+    var rEl = document.getElementById('rolled');
+    rEl.hidden = !rolledNote; rEl.textContent = rolledNote;
+
+    var open = openOf(tab), done = doneOf(tab);
+    document.getElementById('pageNum').textContent = String(open.length);
+    document.getElementById('pageOf').textContent = 'open in ' + L.name;
+    document.getElementById('pagePill').textContent = done.length + ' done';
+
+    renderTabs();
+    document.getElementById('why').textContent = L.why;
+    document.getElementById('newTitle').placeholder = 'Add to ' + L.name;
+
+    var repWrap = document.getElementById('repWrap');
+    repWrap.hidden = !L.repeatable;
+    if (!L.repeatable) document.getElementById('repeats').checked = false;
+
+    var openEl = document.getElementById('openList');
+    openEl.innerHTML = '';
+    if (!open.length){
+      var e = document.createElement('div');
+      e.className = 'empty';
+      e.textContent = done.length
+        ? (L.roll ? 'Nothing open. What is finished clears on its own.' : 'Nothing open. Clear the finished ones when you are ready.')
+        : 'Nothing here yet. Add the first one above.';
+      openEl.appendChild(e);
+    } else {
+      open.forEach(function(x){ openEl.appendChild(renderItem(x, L, false)); });
+    }
+
+    var dw = document.getElementById('doneWrap');
+    dw.hidden = !done.length;
+    if (done.length){
+      var dl = document.getElementById('doneList');
+      dl.innerHTML = '';
+      done.forEach(function(x){ dl.appendChild(renderItem(x, L, false)); });
+      // Projects is the counted list: clearing a finished project would walk
+      // projects_done backwards, so that button is not offered there.
+      document.getElementById('clearDone').hidden = !!L.counts;
+    }
+
+    var arch = state.archive.filter(function(a){ return a.list === tab; });
+    var aw = document.getElementById('archWrap');
+    aw.hidden = !arch.length;
+    if (arch.length){
+      document.getElementById('archCount').textContent = arch.length;
+      var al = document.getElementById('archList');
+      al.innerHTML = '';
+      arch.slice(0, 30).forEach(function(a){ al.appendChild(renderItem(a, L, true)); });
+    }
+  }
+
+  function renderAll(){ renderPoster(); renderPage(); }
+
+  /* ---------------- actions ---------------- */
+  function toggle(listId, id){
+    var arr = items(listId);
+    for (var i=0;i<arr.length;i++){
+      if (arr[i].id === id){
+        arr[i].done = !arr[i].done;
+        arr[i].doneAt = arr[i].done ? todayLocal() : null;
+        break;
+      }
+    }
+    persist();
+    if (listId === 'projects') reportDone();
+    renderAll();
+  }
+
+  function remove(listId, id){
+    state.lists[listId] = items(listId).filter(function(x){ return x.id !== id; });
+    persist();
+    if (listId === 'projects') reportDone();
+    renderAll();
+  }
+
+  function promote(id){
+    var found = null;
+    state.lists.someday = items('someday').filter(function(x){
+      if (x.id === id){ found = x; return false; }
+      return true;
+    });
+    if (found){
+      found.done = false; found.doneAt = null;
+      state.lists.daily.push(found);
+      tab = 'daily';
+    }
+    persist();
+    renderAll();
+  }
+
+  function add(){
+    var input = document.getElementById('newTitle');
+    var title = (input.value || '').trim();
+    if (!title) return;
+    var L = listById(tab);
+    var rep = L.repeatable && document.getElementById('repeats').checked;
+    items(tab).push({
+      id: uid(), title: title, done: false, repeat: !!rep,
+      createdAt: todayLocal(), doneAt: null
+    });
+    input.value = '';
+    input.focus();
+    persist();
+    renderAll();
+  }
+
+  function clearDone(){
+    var L = listById(tab);
+    if (L.counts) return;              // never walk projects_done backwards
+    doneOf(tab).forEach(function(x){
+      state.archive.unshift({ title:x.title, list:tab, doneAt:x.doneAt || todayLocal() });
+    });
+    if (state.archive.length > ARCHIVE_CAP) state.archive.length = ARCHIVE_CAP;
+    state.lists[tab] = openOf(tab);
+    persist();
+    renderAll();
+  }
+
+  /* ---------------- boot ---------------- */
+  function enable(on){
+    ['newTitle','addBtn','repeats'].forEach(function(id){
+      var el = document.getElementById(id);
+      if (el) el.disabled = !on;
+    });
+  }
+
+  function wire(){
+    var btn = document.getElementById('addBtn');
+    var input = document.getElementById('newTitle');
+    if (btn) btn.addEventListener('click', add);
+    if (input) input.addEventListener('keydown', function(e){
+      if (e.key === 'Enter') add();
+    });
+    var cd = document.getElementById('clearDone');
+    if (cd) cd.addEventListener('click', clearDone);
+  }
+
+  wire();
+  enable(false);
+  renderAll();
+
+  Vitality.onWriteError(function(){
+    trouble = 'That did not save. Your lists are still on screen, but the vault refused the write.';
+    renderPage();
+  });
+
+  Vitality.load().then(function(res){
+    if (!res.ok){
+      trouble = 'Could not reach your vault. Nothing is saving until it answers, so nothing gets written over.';
+      renderPage();
+      return;
+    }
+    var d = res.data;
+    if (d && typeof d === 'object'){
+      if (d.v === 2){
+        LISTS.forEach(function(L){
+          state.lists[L.id] = (d.lists && Array.isArray(d.lists[L.id])) ? d.lists[L.id] : [];
+        });
+        state.archive = Array.isArray(d.archive) ? d.archive : [];
+        state.rolledOn = d.rolledOn || '';
+        state.rolledWeek = d.rolledWeek || '';
+      } else if (Array.isArray(d.projects)){
+        // v1. Its items ARE the projects list, carried across untouched so
+        // nothing logged before today moves or disappears.
+        state.lists.projects = d.projects;
+      }
+    }
+    loaded = true;
+    enable(true);
+    if (roll()) persist();
+    renderAll();
+    reportDone();
+  });
+})();
+</script>
+</body>
+</html>

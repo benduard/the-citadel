@@ -54,7 +54,19 @@ laptop is still on the phone. The data was the point; the layout is a later job.
 
 # Not done yet
 
-- [ ] The equation. `lib/tiles/weights.ts` is still empty
-       the Projects tile saves and reports a number, but that number counts
-       toward nothing until there is a goal to count it toward. this is the
-       next real conversation, not a file to guess at
+- [x] The equation. Three goals are live in `lib/tiles/weights.ts`
+       strong, feel, showup - each one weighting checkin/lifting/recovery/body/
+       projects differently.
+- [x] The rank. One standing across every log, Bronze to World Class
+       `lib/rank.js`. Weights are your three goals averaged, since you said all
+       three mattered. Half of it is showing up, half is improving on your own
+       last fortnight. It refuses to rank under 28 days and counts down instead.
+       Run `./run-tests.sh` to check the maths still holds.
+
+---
+
+# Checking the board still works
+
+`./run-tests.sh` runs everything: the rank maths, the shell panels, and
+Lifting's last-time lookup. Plain node, no install, no framework. Run it
+before you push.

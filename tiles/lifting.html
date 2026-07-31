@@ -23,8 +23,15 @@
       custom:   [ { id, name, pri, sec: [], cat, pat, bwf, w, lad: [9], cues: [] } ],
       claimed:  { "<weekKey>:<questId>": true },
       lvlSeen:  <number>,             // last level celebrated, so it fires once
-      rankSeen: { "<exercise name>": <rank index 0-26> }
+      rankSeen: { "<exercise name>": <rank index 0-26> },
+      splits:   { "YYYY-MM-DD": "legs" | "push" | "pull" }
     }
+
+  splits is which of SPLITS was chosen for a given day. Per day, not one sticky
+  setting, so the log remembers what each session was and a new morning never
+  inherits yesterday's plan. A day with no entry means no split was picked, and
+  the picker opens on Everything. Added 2026-07-31; an older blob simply has
+  none, which needs no migration.
 
   v2 replaces v1 on Ruben's word, 2026-07-30. v1 held { unit, days } with the
   same set shape. A v1 blob loads its sets across rather than binning them, but
@@ -238,6 +245,49 @@
   .kv:first-child{ border-top:0; }
   .kv span:last-child{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); }
 
+  /* ---------- today's split ---------- */
+  .splitRow{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+  .splitBtn{
+    flex:1 1 auto; min-height:40px; padding:8px 12px; cursor:pointer;
+    border:1px solid var(--border); border-radius:10px;
+    background:var(--card2); color:var(--muted);
+    font-size:12.5px; font-weight:600; letter-spacing:-.01em; text-align:center;
+    transition:border-color .16s, color .16s, background .16s;
+  }
+  .splitBtn:hover{ color:var(--text); }
+  .splitBtn.on{
+    border-color:var(--volt-line); color:var(--volt); background:var(--volt-soft);
+  }
+  .splitBtn.all{ flex:0 0 auto; }
+
+  /* ---------- last time: the same exercise, set by set ---------- */
+  .lt{ margin-bottom:10px; border:1px solid var(--border); border-radius:10px;
+       background:var(--card2); overflow:hidden; }
+  .lt .lth{ display:flex; align-items:baseline; gap:8px; padding:8px 11px;
+            border-bottom:1px solid rgba(148,163,158,.1); }
+  .lt .lth b{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9.5px;
+              letter-spacing:.14em; text-transform:uppercase; color:var(--muted); font-weight:600; }
+  .lt .lth i{ font-style:normal; font-size:10.5px; color:var(--faint); margin-left:auto;
+              font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .ltRow{ display:flex; align-items:center; gap:9px; padding:7px 11px;
+          border-top:1px solid rgba(148,163,158,.07); }
+  .ltRow:first-of-type{ border-top:0; }
+  .ltRow .n{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9.5px;
+             color:var(--faint); width:34px; flex:none; letter-spacing:.06em; }
+  .ltRow .w{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px;
+             color:var(--text); }
+  .ltRow .r{ margin-left:auto; font-size:10.5px; white-space:nowrap;
+             font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .ltRow .r.up{ color:var(--mint); }
+  .ltRow .r.same{ color:var(--muted); }
+  .ltRow .r.down{ color:var(--amber); }
+  /* the set you are about to do, in the game layer's blue */
+  .ltRow.now{ background:var(--volt-soft); border-top-color:var(--volt-line); }
+  .ltRow.now .n{ color:var(--volt); }
+  .ltRow.now .w{ color:var(--volt); }
+  .lt .ltNote{ padding:8px 11px; font-size:11px; color:var(--muted); line-height:1.45; }
+  .lt .btn{ padding:4px 9px; font-size:11px; }
+
   .scrollx{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
 
   /* rank badge */
@@ -389,11 +439,19 @@
       <div class="card">
         <h3>Log a set</h3>
         <p class="note" id="logNote">Total load on the body. Two 20kg dumbbells is 40.</p>
+        <!-- Today's split. Picking one narrows the exercise list below to the
+             muscles that day trains. Filled by renderSplit(). -->
+        <div class="splitRow" id="splitRow"></div>
+        <p class="note" id="splitNote" style="margin-bottom:8px"></p>
+
         <div class="row" style="margin-bottom:8px">
           <label class="fl grow" style="flex:1 1 100%"><span>Exercise</span>
             <select id="fEx" disabled></select>
           </label>
         </div>
+        <!-- What you did on this exercise the LAST time you trained it, set by
+             set, so set 2 today is aimed at set 2 then. Filled by renderLast(). -->
+        <div id="lastTime"></div>
         <div class="row three" style="margin-bottom:8px">
           <label class="fl grow"><span>Weight (<i id="fUnit">kg</i>)</span>
             <input id="fKg" type="number" inputmode="decimal" step="0.5" min="0" placeholder="0" disabled>
@@ -564,6 +622,15 @@
         <p class="note" id="xpNote"></p>
         <div class="bar" style="margin:10px 0 12px"><i id="xpBar"></i></div>
         <ul class="list" id="xpBreak"></ul>
+      </div>
+
+      <div class="card">
+        <h3>Your training data</h3>
+        <p class="note">Every set you have ever logged is kept. Nothing here thins out old
+          sessions, and nothing ever will without you asking. This is the room it has left.</p>
+        <div class="bar" style="margin:10px 0 10px"><i id="stoBar"></i></div>
+        <p class="note" id="stoNote"></p>
+        <ul class="list" id="stoList"></ul>
       </div>
 
       <div class="card">
@@ -801,6 +868,48 @@
   var PATTERNS = { pressH:'Horizontal press', pressV:'Overhead press', squat:'Squat',
                    hinge:'Hinge', pullV:'Vertical pull', rowH:'Row', curl:'Isolation' };
 
+  /**
+   * THE SPLIT. Ruben's actual three way, as of 2026-07-31:
+   * legs, then chest and shoulders with abs, then back and arms.
+   *
+   * A split is nothing more than a set of PRIMARY muscles. Pick one and the
+   * exercise picker shows the lifts that train those muscles, grouped by
+   * muscle, biggest lift first. Nothing is ever deleted or hidden for good -
+   * "Everything" is always one tap away, because a split is a plan, not a cage.
+   *
+   * Matched on PRIMARY muscle only, deliberately. A bench press hits triceps,
+   * but it is not a triceps exercise, and a picker that said so on arm day
+   * would be a worse tool than no filter at all.
+   *
+   * THE ONE RULE IF YOU EDIT THIS: every muscle in MUSCLES must appear in
+   * exactly one split. Miss one and its exercises quietly vanish from every
+   * split; list one twice and the same lift turns up on two different days.
+   * tiles/lifting.splits.test.js fails loudly on either, so change this freely
+   * and let the test tell you if you broke it.
+   */
+  var SPLITS = [
+    { id:'legs', name:'Legs', mus:['quads','hams','glutes','calves'] },
+    { id:'push', name:'Chest & Shoulders + Abs', mus:['chest','delts','abs','obliques'] },
+    { id:'pull', name:'Back & Arms', mus:['lats','traps','reardelt','biceps','triceps','forearms','lowerback'] }
+  ];
+  function splitById(id){
+    for (var i=0;i<SPLITS.length;i++) if (SPLITS[i].id === id) return SPLITS[i];
+    return null;
+  }
+  // Which split is on for a given day. Stored per DAY, not as one sticky
+  // setting, so the log remembers what each session actually was and a new
+  // morning never inherits yesterday's plan by accident.
+  function splitFor(k){ return S.splits[k || today()] || ''; }
+  // The last day before today that ran this split, so "when did I last do legs"
+  // is answerable from the log rather than from memory.
+  function lastSplitDay(id){
+    var k = today();
+    var keys = Object.keys(S.splits).filter(function(d){
+      return d < k && S.splits[d] === id && (S.days[d] || []).length;
+    }).sort();
+    return keys.length ? keys[keys.length - 1] : null;
+  }
+
   var RAW = [
     ['Barbell Bench Press','chest','delts,triceps','push','pressH',0,3,[0.35,0.55,0.75,1.00,1.25,1.50,1.75,2.05,2.40],'Shoulder blades pinned down and back before the bar moves.|Bar to the lower chest, elbows about 45 degrees from the ribs.|Push the bench away from you. Hips stay down.'],
     ['Incline Barbell Press','chest','delts,triceps','push','pressH',0,2,[0.30,0.45,0.62,0.82,1.05,1.28,1.50,1.75,2.05],'Bench at 30 degrees. Steeper turns it into a shoulder press.|Bar to the collarbone, not the throat.|Same setup as flat: blades back, ribs down.'],
@@ -901,7 +1010,8 @@
   /* ============================ state ============================ */
   var S = {
     v:2, unit:'kg', bw:null, weekTarget:3, rest:120,
-    days:{}, notes:{}, routines:[], custom:[], claimed:{}, lvlSeen:1, rankSeen:{}
+    days:{}, notes:{}, routines:[], custom:[], claimed:{}, lvlSeen:1, rankSeen:{},
+    splits:{}
   };
   var loaded = false;
   var trouble = '';
@@ -927,6 +1037,16 @@
     return (Math.round(v * 10) / 10).toLocaleString(undefined, { maximumFractionDigits:1 });
   }
   function num(n){ return Math.round(n).toLocaleString(); }
+
+  // Exercise names can be typed by hand (S.custom), so anything built into an
+  // HTML string has to be escaped. The frame is sealed and cannot reach the
+  // page or the vault, but a name like "<img onerror=...>" would still wreck
+  // his own log, and everywhere else in this file builds nodes via textContent.
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
 
   // "0 kg x 8" on a pull up is a lie of omission: you moved yourself.
   function setLabel(s, e){
@@ -1244,26 +1364,78 @@
     render();
   }
 
-  function fillSelect(sel, keepValue){
+  /**
+   * Fill an exercise picker.
+   *
+   * splitId narrows it to one training day and regroups by MUSCLE rather than
+   * by push/pull/legs, because on a legs day "Quads / Hamstrings / Glutes /
+   * Calves" is the question being asked, and "Legs" as a single heading
+   * answers nothing. Inside each muscle the biggest lifts come first (w, the
+   * same weight the ranks use), so the top of every group is the lift worth
+   * building the day around.
+   *
+   * Pass no splitId and it behaves exactly as it always did.
+   */
+  function fillSelect(sel, keepValue, splitId){
     var cur = keepValue ? sel.value : '';
     sel.innerHTML = '';
     var list = allEx();
-    var groups = {};
-    list.forEach(function(e){ (groups[e.cat] = groups[e.cat] || []).push(e); });
-    var order = ['push','pull','legs','core','custom'];
-    var names = { push:'Push', pull:'Pull', legs:'Legs', core:'Core', custom:'Yours' };
-    order.forEach(function(c){
-      if (!groups[c]) return;
-      var og = document.createElement('optgroup');
-      og.label = names[c];
-      groups[c].forEach(function(e){
-        var o = document.createElement('option');
-        o.value = e.name; o.textContent = e.name;
-        og.appendChild(o);
+    var sp = splitId ? splitById(splitId) : null;
+
+    if (sp){
+      var inSplit = list.filter(function(e){ return sp.mus.indexOf(e.pri) !== -1; });
+      sp.mus.forEach(function(m){
+        var forMus = inSplit.filter(function(e){ return e.pri === m; })
+          .sort(function(a, b){ return (b.w || 0) - (a.w || 0) || a.name.localeCompare(b.name); });
+        if (!forMus.length) return;
+        var og = document.createElement('optgroup');
+        og.label = MUSCLES[m] || m;
+        forMus.forEach(function(e){
+          var o = document.createElement('option');
+          o.value = e.name; o.textContent = e.name;
+          og.appendChild(o);
+        });
+        sel.appendChild(og);
       });
-      sel.appendChild(og);
-    });
-    if (cur) sel.value = cur;
+      // A custom exercise whose muscle is not in this split still has to be
+      // reachable, or a lift of his own could become unloggable on the very
+      // day he built it for.
+      var strays = list.filter(function(e){ return e.custom && sp.mus.indexOf(e.pri) === -1; });
+      if (strays.length){
+        var og2 = document.createElement('optgroup');
+        og2.label = 'Yours, other days';
+        strays.forEach(function(e){
+          var o = document.createElement('option');
+          o.value = e.name; o.textContent = e.name;
+          og2.appendChild(o);
+        });
+        sel.appendChild(og2);
+      }
+    } else {
+      var groups = {};
+      list.forEach(function(e){ (groups[e.cat] = groups[e.cat] || []).push(e); });
+      var order = ['push','pull','legs','core','custom'];
+      var names = { push:'Push', pull:'Pull', legs:'Legs', core:'Core', custom:'Yours' };
+      order.forEach(function(c){
+        if (!groups[c]) return;
+        var og = document.createElement('optgroup');
+        og.label = names[c];
+        groups[c].forEach(function(e){
+          var o = document.createElement('option');
+          o.value = e.name; o.textContent = e.name;
+          og.appendChild(o);
+        });
+        sel.appendChild(og);
+      });
+    }
+
+    // Keep what was selected if this list still holds it. If the split just
+    // changed underneath it, fall to the first lift of the new day rather
+    // than leaving the picker showing an exercise it no longer offers.
+    if (cur){
+      sel.value = cur;
+      if (sel.value !== cur) sel.selectedIndex = 0;
+    }
   }
 
   function msg(text, ok){
@@ -1277,11 +1449,145 @@
   }
 
   /* ============================ page: home ============================ */
+  /* ---------- last time on this exercise ----------
+     The point of this panel: set 2 today should be aimed at set 2 last time,
+     not at some average. So the sets are matched BY POSITION, in the order
+     they were logged, and the one you are about to do is the one highlighted.
+
+     "Last time" is the most recent day BEFORE today that has this exercise on
+     it. Deliberately not today: today is the session being compared, and
+     folding it in would have you chasing a number you already hit an hour ago.
+     Two sessions on one calendar day read as one day - that is what a date key
+     means here, and inventing a session boundary inside a day would be
+     guessing at something never recorded. */
+  function prevSessionFor(ex){
+    if (!ex) return null;
+    var k = today();
+    var keys = Object.keys(S.days).filter(function(d){ return d < k; }).sort();
+    for (var i = keys.length - 1; i >= 0; i--){
+      var sets = (S.days[keys[i]] || []).filter(function(s){ return s.ex === ex; });
+      if (sets.length) return { date: keys[i], sets: sets };
+    }
+    return null;
+  }
+  function todaySetsFor(ex){
+    return (S.days[today()] || []).filter(function(s){ return s.ex === ex; });
+  }
+
+  // Set for set, is today's heavier work? Volume (load x reps) rather than
+  // weight alone, so 100x8 beating 100x6 counts, which is the whole point of
+  // showing reps next to the weight.
+  function compareSet(now, then){
+    var a = setVolume(now), b = setVolume(then);
+    if (!isFinite(a) || !isFinite(b) || !b) return null;
+    var d = Math.round((a - b) / b * 100);
+    if (d > 0) return { cls:'up', text:'up ' + d + '%' };
+    if (d < 0) return { cls:'down', text:'down ' + Math.abs(d) + '%' };
+    return { cls:'same', text:'matched' };
+  }
+
+  function renderSplit(){
+    var row = $('splitRow'), note = $('splitNote');
+    if (!row || !note) return;
+    var cur = splitFor();
+
+    row.innerHTML = '';
+    SPLITS.forEach(function(s){
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'splitBtn' + (cur === s.id ? ' on' : '');
+      b.setAttribute('data-split', s.id);
+      b.setAttribute('aria-pressed', cur === s.id ? 'true' : 'false');
+      b.textContent = s.name;
+      b.disabled = !loaded;
+      row.appendChild(b);
+    });
+    var all = document.createElement('button');
+    all.type = 'button';
+    all.className = 'splitBtn all' + (cur ? '' : ' on');
+    all.setAttribute('data-split', '');
+    all.setAttribute('aria-pressed', cur ? 'false' : 'true');
+    all.textContent = 'Everything';
+    all.disabled = !loaded;
+    row.appendChild(all);
+
+    if (!cur){
+      note.textContent = 'No split picked, so every exercise is listed. Pick one and the list narrows to that day.';
+      return;
+    }
+    var sp = splitById(cur);
+    var last = lastSplitDay(cur);
+    var bits = [sp.mus.map(function(m){ return MUSCLES[m] || m; }).join(', ')];
+    bits.push(last ? 'last ' + sp.name + ' was ' + lastTimeWhen(last) : 'first ' + sp.name + ' day logged here');
+    note.textContent = bits.join('  ·  ');
+  }
+
+  function renderLast(){
+    var box = $('lastTime');
+    if (!box) return;
+    var ex = $('fEx').value;
+    if (!ex || !loaded){ box.innerHTML = ''; return; }
+
+    var prev = prevSessionFor(ex);
+    var done = todaySetsFor(ex);
+    var e = findEx(ex);
+
+    if (!prev){
+      box.innerHTML = '<div class="lt"><div class="ltNote">First time logging ' + esc(ex) +
+        '. Today is the baseline, and next time this box will hold it.</div></div>';
+      return;
+    }
+
+    var html = '<div class="lt"><div class="lth"><b>Last time</b><i>' + esc(lastTimeWhen(prev.date)) +
+      '  ·  ' + prev.sets.length + (prev.sets.length === 1 ? ' set' : ' sets') + '</i></div>';
+
+    prev.sets.forEach(function(s, i){
+      var mine = done[i] || null;                 // today's set in the SAME position
+      var isNow = i === done.length;              // the one about to be done
+      var right = '';
+      if (mine){
+        var c = compareSet(mine, s);
+        right = '<span class="r ' + (c ? c.cls : 'same') + '">' + setLabel(mine, e) +
+          (c ? '  ·  ' + c.text : '') + '</span>';
+      } else if (isNow){
+        right = '<button class="btn small ghost" type="button" data-use="' + i + '">Use</button>';
+      }
+      html += '<div class="ltRow' + (isNow ? ' now' : '') + '">' +
+        '<span class="n">SET ' + (i + 1) + '</span>' +
+        '<span class="w">' + esc(setLabel(s, e)) + '</span>' +
+        right + '</div>';
+    });
+
+    // Sets beyond what was done last time have nothing to beat, and saying so
+    // is better than silently running out of rows mid session.
+    if (done.length >= prev.sets.length){
+      html += '<div class="ltNote">' +
+        (done.length > prev.sets.length
+          ? 'Set ' + (done.length + 1) + ' is past last time’s ' + prev.sets.length + '. Extra volume, nothing to match.'
+          : 'That is every set from last time. Anything more is new ground.') +
+        '</div>';
+    }
+
+    box.innerHTML = html + '</div>';
+  }
+
+  // Deliberately NOT called niceDate: that name is already taken above and
+  // returns the short "24 Jul" the session and PR lists are built on.
+  function lastTimeWhen(k){
+    var then = fromKey(k);
+    var days = Math.round((fromKey(today()) - then) / 86400000);
+    if (days === 1) return 'yesterday';
+    if (days > 1 && days < 14) return niceDate(k) + ', ' + days + ' days ago';
+    return niceDate(k);
+  }
+
   function renderHome(){
     var k = today();
     var a = S.days[k] || [];
 
     $('fUnit').textContent = unitLabel();
+    renderSplit();
+    renderLast();
 
     $('todayNote').textContent = a.length
       ? a.length + (a.length === 1 ? ' set, ' : ' sets, ') + num(fromKg(dayVolume(k))) + ' ' + unitLabel() + ' moved'
@@ -1856,6 +2162,54 @@
   }
 
   /* ============================ page: profile ============================ */
+  /* ---------- how much room the log has left ----------
+     The host refuses a tile blob over 512 KB and answers save:error, which
+     this tile already surfaces honestly. But finding out at the wall is no
+     use when the whole point of the log is that it keeps everything, so the
+     ceiling is shown while there is still time to do something about it.
+
+     This measures the REAL serialised size, not an estimate, because the
+     number is only worth showing if it is the same number the host checks. */
+  var STORE_CAP = 512 * 1024;
+  function renderStorage(){
+    var bytes;
+    try { bytes = JSON.stringify(S).length; } catch (e) { bytes = 0; }
+    var pct = Math.min(1, bytes / STORE_CAP);
+    var sets = history().length;
+
+    $('stoBar').style.transform = 'scaleX(' + pct + ')';
+    $('stoBar').style.background = pct > 0.8 ? 'var(--amber)' : 'var(--volt)';
+
+    var kb = Math.round(bytes / 1024 * 10) / 10;
+    var note = kb + ' KB of ' + Math.round(STORE_CAP / 1024) + ' KB used, ' +
+      num(sets) + (sets === 1 ? ' set' : ' sets') + ' logged.';
+
+    // Room left, in the only unit that means anything here: more sets.
+    if (sets > 0 && bytes > 0){
+      var perSet = bytes / sets;
+      var room = Math.max(0, Math.floor((STORE_CAP - bytes) / perSet));
+      note += ' Room for roughly ' + num(room) + ' more at the size yours run.';
+      if (pct > 0.8) note += ' Worth saying now rather than at the wall: tell the mentor and the log can be split by year before anything is at risk.';
+    }
+    $('stoNote').textContent = note;
+
+    var ul = $('stoList'); ul.innerHTML = '';
+    [['Sessions', num(Object.keys(S.days).length) + ' days with a set on them'],
+     ['Sets', num(sets) + ' kept, every one of them'],
+     ['Routines', num(S.routines.length) + ' saved'],
+     ['Custom exercises', num(S.custom.length) + ' of your own'],
+     ['Where it lives', 'signed in, your Supabase vault. signed out, this device only']
+    ].forEach(function(r){
+      var li = document.createElement('li');
+      var d = document.createElement('div'); d.className = 'grow';
+      var l1 = document.createElement('div'); l1.className = 'l1'; l1.textContent = r[0];
+      var l2 = document.createElement('div'); l2.className = 'l2'; l2.textContent = r[1];
+      d.appendChild(l1); d.appendChild(l2);
+      li.appendChild(d);
+      ul.appendChild(li);
+    });
+  }
+
   function renderProfile(){
     var xp = xpTotal();
     var L = levelFor(xp);
@@ -1883,6 +2237,8 @@
       li.appendChild(n);
       br.appendChild(li);
     });
+
+    renderStorage();
 
     if ($('fBw') !== document.activeElement)
       $('fBw').value = S.bw ? Math.round(fromKg(S.bw) * 10) / 10 : '';
@@ -2083,6 +2439,31 @@
       if (t === $('bRest')) { startRest(); return; }
       if (t === $('bRestStop')) { stopRest(); return; }
 
+      // Today's split. Narrows the picker, and is recorded against the day so
+      // the log knows what each session was. hasAttribute, not the value:
+      // "Everything" is the empty string, which a truthy check would miss.
+      if (t.hasAttribute && t.hasAttribute('data-split')) {
+        var pick = t.getAttribute('data-split');
+        if (pick) S.splits[today()] = pick;
+        else delete S.splits[today()];   // no split is an absence, not a value
+        fillSelect($('fEx'), true, pick);
+        buzz(10);
+        persist();                        // persist re-renders, which redraws both
+        return;
+      }
+      // Copy last time's matching set into the form. It FILLS, it does not log:
+      // a button that silently wrote a set would put work in his history that
+      // his body never did, and this log is the thing every rank is built on.
+      if ((a = t.getAttribute('data-use'))) {
+        var prevU = prevSessionFor($('fEx').value);
+        var srcU = prevU && prevU.sets[parseInt(a, 10)];
+        if (!srcU) return;
+        $('fKg').value = srcU.kg ? Math.round(fromKg(srcU.kg) * 10) / 10 : '';
+        $('fReps').value = srcU.reps;
+        $('fReps').focus();
+        msg('Last time’s set ' + (parseInt(a, 10) + 1) + ' is in the form. Change it to what you actually do.', true);
+        return;
+      }
       if ((a = t.getAttribute('data-repeat'))) {
         var k = today(), list = S.days[k] || [];
         var src = list.filter(function(s){ return s.id === a; })[0];
@@ -2169,7 +2550,7 @@
         S.custom.push({ id:'c' + Date.now(), name:cn, pri:$('cMus').value, sec:[],
                         cat:'custom', pat:$('cPat').value, bwf:0, w:1, lad:null, cues:['Yours.'] });
         $('cName').value = '';
-        fillSelect($('fEx'), true);
+        fillSelect($('fEx'), true, splitFor());
         fillSelect($('reEx'), true);
         msg(cn + ' added. It logs and counts toward volume. No rank, because no ladder was set for it.', true);
         persist();
@@ -2212,6 +2593,7 @@
     $('fEx').addEventListener('change', function(){
       var e = findEx(this.value);
       if (e && e.lad) ladPick = this.value;   // only lifts with a ladder appear in that picker
+      renderLast();                            // switch exercise, switch the target
     });
 
     fillSelect($('fEx'), false);
@@ -2261,6 +2643,10 @@
         S.claimed = d.claimed || {};
         S.lvlSeen = d.lvlSeen || 1;
         S.rankSeen = d.rankSeen || {};
+        // Added 2026-07-31. A blob saved before that has no splits key, which
+        // is not a problem to fix: no split recorded means no split was
+        // chosen, and the picker simply opens on Everything.
+        S.splits = d.splits || {};
       } else if (d.days){
         // A v1 blob. Ruben asked for a clean start on 2026-07-30, so only the
         // display unit carries over and the log begins empty.
@@ -2269,6 +2655,10 @@
     }
     loaded = true;
     enable(true);
+    // The picker was filled at boot, before the vault answered and before
+    // there was any way to know today's split. Now there is, so refill it or
+    // a split chosen earlier today would come back to a full, unfiltered list.
+    fillSelect($('fEx'), true, splitFor());
     render();
     pushReport();
     // Seed the rank snapshot on first ever load so an existing lifter is not

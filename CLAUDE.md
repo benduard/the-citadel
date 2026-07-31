@@ -185,6 +185,15 @@ Sealed tiles never fetch and never hold a key.
   ask: remove the old one, or merge. If they say merge, you do the merge.
 - Design law: pure black, mint, Inter, minimal, calm. Mint is good, amber is
   caution, never red for how a person is doing. Off target is warm, never shaming.
+- On this board, the shell (background, header, tile card frame, the Library's
+  chrome) runs a second identity on top of that law: graphite surfaces, gold +
+  petrol as the interaction accent, a chamfered-panel command-deck look. This
+  is scoped exactly like Lifting's electric blue (`vault/decisions.md`): it is
+  the game/command layer, never how a person is doing. Anything judging that -
+  readiness bands, check-in scores, any tile's own verdict on how Ruben is
+  doing - stays mint and amber inside that tile's own file, untouched. Sealed
+  tiles do not inherit the shell's CSS anyway; this line is about intent, not
+  a technical accident.
 - Small steps. Push often. Never break their board.
 
 ---

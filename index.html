@@ -1,56 +1,62 @@
 <!DOCTYPE html>
-<html lang="en" style="background: #050807; color-scheme: dark;">
+<html lang="en" style="background: #0b0d10; color-scheme: dark;">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-<meta name="theme-color" content="#04060a" />
-<title>Main Dashboard</title>
+<meta name="theme-color" content="#0b0d10" />
+<title>The Citadel</title>
 
 <!--
-  The Vitality dashboard shell, pulled to one file.
-  Ported: app/app/Dashboard.tsx (shell only), app/app/DashboardHeader.tsx,
-  app/app/DashboardHeaderGem.tsx (fallback path), components/WelcomeBackdrop.tsx.
-  CSS extracted with postcss from dashboard.module.css, dashboardHeaderGem.module.css,
-  WelcomeBackdrop.module.css; :root + reset verbatim from app/globals.css.
-  Deliberately absent: the setup pill, the profile avatar, the settings gear,
-  Customize, and the whole DashboardGrid.
--->
+  THE SHELL. Rebuilt from the mint/aurora seed shell into the board's second
+  identity: graphite surfaces, gold + petrol as the interaction accent, a
+  chamfered command-deck look. Scoped exactly like Lifting's electric blue
+  (vault/decisions.md) - this is the game/command layer, never a verdict on
+  how Ruben is doing. Every tile is a sealed iframe with its own :root and
+  its own hardcoded colors (sandbox="allow-scripts", no allow-same-origin -
+  it cannot inherit anything from this page), so nothing here touches a
+  single tile's own mint/amber judgment colors. See CLAUDE.md's design law.
 
-<!-- Fonts layout.tsx loads via next/font/google. The shell uses --font-inter
-     (body) and --font-serif (the greeting). Hanken Grotesk + JetBrains Mono are
-     loaded by layout.tsx but no shell element references them, so they are not
-     pulled here. -->
+  Only Inter is loaded (design law's stated typeface). The command-deck look
+  comes from weight, tracking and a system-monospace stack for data labels,
+  not a second display webfont.
+-->
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap" rel="stylesheet" />
 
 <style>
-/* next/font exposes each face as a CSS variable on <html>. Same variables,
-   same faces, resolved to the Google Fonts families above. */
 :root {
   --font-inter: 'Inter';
-  --font-serif: 'Instrument Serif';
+  --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Code', Consolas, Menlo, monospace;
 }
 
-/* ===== app/globals.css — :root, verbatim ===== */
+/* ===== Color ===== */
 :root {
-  /* Colors */
-  --bg: #000000;
-  --bg-elevated: #0a0a0a;
-  --fg: #ffffff;
-  --mint: #6EE7B7;
-  --mint-hover: #5dd6a6;
-  --mint-deep: #1f4d3d;       /* dark teal partner to mint */
-  --mint-glow: rgba(110, 231, 183, 0.4);
-  --mint-ink: #042a1c;        /* dark foreground for text/icons on a mint fill */
+  /* Surfaces: graphite ladder, page -> card -> raised */
+  --bg: #0b0d10;
+  --bg-elevated: #151a20;
+  --surface-2: #1b212a;
+  --fg: #e9eef3;
+
+  /* The shell's game-layer accent duo. Gold: identity, strategy, ceremonial.
+     Petrol: interaction, momentum - the replacement for the seed's mint IN
+     THIS SHELL ONLY. */
+  --gold: #c8a567;
+  --gold-hi: #e8cf9e;
+  --petrol: #2e7d78;
+  --petrol-hover: #266864;
+  --petrol-hi: #5aaca5;
+  --petrol-ink: #04211e;
+
+  /* Design law's own colors, unchanged: amber is caution, red is never used
+     for how a person is doing. */
   --amber: #F59E0B;
-  --amber-warm: #d97706;      /* deeper amber for duotone gradients */
-  --wine: #7c2d12;            /* deep red-brown, partners with amber */
-  --red: #EF4444;
-  --muted: rgba(255, 255, 255, 0.5);
-  --muted-strong: rgba(255, 255, 255, 0.7);
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  --amber-warm: #d97706;
+
+  --muted: rgba(233, 238, 243, 0.5);
+  --muted-strong: rgba(233, 238, 243, 0.7);
+  --border: rgba(154, 168, 182, 0.14);
+  --border-strong: rgba(154, 168, 182, 0.24);
   --card: rgba(255, 255, 255, 0.02);
   --card-elevated: rgba(255, 255, 255, 0.04);
 
@@ -83,29 +89,23 @@
 
   /* Motion */
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ease-premium: cubic-bezier(0.16, 1, 0.3, 1);   /* the signature easing */
-  --ease-out-soft: cubic-bezier(0.32, 0.72, 0, 1); /* smooth lift / float */
+  --ease-premium: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-soft: cubic-bezier(0.32, 0.72, 0, 1);
   --duration-fast: 120ms;
   --duration: 180ms;
   --duration-lift: 480ms;
 }
 
-/* ===== app/globals.css — reset + html/body, verbatim ===== */
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-  /* Kill the grey/blue tap flash Safari paints over buttons & links on touch. */
   -webkit-tap-highlight-color: transparent;
 }
 
 html, body {
   height: 100%;
-  /* Rubber-band / overscroll past the top of any page must show the app's
-     near-black, never a pure-black band. Tint the root the editorial
-     atmosphere's darkest stop (#04060a) so the reveal is seamless, and damp the
-     bounce so it barely shows at all. body keeps var(--bg) below. */
-  background: #04060a;
+  background: #0b0d10;
   overscroll-behavior-y: none;
 }
 
@@ -118,33 +118,22 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  /* Retint every native control accent (form widgets, iOS cursor/selection
-     grab-handles) to the brand mint so nothing renders the OS default blue. */
-  accent-color: var(--mint);
-}
-
-::selection {
-  background: rgba(110, 231, 183, 0.25);
-}
-::-moz-selection {
-  background: rgba(110, 231, 183, 0.25);
-}
-
-:focus-visible {
-  outline: 2px solid rgba(110, 231, 183, 0.65);
-  outline-offset: 2px;
-}
-
-body {
+  accent-color: var(--petrol);
   -webkit-user-select: none;
   -moz-user-select: none;
   user-select: none;
 }
 
-/* ===== app/globals.css — .grain-overlay, verbatim ===== */
-.grain-overlay {
-  position: relative;
+::selection { background: rgba(46, 125, 120, 0.32); }
+::-moz-selection { background: rgba(46, 125, 120, 0.32); }
+
+:focus-visible {
+  outline: 2px solid rgba(90, 172, 165, 0.75);
+  outline-offset: 2px;
 }
+
+/* Fine surface grain, fixed overlay, never animated. */
+.grain-overlay { position: relative; }
 .grain-overlay::after {
   content: '';
   position: fixed;
@@ -152,87 +141,340 @@ body {
   pointer-events: none;
   z-index: 1;
   opacity: 0.035;
-  /* no mix-blend-mode: a blended fixed layer forces the compositor to
-     re-blend the whole page every scroll frame on mobile; at 3.5% opacity
-     the plain texture reads the same */
   background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
   background-size: 200px 200px;
 }
 
-/* ===== app/app/dashboard.module.css — postcss-extracted ===== */
+/* ===== Page: graphite atmosphere, directional gold overhead light, faint
+   petrol counter-light. Replaces the seed's aurora/mountains/particles. ===== */
 .page {
   position: relative;
   min-height: 100vh;
-  /* viewportFit:cover + black-translucent status bar means the page paints
-     under the notch / Dynamic Island and the home indicator. Pad the top and
-     bottom by the safe-area insets so the greeting clears the status bar and
-     the last tile clears the home indicator on iPhone. Insets are 0 on
-     desktop, so this is a no-op there. */
-  padding: calc(var(--space-10) + env(safe-area-inset-top)) var(--space-6)
-    calc(var(--space-16) + env(safe-area-inset-bottom));
-  overflow: hidden;
+  padding: calc(var(--space-8) + env(safe-area-inset-top)) var(--space-5)
+    calc(var(--space-12) + env(safe-area-inset-bottom));
 }
-
 .page::before {
   content: '';
-  position: absolute;
-  inset: -10% -5%;
-  background:
-    radial-gradient(ellipse 50% 35% at 70% 20%, rgba(110, 231, 183, 0.06), transparent 65%),
-    radial-gradient(ellipse 40% 30% at 20% 80%, rgba(110, 231, 183, 0.04), transparent 70%);
-  pointer-events: none;
-  animation: canvasDrift 60s ease-in-out infinite alternate;
+  position: fixed;
+  inset: 0;
   z-index: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1100px 460px at 58% -180px, rgba(200, 165, 103, 0.06), transparent 62%),
+    radial-gradient(900px 520px at 10% 108%, rgba(46, 125, 120, 0.05), transparent 60%),
+    linear-gradient(180deg, #0d1015 0%, #0b0d10 34%, #090b0e 100%);
+  background-attachment: fixed;
 }
+.rank[hidden] { display: none; }
 
 .shell {
   position: relative;
-  /* Lifts content above the fixed WelcomeBackdrop layers (aurora/mountains/
-     particles sit at z 0-2) so tiles and greeting stay in front. */
-  z-index: 5;
-  max-width: 1180px;
+  z-index: 2;
+  max-width: 1280px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: var(--space-10);
+  gap: var(--space-6);
 }
 
-/* ===== The tile grid =====
-   Vitality's own grid (.gridConsolidated) is a hand-placed 6-tile
-   grid-template-areas map. Named areas cannot drive a registry that does not
-   know its tiles ahead of time, so the AREAS are not ported. Its MEASUREMENTS
-   are, exactly: 4 columns, rows minmax(160px, 200px), gap --space-4; at 980px
-   two columns and grid-auto-rows minmax(160px, auto); at 560px gap --space-3
-   and minmax(150px, auto). Tiles span by size instead of being named.
+/* ===== Command bar: emblem, wordmark, sync state ===== */
+.cmdbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  opacity: 0;
+  animation: fadeUp 500ms var(--ease-premium) 40ms forwards;
+  /* The Library gear is position:fixed at 16px from the top right of the
+     VIEWPORT and is 42px wide, so it owns the box 16-58px in from that
+     corner. This row ends in the sync pill, which lands in exactly that box
+     on any screen narrow enough that the shell is not centred away from it.
+     Reserve the gear's lane rather than let it sit on top of the pill. */
+  padding-right: 48px;
+}
+/* Past this width the 1280px shell is centred with more than 58px of margin,
+   so the gear can no longer reach the pill and the lane is not needed. */
+@media (min-width: 1400px) { .cmdbar { padding-right: 0; } }
+.emblem {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  color: var(--gold-hi);
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  background: linear-gradient(155deg, rgba(200,165,103,.22), rgba(200,165,103,.04));
+  border: 1px solid rgba(200, 165, 103, 0.3);
+}
+.emblem svg { width: 14px; height: 14px; }
+.wordmark {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--fg);
+}
+.cmdbar-spacer { flex: 1; }
+.syncpill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  color: var(--muted-strong);
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: var(--radius-pill);
+  padding: 6px 11px;
+  text-transform: uppercase;
+}
+.syncdot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--muted); }
+.syncdot.on { background: var(--petrol-hi); animation: pulseDot 2.4s ease-in-out infinite; }
+.syncdot.warn { background: var(--amber); }
+@keyframes pulseDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .syncdot.on { animation: none; } }
 
-   [hidden] is why an empty board is still the seed: no tiles, no grid, no gap,
-   nothing on screen but the gem, the name and the date. */
+/* ===== Header: greeting + date ===== */
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  opacity: 0;
+  animation: fadeUp 600ms var(--ease-premium) 90ms forwards;
+}
+.greeting {
+  font-size: clamp(1.7rem, 4.4vw, 2.35rem);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.12;
+  color: var(--fg);
+  min-height: 1.2em;
+  text-wrap: balance;
+}
+.greetingName { color: var(--petrol-hi); }
+.date {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  min-height: 1.5em;
+}
+
+@media (prefers-reduced-motion: reduce) { .cmdbar, .header, .coverage, .tileGrid .tile { animation: none !important; opacity: 1 !important; } }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ===== The rank. The board's one standing, gold because it is identity and
+   ceremony, never a verdict on how a person is doing. ===== */
+.rank {
+  position: relative;
+  padding: 1px;
+  clip-path: polygon(16px 0, calc(100% - 16px) 0, 100% 16px, 100% calc(100% - 16px), calc(100% - 16px) 100%, 16px 100%, 0 calc(100% - 16px), 0 16px);
+  background: linear-gradient(180deg, rgba(200,165,103,.45), rgba(200,165,103,.14) 45%, rgba(154,168,182,.1));
+  opacity: 0;
+  animation: fadeUp 620ms var(--ease-premium) 120ms forwards;
+}
+.rank-in {
+  clip-path: polygon(15.4px 0, calc(100% - 15.4px) 0, 100% 15.4px, 100% calc(100% - 15.4px), calc(100% - 15.4px) 100%, 15.4px 100%, 0 calc(100% - 15.4px), 0 15.4px);
+  background: linear-gradient(180deg, #11151c 0%, #0d1016 60%, #0c0e13 100%);
+  padding: 18px 20px 16px;
+}
+.goldline {
+  position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent 2%, rgba(200,165,103,.16) 18%, rgba(200,165,103,.75) 50%, rgba(200,165,103,.16) 82%, transparent 98%);
+}
+.rank-eyebrow {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 9.5px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 12px;
+}
+.rank-eyebrow::before {
+  content: ''; width: 3px; height: 11px; flex: none;
+  background: linear-gradient(180deg, var(--gold-hi), var(--gold));
+  clip-path: polygon(0 0, 100% 2px, 100% 100%, 0 calc(100% - 2px));
+}
+.rank-eyebrow .spacer { flex: 1; }
+.rank-days { letter-spacing: 0.1em; color: var(--muted); }
+
+.rank-body { display: grid; grid-template-columns: minmax(210px, 300px) 1fr; gap: 22px; align-items: start; }
+@media (max-width: 820px) { .rank-body { grid-template-columns: 1fr; gap: 16px; } }
+
+.rank-name {
+  font-size: clamp(1.9rem, 5vw, 2.6rem);
+  font-weight: 700; line-height: 1;
+  letter-spacing: -0.02em;
+  background: linear-gradient(180deg, var(--gold-hi), var(--gold));
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  margin-bottom: 6px;
+}
+.rank-blurb { font-size: 12.5px; color: var(--muted-strong); line-height: 1.45; margin-bottom: 12px; max-width: 34ch; }
+.rank-points {
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em;
+  color: var(--muted); display: flex; justify-content: space-between; gap: 10px;
+  font-variant-numeric: tabular-nums; margin-bottom: 6px;
+}
+.rank-points b { color: var(--gold); font-weight: 600; }
+.rank-bar {
+  height: 6px; border-radius: 3px; overflow: hidden;
+  background: linear-gradient(180deg, #0a0c0f, #0c0e12);
+  box-shadow: inset 0 1px 3px rgba(0,0,0,.6);
+}
+.rank-bar > span {
+  display: block; height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, var(--gold), var(--gold-hi));
+}
+.rank-next { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.06em; color: var(--muted); margin-top: 7px; }
+
+/* Attribute breakdown: never a number you have to trust. */
+.attrs { display: flex; flex-direction: column; gap: 2px; }
+.attr {
+  display: grid;
+  grid-template-columns: 88px 1fr 62px 96px;
+  align-items: center; gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(201,212,222,.05);
+}
+.attr:last-child { border-bottom: 0; }
+.attr-name { font-size: 12px; font-weight: 600; color: var(--fg); display: flex; align-items: baseline; gap: 6px; }
+.attr-name .w { font-family: var(--font-mono); font-size: 9px; color: var(--muted); font-weight: 400; }
+.attr-bar { height: 5px; border-radius: 3px; background: rgba(154,168,182,.1); overflow: hidden; min-width: 40px; }
+.attr-bar > span { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--petrol), var(--petrol-hi)); }
+.attr-bar.none > span { background: rgba(154,168,182,.22); }
+.attr-logged { font-family: var(--font-mono); font-size: 9.5px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.attr-trend { font-family: var(--font-mono); font-size: 9.5px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.attr-trend.up { color: var(--petrol-hi); }
+.attr-trend.flat { color: var(--muted); }
+.attr-trend.down { color: var(--amber); }
+.attr-trend.none { color: var(--muted); opacity: .75; }
+@media (max-width: 560px) {
+  .attr { grid-template-columns: 1fr 62px 88px; grid-template-areas: 'n l t' 'b b b'; row-gap: 5px; }
+  .attr-name { grid-area: n; } .attr-logged { grid-area: l; } .attr-trend { grid-area: t; } .attr-bar { grid-area: b; }
+}
+
+/* Building state: a countdown, never a scolding. */
+.rank-building { display: flex; flex-direction: column; gap: 10px; }
+.rank-building .big { font-size: 1.25rem; font-weight: 650; color: var(--fg); letter-spacing: -0.01em; }
+.rank-building .sub { font-size: 12.5px; color: var(--muted-strong); line-height: 1.5; max-width: 58ch; }
+
+/* The scale, printed, because it is a scale somebody chose. */
+.rank-scale { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(201,212,222,.06); }
+.rank-scale summary {
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted); cursor: pointer; list-style: none; display: flex; align-items: center; gap: 7px;
+}
+.rank-scale summary::-webkit-details-marker { display: none; }
+.rank-scale summary::before { content: '+'; color: var(--gold); font-size: 11px; }
+.rank-scale[open] summary::before { content: '\2212'; }
+.rank-scale-body { margin-top: 11px; font-size: 12px; color: var(--muted-strong); line-height: 1.55; }
+.rank-scale-body p { margin-bottom: 9px; max-width: 68ch; }
+.tiers { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.tierchip {
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.05em;
+  border: 1px solid var(--border); border-radius: var(--radius-pill);
+  padding: 3px 9px; color: var(--muted);
+}
+.tierchip.here { color: var(--gold); border-color: rgba(200,165,103,.4); background: rgba(200,165,103,.07); }
+
+/* ===== Coverage: today's real signal per goal. No invented score - a tile
+   either reported today or it did not. ===== */
+.coverage {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+  opacity: 0;
+  animation: fadeUp 620ms var(--ease-premium) 140ms forwards;
+}
+.goalcard {
+  position: relative;
+  padding: 14px 15px 13px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(21,26,32,.7), rgba(13,16,21,.7));
+  box-shadow: inset 0 1px 0 rgba(201,212,222,.06), 0 1px 3px rgba(0,0,0,.4);
+}
+.goalcard.attention { border-color: rgba(200, 165, 103, 0.32); }
+.goalcard-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.goalcard-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+  line-height: 1.3;
+}
+.goalcard-frac {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--muted-strong);
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.goalcard-tag {
+  display: inline-block;
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold);
+  border: 1px solid rgba(200,165,103,.32);
+  border-radius: 4px;
+  padding: 1px 5px;
+  vertical-align: middle;
+}
+.goaldots { display: flex; flex-wrap: wrap; gap: 6px; }
+.goaldot {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 3px 8px 3px 6px;
+}
+.goaldot .d { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); flex: none; }
+.goaldot.reported { color: var(--muted-strong); }
+.goaldot.reported .d { background: var(--petrol-hi); }
+.coverage-empty {
+  grid-column: 1 / -1;
+  font-size: 12.5px;
+  color: var(--muted);
+  padding: 4px 2px;
+}
+
+/* ===== The tile grid ===== */
 .tileGrid {
-  /* components/veeTiles.css .grid, verbatim measurements: the LIVE dashboard's
-     customizable grid (18px gap, row clamp), not the older consolidated grid
-     (160-200px rows) this shell first shipped with - that one made every tile
-     taller than the real app and the poster art read small and lost. */
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   grid-auto-rows: clamp(118px, 13.5vw, 160px);
-  gap: 18px;
+  gap: 16px;
 }
-
 .tileGrid[hidden] { display: none; }
 
 .tile {
-  /* --cols/--rows come from SIZE_PRESETS in host.js. min-width:0 stops a wide
-     tile's content forcing its column past 1fr and shoving the grid sideways.
-     Visuals: veeTiles.css .tile verbatim - translucent glass the world glows
-     through, mint-tinted border, soft top highlight + drop shadow. */
   grid-column: span var(--cols, 2);
   grid-row: span var(--rows, 1);
   min-width: 0;
-  border: 1px solid rgba(167, 243, 208, .10);
-  background: linear-gradient(165deg, rgba(16, 26, 22, .55) 0%, rgba(7, 12, 10, .40) 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05), 0 22px 50px -30px rgba(0, 0, 0, .75);
-  border-radius: 20px;
+  position: relative;
+  clip-path: polygon(12px 0, calc(100% - 12px) 0, 100% 12px, 100% calc(100% - 12px), calc(100% - 12px) 100%, 12px 100%, 0 calc(100% - 12px), 0 12px);
+  border: 1px solid var(--border);
+  background: linear-gradient(165deg, #151a20 0%, #0e1216 100%);
+  box-shadow: inset 0 1px 0 rgba(201,212,222,.06), 0 18px 40px -26px rgba(0,0,0,.8);
   overflow: hidden;
+  transition: border-color var(--duration) ease, box-shadow var(--duration) ease;
+}
+.tile:hover {
+  border-color: rgba(154, 168, 182, 0.3);
+  box-shadow: inset 0 1px 0 rgba(201,212,222,.1), 0 18px 40px -20px rgba(0,0,0,.85);
 }
 
 .tileFrame {
@@ -241,15 +483,9 @@ body {
   height: 100%;
   border: 0;
   background: transparent;
-  /* color-scheme:normal, deliberately. The tile spec forbids a tile declaring
-     color-scheme because a dark declaration makes the browser paint an opaque
-     white canvas behind it. <html> here sets color-scheme:dark, which iframes
-     inherit, so it is neutralised at the frame instead. */
   color-scheme: normal;
 }
 
-/* veeTiles.css: phone = 2 cols at 760px, taller rows. A 3-or-4-wide tile
-   cannot fit 2 columns; clamp instead of letting it overflow the grid. */
 @media (max-width: 760px) {
   .tileGrid {
     grid-template-columns: repeat(2, 1fr);
@@ -258,348 +494,64 @@ body {
   .tile { grid-column: span min(var(--cols, 2), 2); }
 }
 
-.header {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  opacity: 0;
-  animation: fadeUp 700ms var(--ease-premium) forwards;
-}
-
-.greeting {
-  font-family: var(--font-serif), 'Times New Roman', Georgia, serif;
-  font-style: italic;
-  font-weight: 400;
-  /* --greet-scale (default 1) lets the user size their greeting; the font stays
-     Instrument Serif italic, the unified voice. */
-  font-size: calc(clamp(2.25rem, 4.5vw, 3.25rem) * var(--greet-scale, 1));
-  line-height: 1;
-  letter-spacing: -0.02em;
-  color: var(--fg);
-  /* greeting text mounts client-side; reserve its line so the header never
-     grows a frame after mount (CLS on every /app open) */
-  min-height: 1.2em;
-}
-
-.greetingName {
-  font-style: italic;
-  /* the accented name follows the chosen wallpaper accent (mint by default) */
-  color: var(--wall-accent, var(--mint));
-}
-
-.date {
-  font-size: var(--text-xs);
-  font-weight: 500;
-  color: var(--muted);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  /* same reservation as .greeting: date text mounts client-side */
-  min-height: 1.5em;
-}
-
 @media (max-width: 560px) {
   .page {
-    padding: calc(var(--space-8) + env(safe-area-inset-top)) var(--space-4)
-      calc(var(--space-12) + env(safe-area-inset-bottom));
+    padding: calc(var(--space-6) + env(safe-area-inset-top)) var(--space-4)
+      calc(var(--space-10) + env(safe-area-inset-bottom));
   }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .header, .page::before {
-    animation: none !important;
-  }
-}
-
-.headerRow {
-  display: flex;
-  align-items: center;
-  gap: var(--space-6);
-}
-
-.headerGem {
-  flex: 0 0 auto;
-  width: 180px;
-  height: 180px;
-}
-
-@media (max-width: 980px) {
-  .headerGem {
-    width: 140px;
-    height: 140px;
-  }
-}
-
-@media (max-width: 560px) {
-  .headerRow {
-    gap: var(--space-4);
-  }
-  .headerGem {
-    width: 100px;
-    height: 100px;
-  }
-  .header {
-    min-width: 0;
-  }
-  .greeting {
-    font-size: clamp(1.85rem, 7vw, 2.3rem);
-  }
-}
-
-@media (min-width: 981px) and (min-height: 761px) {
-  .page.oneScreen {
-    padding-top: var(--space-8);
-    padding-bottom: var(--space-8);
-  }
-  .oneScreen .shell {
-    width: 100%;
-    gap: var(--space-6);
-  }
-}
-
-.gw { display: inline-block; }
-
-.greetReveal .gw {
-  opacity: 0;
-  animation: greetWordIn 0.85s var(--ease-premium) both;
-  animation-delay: var(--d, 0s);
-  will-change: transform, opacity, filter;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .greetReveal .gw {
-    animation: entRmFade 0.4s ease both;
-    animation-delay: 0ms;
-  }
-}
-
-@keyframes canvasDrift {
-  from { transform: translate3d(0, 0, 0); }
-  to   { transform: translate3d(-2%, 1%, 0); }
-}
-
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes greetWordIn {
-  from { opacity: 0; transform: translateY(14px); filter: blur(6px); }
-  to { opacity: 1; transform: translateY(0); filter: blur(0); }
-}
-
-@keyframes entRmFade {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-/* ===== app/app/dashboardHeaderGem.module.css — postcss-extracted ===== */
-.gemStage {
-  position: relative;
-  flex-shrink: 0;
-  /* Fill the container by default. When the component is used standalone it
-     sets an inline width/height; when used on the dashboard the .headerGem
-     container owns the size (responsive across breakpoints) and the stage
-     simply fills it. */
-  width: 100%;
-  height: 100%;
-  transform-origin: center;
-  z-index: 2;
-  animation: dashgem-halo 3.9s ease-in-out infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  .gemStage {
-    animation: none;
-    filter: drop-shadow(0 0 36px rgba(110, 231, 183, 0.14))
-            drop-shadow(0 0 80px rgba(110, 231, 183, 0.06));
-  }
-}
-.gemFallback {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(110, 231, 183, 0.18) 0%, rgba(110, 231, 183, 0) 70%);
-  animation: dashgem-breathe 3.2s ease-in-out infinite;
-}
-@keyframes dashgem-halo {
-  0%, 100% {
-    filter: drop-shadow(0 0 30px rgba(110, 231, 183, 0.12))
-            drop-shadow(0 0 70px rgba(110, 231, 183, 0.05));
-  }
-  50% {
-    filter: drop-shadow(0 0 55px rgba(110, 231, 183, 0.22))
-            drop-shadow(0 0 120px rgba(110, 231, 183, 0.12));
-  }
-}
-@keyframes dashgem-breathe {
-  0%, 100% { opacity: 0.5; transform: scale(0.96); }
-  50%      { opacity: 1;   transform: scale(1); }
-}
-
-/* ===== components/WelcomeBackdrop.module.css — postcss-extracted ===== */
-.atmosphere {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  /* The aurora wash tints to --wall-accent (the chosen World accent), so changing
-     the wallpaper color re-themes the whole glow. Falls back to mint. */
-  background-image:
-    radial-gradient(60% 50% at 50% 30%,
-      color-mix(in srgb, var(--wall-accent, #6EE7B7) 16%, transparent) 0%,
-      color-mix(in srgb, var(--wall-accent, #6EE7B7) 6%, transparent) 32%,
-      transparent 65%),
-    radial-gradient(28% 22% at 50% 38%, rgba(255, 226, 181, 0.07) 0%, rgba(255, 226, 181, 0) 70%),
-    radial-gradient(120% 80% at 50% 100%, rgba(14, 38, 30, 0.5) 0%, rgba(4, 6, 10, 0.95) 75%);
-  background-repeat: no-repeat;
-  background-size: 100% 100%;
-}
-
-.mountainsLayer {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 1;
-  height: 30vh;
-  min-height: 180px;
-  pointer-events: none;
-  opacity: 0.8;
-}
-
-.mountainsLayer svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.particles {
-  position: fixed;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-  overflow: hidden;
-}
-
-.particles span {
-  position: absolute;
-  width: 1.5px;
-  height: 1.5px;
-  background: rgba(233, 239, 233, 0.7);
-  border-radius: 50%;
-  animation: welcome-backdrop-drift linear infinite;
-  /* particle glow tints to the chosen accent too */
-  box-shadow: 0 0 6px color-mix(in srgb, var(--wall-accent, #a7f3d0) 55%, transparent);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .particles span { animation: none; }
-}
-
-@keyframes welcome-backdrop-drift {
-  0%   { transform: translate3d(0, 0, 0); opacity: 0; }
-  10%  { opacity: 0.7; }
-  90%  { opacity: 0.55; }
-  100% { transform: translate3d(var(--dx, 12px), var(--dy, -100vh), 0); opacity: 0; }
 }
 </style>
 </head>
 <body>
 
-<!-- Dashboard.tsx: <main className={`${styles.page} ${styles.oneScreen} grain-overlay`}
-     style={{ '--wall-accent': wallAccent }}>. No data-entrance: that attribute
-     only drives tile entrances, and there are no tiles here. -->
-<main class="page oneScreen grain-overlay" style="--wall-accent: #6EE7B7" id="page">
-
-  <!-- WelcomeBackdrop, world mode. Fixed layers at z 0/1/2. -->
-  <div style="--wall-accent: #6EE7B7">
-    <div class="atmosphere" aria-hidden="true"></div>
-    <div class="mountainsLayer" aria-hidden="true">
-      <svg viewBox="0 0 1600 420" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="welcome-backdrop-mt-far" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#0d1a17" stop-opacity="0" />
-            <stop offset="55%" stop-color="#0d1a17" stop-opacity=".55" />
-            <stop offset="100%" stop-color="#0d1a17" stop-opacity=".95" />
-          </linearGradient>
-          <linearGradient id="welcome-backdrop-mt-near" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#050a09" stop-opacity=".4" />
-            <stop offset="60%" stop-color="#050a09" stop-opacity=".95" />
-            <stop offset="100%" stop-color="#050a09" stop-opacity="1" />
-          </linearGradient>
-        </defs>
-        <path d="M0,300 L120,230 L210,260 L320,180 L430,220 L560,150 L680,210 L820,170 L960,220 L1100,180 L1240,240 L1380,200 L1500,250 L1600,220 L1600,420 L0,420 Z" fill="url(#welcome-backdrop-mt-far)" />
-        <path d="M0,360 L100,320 L220,340 L340,290 L460,330 L590,300 L720,340 L860,310 L1000,350 L1140,310 L1280,355 L1420,320 L1540,360 L1600,340 L1600,420 L0,420 Z" fill="url(#welcome-backdrop-mt-near)" />
-      </svg>
-    </div>
-    <div class="particles" id="particles" aria-hidden="true"></div>
-  </div>
-
+<main class="page grain-overlay" id="page">
   <div class="shell">
-    <div class="headerRow">
-      <!-- DashboardHeaderGem className={styles.headerGem}. The non-button branch
-           of Dashboard.tsx (showGem, no I'm-home ritual): the gem renders, but
-           there is no Homecoming behind it to open. -->
-      <div class="headerGem" style="pointer-events: none" aria-hidden="true">
-        <div class="gemStage">
-          <!-- HeroCrystal is Three.js and is not ported. This is the component's
-               OWN dynamic-import loading fallback (styles.gemFallback), not a
-               hand-rolled gem. -->
-          <div class="gemFallback" aria-hidden="true"></div>
-        </div>
-      </div>
 
-      <!-- DashboardHeader -->
-      <div class="header" id="header" style="--greet-scale: 1">
-        <h1 class="greeting greetReveal" id="greeting"></h1>
-        <p class="date" id="date"></p>
-      </div>
+    <div class="cmdbar">
+      <span class="emblem" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3.5 20 8v8l-8 4.5L4 16V8Z"/></svg>
+      </span>
+      <span class="wordmark">THE CITADEL</span>
+      <div class="cmdbar-spacer"></div>
+      <!-- Where your data is going, in one line. aria-live because it changes
+           after boot (and again on sign in) with nothing else announcing it. -->
+      <span class="syncpill" id="syncPill" role="status" aria-live="polite"><span class="syncdot" id="syncDot" aria-hidden="true"></span><span id="syncLabel">Checking</span></span>
     </div>
 
-    <!-- The board. Empty until the registry has a tile, and [hidden] until
-         then, so a fresh seed is the shell and nothing else. host.js fills it. -->
+    <div class="header">
+      <h1 class="greeting" id="greeting"></h1>
+      <p class="date" id="date"></p>
+    </div>
+
+    <!-- The standing across every log. lib/rank.js computes it from the real
+         ledger and refuses to rank until two full fortnights exist. -->
+    <section class="rank" id="rank" aria-label="Your standing" hidden></section>
+
+    <!-- Today, specifically: which of each goal's tiles have reported. -->
+    <div class="coverage" id="coverage" aria-label="Today's coverage by goal"></div>
+
     <div class="tileGrid" id="tileGrid" hidden></div>
   </div>
-
 </main>
 
-<!-- Who this board belongs to. Loaded before the boot script so the greeting
-     can read it. The mentor writes this file the moment they say their name. -->
+<!-- Who this board belongs to. -->
 <script src="lib/site.js"></script>
 
-<!-- The remote vault. host.js's Store seam swaps to this when someone is
-     signed in; signed out, these three files sit idle and everything runs
-     on localStorage exactly as before. -->
+<!-- The remote vault. -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="lib/supabase-config.js"></script>
 <script src="lib/vault-remote.js"></script>
 
 <script>
 // ── The host contract. Host present, it uses the dashboard's store. No host,
-//    localStorage, and the shell still runs.
+//    localStorage, and the shell still runs. (Unrelated to the visual layer:
+//    this is the tile-bridge fallback, in case this very page is ever loaded
+//    as a tile inside a bigger host.)
 if (!window.Vitality) { window.Vitality = {
   save: d => { try{localStorage.setItem('v:shell',JSON.stringify(d))}catch(e){} return Promise.resolve(true) },
   load: () => { try{ return Promise.resolve(JSON.parse(localStorage.getItem('v:shell')||'{}')) }catch(e){ return Promise.resolve({}) } } } }
 
-// ── lib/tiles/dashboardChrome.ts — DEFAULT_CHROME, verbatim (the fields the
-//    shell reads).
-var DEFAULT_CHROME = {
-  background: { mode: 'world', accent: '#6EE7B7', particles: 24, mountains: true, speed: 1 },
-  greeting: { mode: 'auto', text: '', showName: true, accentName: true, scale: 1 },
-  date: { show: true, format: 'full' },
-  gem: { show: true, tint: 'mint' }
-}
-
-// The board pins the line to "Welcome back" through the component's own
-// custom-greeting path. The shipped default is mode:'auto' (the random pool
-// below); set CHROME = DEFAULT_CHROME to get that behaviour back.
-var CHROME = {
-  background: DEFAULT_CHROME.background,
-  greeting: { mode: 'custom', text: 'Welcome back', showName: true, accentName: true, scale: 1 },
-  date: DEFAULT_CHROME.date,
-  gem: DEFAULT_CHROME.gem
-}
-
-// ── DashboardHeader.tsx — the auto greeting pool, verbatim.
+// ── Greeting pool, verbatim from the seed shell, re-skinned not rewritten.
 var GREETINGS = [
   { text: 'Howdy', punct: '' },
   { text: "How's it going", punct: '?' },
@@ -608,7 +560,6 @@ var GREETINGS = [
   { text: 'Morning', punct: '' },
   { text: "Let's get after it", punct: '' }
 ]
-
 function pickGreeting() {
   var pool = new Date().getHours() < 12 ? GREETINGS : GREETINGS.filter(function (g) { return g.text !== 'Morning' })
   var i = Math.floor(Math.random() * pool.length)
@@ -616,105 +567,264 @@ function pickGreeting() {
     var last = window.sessionStorage.getItem('vitality:greet-last')
     if (pool.length > 1 && pool[i].text === last) i = (i + 1) % pool.length
     window.sessionStorage.setItem('vitality:greet-last', pool[i].text)
-  } catch (e) {
-    /* storage unavailable: any pick works */
-  }
+  } catch (e) {}
   return pool[i]
 }
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }
 
-function esc(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-// ── DashboardHeader render, mirrored from the JSX.
 function renderHeader(firstName) {
-  var g = CHROME.greeting
-  var d = CHROME.date
   var auto = pickGreeting()
   var now = new Date()
   var fullDate = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
-  var todayDate = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+  var includesName = !!(firstName && auto.text.toLowerCase().indexOf(String(firstName).toLowerCase()) !== -1)
+  var renderName = !!(firstName && !includesName)
 
-  // Custom wording falls back to the randomized auto line if blank (never render empty).
-  var custom = g.mode === 'custom' && g.text.trim() ? g.text.trim() : null
-  var word = custom !== null ? custom : auto.text
-  var punct = custom ? '' : auto.punct
-  var includesName = !!(firstName && word.toLowerCase().indexOf(String(firstName).toLowerCase()) !== -1)
-  var renderName = !!(g.showName && firstName && !includesName)
-  var dateText = d.format === 'today' ? todayDate : fullDate
-
-  var words = word ? word.split(' ') : []
-  var dly = function (i) { return '--d: ' + (0.05 + i * 0.09).toFixed(2) + 's' }
-
-  var html = ''
-  for (var i = 0; i < words.length; i++) {
-    if (i > 0) html += ' '
-    html += '<span class="gw" style="' + dly(i) + '">' + esc(words[i]) +
-      (!renderName && i === words.length - 1 ? esc(punct) : '') + '</span>'
-  }
-  if (renderName) {
-    html += '<span class="gw" style="' + dly(words.length) + '">' +
-      ',&nbsp;<span class="' + (g.accentName ? 'greetingName' : '') + '">' + esc(firstName) + '</span>' +
-      esc(punct) + '</span>'
-  }
+  var html = esc(auto.text) + (renderName ? '' : esc(auto.punct))
+  if (renderName) html += ', <span class="greetingName">' + esc(firstName) + '</span>' + esc(auto.punct)
 
   document.getElementById('greeting').innerHTML = html
-  document.getElementById('header').style.setProperty('--greet-scale', g.scale)
-  var dateEl = document.getElementById('date')
-  // {d.show && <p className={styles.date}>{dateText}</p>}
-  if (d.show) dateEl.textContent = dateText
-  else dateEl.remove()
+  document.getElementById('date').textContent = fullDate
 }
 
-// ── WelcomeBackdrop.tsx — the drifting particle field, verbatim.
-function renderParticles() {
-  var bg = CHROME.background
-  var root = document.getElementById('particles')
-  if (!root) return
-  root.innerHTML = ''
-  var world = bg.mode === 'world' ? bg : null
-  var count = world ? world.particles : 0
-  var speed = world ? world.speed : 1
-  if (count <= 0) return
-  var N = window.innerWidth < 640 ? Math.round(count * 0.6) : count
-  for (var i = 0; i < N; i++) {
-    var s = document.createElement('span')
-    s.style.left = Math.random() * 100 + '%'
-    s.style.top = 60 + Math.random() * 40 + '%'
-    var size = 1.2 + Math.random() * 1.2
-    s.style.width = s.style.height = size + 'px'
-    var dur = (22 + Math.random() * 28) / Math.max(0.2, speed)
-    s.style.animationDuration = dur + 's'
-    s.style.animationDelay = -Math.random() * dur + 's'
-    s.style.setProperty('--dx', Math.random() * 30 - 15 + 'px')
-    s.style.setProperty('--dy', -(60 + Math.random() * 50) + 'vh')
-    root.appendChild(s)
-  }
-}
-
-// ── Boot. The name: the store first (a later episode's in-app profile), then
-//    lib/site.js, the file the mentor writes the moment they say their name.
-//    No name at all means DashboardHeader's renderName is false and the
-//    greeting simply renders without one.
 var siteName = (window.SITE && typeof window.SITE.name === 'string' && window.SITE.name.trim()) || null
 window.Vitality.load().then(function (data) {
-  var name = (data && data.name) || siteName
-  renderHeader(name)
-  renderParticles()
+  renderHeader((data && data.name) || siteName)
 }).catch(function () {
   renderHeader(siteName)
-  renderParticles()
 })
+
+// ── Sync pill: the one honest line about where data is going right now.
+function renderSync() {
+  var dot = document.getElementById('syncDot')
+  var label = document.getElementById('syncLabel')
+  if (!window.VitalityRemote) { dot.className = 'syncdot'; label.textContent = 'Local only'; return }
+  if (!window.VitalityRemote.isAvailable()) { dot.className = 'syncdot warn'; label.textContent = 'Sync offline'; return }
+  window.VitalityRemote.getSession().then(function (session) {
+    if (session && session.user) { dot.className = 'syncdot on'; label.textContent = 'Synced' }
+    else { dot.className = 'syncdot'; label.textContent = 'Local only' }
+  })
+}
+renderSync()
+if (window.VitalityRemote) window.VitalityRemote.onAuthChange(function () { renderSync() })
 </script>
 
-<!-- The board. Order matters: the registry is the list, the host renders it.
-     registry.js is the ONE file that changes when a tile is added. -->
+<!-- The board. Order matters: the registry is the list, the host renders it. -->
 <script src="lib/tiles/registry.js"></script>
 <script src="lib/tiles/host.js"></script>
 
-<!-- The Library: the settings gear, top-right. It injects itself (gear, styles,
-     overlay), reads the registry above, and toggles tiles through the host's
-     remount. Delete this one line and the board is the bare seed again. -->
+<!-- The ladder and the arithmetic behind it. Plain data, versioned in git. -->
+<script src="lib/rank.js"></script>
+
+<script>
+// ── Today's coverage. Mirrors lib/tiles/weights.ts DEFAULT_GOALS - tile ids
+//    only, since the real numbers stay in that file. Keep this list in sync
+//    by hand if a goal's tiles change there; there is no build step to
+//    generate one from the other.
+var GOAL_TILES = [
+  { id: 'strong',  label: 'Get stronger without breaking down.', tiles: ['lifting', 'recovery', 'checkin', 'body'] },
+  { id: 'feel',    label: 'Feel good every day, consistently.',   tiles: ['checkin', 'recovery', 'lifting', 'projects', 'body'] },
+  { id: 'showup',  label: 'Show up every day, no matter what.',   tiles: ['checkin', 'lifting', 'projects', 'recovery'] }
+]
+
+function localISODate(d) {
+  d = d || new Date()
+  var y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0')
+  return y + '-' + m + '-' + day
+}
+function tileName(id) {
+  var t = (Array.isArray(window.TILES) ? window.TILES : []).filter(function (x) { return x && x.id === id })[0]
+  return t ? t.name : id
+}
+function esc2(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }
+
+// Takes the rows it is given rather than fetching its own. One read feeds
+// every panel - see refreshBoard() at the bottom.
+function renderCoverage(rows) {
+  var root = document.getElementById('coverage')
+  if (!root) return
+  ;(function () {
+    var today = localISODate()
+    var reportedToday = {}
+    ;(rows || []).forEach(function (r) { if (r && r.date === today && r.tile) reportedToday[r.tile] = true })
+
+    var withRatio = GOAL_TILES.map(function (g) {
+      var done = g.tiles.filter(function (t) { return reportedToday[t] }).length
+      return { g: g, done: done, ratio: g.tiles.length ? done / g.tiles.length : 1 }
+    })
+    var anyReported = Object.keys(reportedToday).length > 0
+    var minRatio = Math.min.apply(null, withRatio.map(function (x) { return x.ratio }))
+    var maxRatio = Math.max.apply(null, withRatio.map(function (x) { return x.ratio }))
+    // Only flag a goal as needing attention once something has actually
+    // happened today and the goals genuinely differ - otherwise every goal
+    // reads the same and singling one out would be noise, not signal.
+    var flagLowest = anyReported && minRatio < maxRatio
+
+    root.innerHTML = withRatio.map(function (x) {
+      var isLowest = flagLowest && x.ratio === minRatio
+      var dots = x.g.tiles.map(function (t) {
+        var on = !!reportedToday[t]
+        return '<span class="goaldot' + (on ? ' reported' : '') + '"><span class="d"></span>' + esc2(tileName(t)) + '</span>'
+      }).join('')
+      return '<div class="goalcard' + (isLowest ? ' attention' : '') + '">' +
+        '<div class="goalcard-head"><span class="goalcard-label">' + esc2(x.g.label) +
+        (isLowest ? '<span class="goalcard-tag">Furthest behind today</span>' : '') + '</span>' +
+        '<span class="goalcard-frac">' + x.done + '/' + x.g.tiles.length + '</span></div>' +
+        '<div class="goaldots">' + dots + '</div></div>'
+    }).join('')
+  })()
+}
+// ── The rank. Everything below RENDERS a result lib/rank.js computed; none
+//    of it decides anything, so there is exactly one place the scale lives.
+function fmt(n, unit) {
+  if (n == null) return '--'
+  var v = Math.abs(n) >= 1000 ? Math.round(n).toLocaleString() : Math.round(n * 10) / 10
+  return v + (unit || '')
+}
+
+function attrRow(p) {
+  var pct = p.score == null ? 0 : Math.round(p.score * 100)
+  var bar = '<div class="attr-bar' + (p.score == null ? ' none' : '') + '"><span style="width:' +
+    (p.score == null ? 100 : pct) + '%"></span></div>'
+
+  var logged = p.everLogged && p.expected > 0
+    ? p.logged + '/' + p.expected
+    : (p.mode === 'cumulative' && p.everLogged ? 'output' : '--')
+
+  var trend, cls
+  if (!p.everLogged) { trend = 'not started'; cls = 'none' }
+  else if (p.mode === 'rhythm-only') { trend = 'no direction set'; cls = 'none' }
+  // "Too few" and "none yet" are different facts and read differently: one
+  // says keep logging, the other says you have logged, just not enough of it.
+  else if (p.trend == null) {
+    trend = (p.detail && p.detail.thin) ? 'too few to compare' : 'need history'
+    cls = 'none'
+  }
+  else {
+    var d = p.detail || {}
+    var pair = fmt(d.recent, p.unit) + ' v ' + fmt(d.prior, p.unit)
+    if (p.trend > 0.55) { trend = '↑ ' + pair; cls = 'up' }
+    else if (p.trend < 0.45) { trend = '↓ ' + pair; cls = 'down' }
+    else { trend = '→ ' + pair; cls = 'flat' }
+  }
+
+  return '<div class="attr">' +
+    '<div class="attr-name">' + esc2(p.label) + '<span class="w">' + p.weight + '</span></div>' +
+    bar +
+    '<div class="attr-logged">' + esc2(logged) + '</div>' +
+    '<div class="attr-trend ' + cls + '">' + esc2(trend) + '</div>' +
+  '</div>'
+}
+
+function scaleBlock(r) {
+  var here = r.ready ? r.tier.id : null
+  var tiers = r.ladder.map(function (t) {
+    return '<span class="tierchip' + (t.id === here ? ' here' : '') + '">' + esc2(t.name) + ' ' + t.min + '+</span>'
+  }).join('')
+  return '<details class="rank-scale"><summary>How this is worked out</summary><div class="rank-scale-body">' +
+    '<div class="tiers">' + tiers + '</div>' +
+    '<p>Half of your standing is <b>showing up</b> (days logged against a target cadence), half is ' +
+    '<b>improving</b> (your last ' + r.window + ' days against your previous ' + r.window + '). ' +
+    'Holding steady scores the middle of that second half, not zero.</p>' +
+    '<p>Weights come from your own three goals in <code>lib/tiles/weights.ts</code>, averaged, because you ' +
+    'said all three mattered: Check in 32, Lifting 28, Recovery 25, Projects 10, Body 5.</p>' +
+    '<p>Body weight is counted for logging it only, never as a direction, because nothing says whether ' +
+    'it should rise or fall. Progress is left out entirely, since its XP is computed from these same ' +
+    'tiles and would count the same work twice.</p>' +
+    '<p>These thresholds and the target cadence are a scale someone chose, not a measurement. ' +
+    'They live in <code>lib/rank.js</code> and are meant to be argued with.</p>' +
+    '</div></details>'
+}
+
+function renderRank(rows) {
+  var root = document.getElementById('rank')
+  // An empty .rank is a 1px gradient border wrapped around nothing, which
+  // paints as a stray gold sliver. If the ladder script never loaded there is
+  // nothing honest to show, so show nothing at all.
+  if (!root) return
+  if (!window.VitalityRank) { root.hidden = true; return }
+  root.hidden = false
+  ;(function () {
+    var r = window.VitalityRank.compute(rows)
+    var head = '<div class="goldline"></div><div class="rank-in">'
+
+    if (!r.ready) {
+      var body
+      if (r.reason === 'empty') {
+        body = '<div class="rank-building">' +
+          '<div class="big">No standing yet</div>' +
+          '<div class="sub">Nothing has been logged, so there is nothing to rank. Log a day in any tile ' +
+          'and this starts building.</div></div>'
+      } else {
+        body = '<div class="rank-building">' +
+          '<div class="big">' + r.daysToGo + ' more ' + (r.daysToGo === 1 ? 'day' : 'days') + '</div>' +
+          '<div class="sub">A rank compares your last ' + r.window + ' days against the ' + r.window +
+          ' before them, so it needs ' + r.daysNeeded + ' days of history before it can say anything true. ' +
+          'You are ' + r.daysLogged + ' in. Nothing is being scored until then.</div>' +
+          '<div class="attrs">' + r.parts.map(attrRow).join('') + '</div></div>'
+      }
+      root.innerHTML = head + '<div class="rank-eyebrow">Your standing<span class="spacer"></span>' +
+        '<span class="rank-days">BUILDING</span></div>' + body + scaleBlock(r) + '</div>'
+      return
+    }
+
+    root.innerHTML = head +
+      '<div class="rank-eyebrow">Your standing<span class="spacer"></span>' +
+      '<span class="rank-days">LAST ' + (r.window * 2) + ' DAYS</span></div>' +
+      '<div class="rank-body">' +
+        '<div>' +
+          '<div class="rank-name">' + esc2(r.tier.name) + '</div>' +
+          '<div class="rank-blurb">' + esc2(r.tier.blurb) + '</div>' +
+          '<div class="rank-points"><span>RANK POINTS</span><b>' + r.points + ' / 100</b></div>' +
+          '<div class="rank-bar"><span style="width:' + Math.round(r.progress * 100) + '%"></span></div>' +
+          '<div class="rank-next">' + (r.next
+            ? r.toNext + ' to ' + esc2(r.next.name)
+            : 'Top of the ladder') + '</div>' +
+        '</div>' +
+        '<div class="attrs">' + r.parts.map(attrRow).join('') + '</div>' +
+      '</div>' + scaleBlock(r) + '</div>'
+  })()
+}
+
+/**
+ * ONE read of the ledger, feeding every panel that needs it.
+ *
+ * Both panels used to fetch it themselves, which on a signed-in board meant
+ * two session lookups and two full table reads for one screen, and left the
+ * door open for them to disagree with each other by being fetched a moment
+ * apart.
+ */
+function refreshBoard() {
+  var rank = document.getElementById('rank')
+  var cov = document.getElementById('coverage')
+  if (!window.VitalityHost) { if (rank) rank.hidden = true; return }
+  window.VitalityHost.ledger().then(function (rows) {
+    renderCoverage(rows)
+    renderRank(rows)
+  }).catch(function () {
+    // Say nothing rather than a number that might be wrong.
+    if (rank) {
+      rank.hidden = false
+      rank.innerHTML = '<div class="rank-in"><div class="rank-building">' +
+        '<div class="big">Standing unavailable</div>' +
+        '<div class="sub">Your log could not be read just now, so nothing is being shown rather than ' +
+        'a number that might be wrong. It is not lost - try again in a moment.</div></div></div>'
+    }
+    if (cov) cov.innerHTML = '<div class="coverage-empty">Today’s coverage isn’t available right now.</div>'
+  })
+}
+
+refreshBoard()
+
+// A tile just wrote a number to the ledger, so the rank and today's coverage
+// are one log out of date. host.js fires this the moment a report lands.
+window.addEventListener('vitality:ledger', refreshBoard)
+
+// Signing in or out swaps which vault answers, so everything on screen is
+// about to be someone else's numbers.
+if (window.VitalityRemote) window.VitalityRemote.onAuthChange(refreshBoard)
+</script>
+
+<!-- The Library: the settings gear, top-right. -->
 <script src="lib/tiles/library.js"></script>
 
 </body>

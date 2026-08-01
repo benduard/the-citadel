@@ -919,7 +919,8 @@
   var MUSCLES = {
     chest:'Chest', lats:'Lats', traps:'Traps', delts:'Shoulders', reardelt:'Rear delts',
     biceps:'Biceps', triceps:'Triceps', forearms:'Forearms', abs:'Abs', obliques:'Obliques',
-    lowerback:'Lower back', glutes:'Glutes', quads:'Quads', hams:'Hamstrings', calves:'Calves'
+    lowerback:'Lower back', glutes:'Glutes', quads:'Quads', hams:'Hamstrings', calves:'Calves',
+    neck:'Neck'
   };
   var BIG_MUSCLES = { chest:1, lats:1, quads:1, hams:1, glutes:1, lowerback:1, traps:1 };
   var PATTERNS = { pressH:'Horizontal press', pressV:'Overhead press', squat:'Squat',
@@ -943,11 +944,17 @@
    * split; list one twice and the same lift turns up on two different days.
    * tiles/lifting.splits.test.js fails loudly on either, so change this freely
    * and let the test tell you if you broke it.
+   *
+   * Neck is deliberately its own split rather than folded into Push or Pull:
+   * it is not tied to one training day the way chest or back is - it is added
+   * on whichever day there is time for it - so it gets its own always-visible
+   * tab instead of quietly living inside another day's list.
    */
   var SPLITS = [
     { id:'legs', name:'Legs', mus:['quads','hams','glutes','calves'] },
     { id:'push', name:'Chest & Shoulders + Abs', mus:['chest','delts','abs','obliques'] },
-    { id:'pull', name:'Back & Arms', mus:['lats','traps','reardelt','biceps','triceps','forearms','lowerback'] }
+    { id:'pull', name:'Back & Arms', mus:['lats','traps','reardelt','biceps','triceps','forearms','lowerback'] },
+    { id:'neck', name:'Neck', mus:['neck'] }
   ];
   function splitById(id){
     for (var i=0;i<SPLITS.length;i++) if (SPLITS[i].id === id) return SPLITS[i];
@@ -1008,7 +1015,43 @@
     ['Hanging Leg Raise','abs','obliques,forearms','core','pullV',1,1,[1.00,1.04,1.09,1.15,1.22,1.30,1.40,1.52,1.66],'Log added weight only. Your bodyweight is counted for you.|Curl the pelvis up, do not just swing the legs.|Stop the swing between reps.'],
     ['Cable Crunch','abs','obliques','core','curl',0,1,[0.20,0.32,0.45,0.60,0.76,0.94,1.12,1.32,1.55],'Hips fixed. Only the spine moves.|Pull with the abs, not the arms.|Round down toward the knees.'],
     ['Ab Wheel Rollout','abs','lats,lowerback','core','pullV',1,1,[1.00,1.02,1.05,1.09,1.14,1.20,1.28,1.38,1.50],'Log added weight only. Your bodyweight is counted for you.|Ribs down, glutes squeezed, no sag.|Only roll as far as you can come back from.'],
-    ['Back Extension','lowerback','glutes,hams','core','hinge',1,1,[1.00,1.10,1.22,1.36,1.52,1.70,1.90,2.14,2.40],'Log added weight only. Your bodyweight is counted for you.|Round or stay flat, pick one and own it.|Do not hyperextend at the top.']
+    ['Back Extension','lowerback','glutes,hams','core','hinge',1,1,[1.00,1.10,1.22,1.36,1.52,1.70,1.90,2.14,2.40],'Log added weight only. Your bodyweight is counted for you.|Round or stay flat, pick one and own it.|Do not hyperextend at the top.'],
+
+    // ---- Added 2026-08-01: Ruben's actual current gym machines and
+    // accessory work, on top of the barbell/dumbbell library above. Where a
+    // machine trains the same thing as an existing entry (Leg Extension,
+    // Standing Calf Raise, Skull Crusher, Lat Pulldown, Seated Cable Row,
+    // Dip, Lateral Raise, Hanging Leg Raise all already cover their machine's
+    // movement), it is not duplicated here.
+    ['Pendulum Squat','quads','glutes,hams','legs','squat',0,2,[0.80,1.20,1.65,2.15,2.70,3.30,3.95,4.65,5.40],'The arc does the work of tracking the knee - do not fight it.|Full depth to where the sled lets you go, no bouncing out of the bottom.|Push evenly through the whole foot on the way up.'],
+    ['Hack Squat','quads','glutes,hams','legs','squat',0,2,[0.70,1.05,1.42,1.85,2.32,2.82,3.38,3.98,4.62],'Shoulders and lower back stay flat on the pad the whole rep.|Feet a little forward of center so the knees do not shoot past the toes.|Control the negative - the machine will not save a dropped weight.'],
+    ['Seated Calf Raise','calves','','legs','curl',0,1,[0.35,0.55,0.78,1.02,1.30,1.60,1.92,2.28,2.65],'Knees bent changes the target to the soleus, under the calf.|Pause stretched at the bottom, do not bounce.|Slow up, slower down.'],
+    ['Seated Hamstring Curl','hams','','legs','hinge',0,1,[0.25,0.38,0.52,0.68,0.85,1.04,1.24,1.45,1.68],'Back flat against the pad, hips do not rock.|Point the toes to feel it higher, flex them to feel it lower.|Squeeze at the bottom of the curl, control the return.'],
+    ['Lying Hamstring Curl','hams','','legs','hinge',0,1,[0.28,0.42,0.57,0.74,0.93,1.13,1.34,1.57,1.82],'Hips stay pinned to the pad - a rising hip is the lower back taking over.|Full squeeze at the top, do not let it snap back down.|Point the toes for outer hamstring, flex them for inner.'],
+    ['Adductor/Abductor Machine','glutes','','legs','curl',0,1,[0.30,0.48,0.68,0.90,1.14,1.40,1.68,1.98,2.30],'Log adductor and abductor work separately if the stack differs between them.|Controlled through the whole range, no slamming the plates.|A small range done fully beats a big range done half way.'],
+
+    ['Dumbbell Flat Press','chest','delts,triceps','push','pressH',0,2,[0.30,0.46,0.64,0.85,1.08,1.30,1.52,1.78,2.08],'Log both dumbbells added together.|Wrists stacked over elbows the whole way.|Stop when the upper arm reaches the torso line.'],
+    ['Incline Plate-Loaded Machine Press','chest','delts,triceps','push','pressH',0,2,[0.35,0.53,0.73,0.95,1.20,1.46,1.72,2.01,2.34],'Handles roughly in line with the collarbone before you press.|Press up and slightly back into the seat, not straight out.|Do not let the shoulders round forward at the bottom.'],
+    ['Decline Plate-Loaded Machine Press','chest','delts,triceps','push','pressH',0,2,[0.38,0.57,0.78,1.02,1.28,1.56,1.84,2.15,2.50],'Lower chest is the target - handles finish near the bottom of the sternum.|Ribs down, do not arch to move more weight.|Full stretch at the back, no bouncing off the stops.'],
+    ['Plate-Loaded Machine Shoulder Press','delts','triceps','push','pressV',0,2,[0.28,0.44,0.62,0.82,1.03,1.25,1.48,1.73,2.01],'Seat height so the handles start level with the shoulders, not above them.|Press up without shrugging into the traps.|Stop just short of lockout to keep the shoulder loaded.'],
+    ['Standing Machine Lateral Raise','delts','','push','curl',0,1,[0.10,0.17,0.24,0.32,0.41,0.51,0.62,0.74,0.88],'Pad sits above the elbow, not in the hand.|Lead with the elbow, stop at shoulder height.|Standing keeps the torso honest - no swinging into it.'],
+    ['Seated Machine Lateral Raise','delts','','push','curl',0,1,[0.10,0.17,0.24,0.32,0.41,0.51,0.62,0.74,0.88],'Sitting removes the hips from the movement entirely.|Lead with the elbow, stop at shoulder height.|Slow the negative - this is the half that actually builds the muscle.'],
+    ['Chest Fly Machine','chest','','push','curl',0,1,[0.20,0.32,0.45,0.60,0.76,0.94,1.13,1.34,1.57],'Handles start wide with a slight bend in the elbow, held throughout.|Squeeze the chest together at the front, do not just swing the arms.|Control it back to the stretch, do not let the stack slam.'],
+    ['Weighted Crunch','abs','obliques','core','curl',0,1,[0.10,0.17,0.24,0.32,0.41,0.51,0.62,0.74,0.87],'Plate held at the chest, not behind the head pulling on the neck.|Curl the ribs toward the hips, small honest range.|Exhale on the way up, that is what actually contracts the abs.'],
+
+    ['Chest Supported T-Bar Row','lats','traps,biceps,reardelt','pull','rowH',0,2,[0.34,0.52,0.72,0.94,1.18,1.44,1.70,1.98,2.28],'Chest pinned to the pad the whole set - if it lifts off, the weight is too heavy.|Pull to the lower ribs, elbows past the body.|Let the shoulder blades protract fully at the stretch.'],
+    ['Rear Delt Fly Machine','reardelt','traps','pull','curl',0,1,[0.14,0.22,0.31,0.41,0.52,0.64,0.77,0.91,1.07],'Chest against the pad, do not lean back to muscle it up.|Lead with the elbows and squeeze the shoulder blades together.|Light and controlled - this is a finishing exercise, not a main lift.'],
+    ['Incline Dumbbell Curl','biceps','forearms','pull','curl',0,1,[0.12,0.19,0.27,0.36,0.46,0.57,0.69,0.82,0.96],'Log both dumbbells added together.|The stretch behind the torso is the point - do not shorten the range to lift more.|Elbows stay back through the whole curl.'],
+    ['Machine Preacher Curl','biceps','forearms','pull','curl',0,1,[0.16,0.26,0.37,0.48,0.61,0.75,0.90,1.06,1.24],'Armpit at the top edge of the pad, not floating above it.|Do not lock out hard at the bottom - keep a little bend under tension.|Full squeeze at the top of every rep.'],
+    ['Barbell Preacher Curl','biceps','forearms','pull','curl',0,1,[0.15,0.24,0.34,0.45,0.57,0.70,0.84,0.99,1.16],'Armpit at the top edge of the pad, not floating above it.|Do not lock out hard at the bottom - keep a little bend under tension.|Full squeeze at the top of every rep.'],
+    ['Rope Triceps Pushdown','triceps','','push','curl',0,1,[0.14,0.23,0.33,0.43,0.55,0.67,0.81,0.96,1.13],'Elbows pinned to your sides the whole set.|Split the rope apart at the bottom for the full contraction.|Only the forearm moves.'],
+    ['Cable Reverse Curl','forearms','biceps','pull','curl',0,1,[0.12,0.19,0.27,0.36,0.46,0.57,0.69,0.82,0.96],'Palms down the whole rep - this is what makes it a reverse curl.|Elbows pinned, no swinging from the shoulders.|Lighter than a regular curl is normal here. That is the exercise, not a bad day.'],
+    ['Dumbbell Reverse Curl','forearms','biceps','pull','curl',0,1,[0.11,0.18,0.26,0.34,0.44,0.54,0.66,0.78,0.92],'Log both dumbbells added together.|Palms down the whole rep - this is what makes it a reverse curl.|Elbows pinned, no swinging from the shoulders.'],
+    ['Standing Forearm Curl','forearms','','pull','curl',0,1,[0.08,0.13,0.19,0.25,0.32,0.40,0.49,0.58,0.69],'Let the bar roll down to the fingertips before curling back up.|Small range, done slow, is the whole exercise.|Forearms sit on nothing - the wrist alone is doing the work.'],
+
+    ['Weighted Neck Curl','neck','','neck','curl',0,1,[0.05,0.09,0.13,0.18,0.24,0.30,0.37,0.45,0.54],'Lying on your back, plate or harness resting on the forehead.|Small range - chin toward the chest, then back to neutral.|Light and slow. The neck has no business being trained like a big lift.'],
+    ['Weighted Neck Extension','neck','','neck','curl',0,1,[0.06,0.10,0.15,0.20,0.26,0.33,0.40,0.48,0.58],'Lying face down, weight resting at the back of the head.|Small range - lift the head back against the resistance, then return to neutral.|Support yourself with the arms, the neck does the lifting alone.'],
+    ['Weighted Side Neck Curl','neck','','neck','curl',0,1,[0.04,0.07,0.11,0.15,0.20,0.25,0.31,0.38,0.46],'Lying on your side, weight resting above the ear.|Log one side per set - they rarely match exactly.|Bring the ear toward the shoulder, small range, no jerking.']
   ];
 
   /**
@@ -1506,8 +1549,8 @@
     } else {
       var groups = {};
       list.forEach(function(e){ (groups[e.cat] = groups[e.cat] || []).push(e); });
-      var order = ['push','pull','legs','core','custom'];
-      var names = { push:'Push', pull:'Pull', legs:'Legs', core:'Core', custom:'Yours' };
+      var order = ['push','pull','legs','core','neck','custom'];
+      var names = { push:'Push', pull:'Pull', legs:'Legs', core:'Core', neck:'Neck', custom:'Yours' };
       order.forEach(function(c){
         if (!groups[c]) return;
         var og = document.createElement('optgroup');

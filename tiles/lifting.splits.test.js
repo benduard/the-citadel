@@ -48,10 +48,11 @@ const check = (label, cond, extra) => {
 }
 
 console.log('\n[1] the split matches what Ruben actually trains')
-check('three splits', SPLITS.length === 3, SPLITS.length)
+check('four splits', SPLITS.length === 4, SPLITS.length)
 check('legs', !!sandbox.splitById('legs'))
 check('chest and shoulders + abs', !!sandbox.splitById('push'))
 check('back and arms', !!sandbox.splitById('pull'))
+check('neck, its own always-available section', !!sandbox.splitById('neck'))
 
 console.log('\n[2] THE INVARIANT: every muscle in exactly one split')
 const all = Object.keys(MUSCLES)
@@ -74,8 +75,15 @@ const dupes = LIB.filter(e => SPLITS.filter(s => s.mus.indexOf(e.pri) !== -1).le
 check('each exercise belongs to exactly one day', dupes.length === 0, dupes.map(e => e.name).join(', '))
 
 console.log('\n[5] each day has real work in it')
+// Neck is an accessory section, not a training day on its own - it will
+// never have a "serious lift to build on" the way a squat or a bench does,
+// so it is held to a lighter bar: real exercises exist, full stop.
 SPLITS.forEach(s => {
   const forDay = LIB.filter(e => s.mus.indexOf(e.pri) !== -1)
+  if (s.id === 'neck'){
+    check(`${s.name}: has real exercises`, forDay.length >= 2, String(forDay.length))
+    return
+  }
   const compounds = forDay.filter(e => e.w >= 2)
   check(`${s.name}: ${forDay.length} exercises`, forDay.length >= 5, String(forDay.length))
   check(`${s.name}: has serious lifts to build on`, compounds.length >= 2, String(compounds.length))
@@ -102,6 +110,27 @@ console.log('\n[7] biggest lift first inside a muscle')
 const quads = LIB.filter(e => e.pri === 'quads')
   .sort((a, b) => (b.w || 0) - (a.w || 0) || a.name.localeCompare(b.name))
 check('Back Squat leads the quads group', quads[0].name === 'Back Squat', quads[0].name)
+
+console.log('\n[8] the real machines Ruben listed land on the right day')
+const names = LIB.map(e => e.name)
+;['Pendulum Squat','Hack Squat','Seated Calf Raise','Seated Hamstring Curl',
+  'Lying Hamstring Curl','Adductor/Abductor Machine'].forEach(n =>
+  check(`${n} is on leg day`, legs.includes(n)))
+;['Dumbbell Flat Press','Incline Plate-Loaded Machine Press','Decline Plate-Loaded Machine Press',
+  'Plate-Loaded Machine Shoulder Press','Standing Machine Lateral Raise','Seated Machine Lateral Raise',
+  'Chest Fly Machine','Weighted Crunch'].forEach(n =>
+  check(`${n} is on chest/shoulder day`, push.includes(n)))
+;['Chest Supported T-Bar Row','Rear Delt Fly Machine','Incline Dumbbell Curl',
+  'Machine Preacher Curl','Barbell Preacher Curl','Rope Triceps Pushdown',
+  'Cable Reverse Curl','Dumbbell Reverse Curl','Standing Forearm Curl'].forEach(n =>
+  check(`${n} is on back/arms day`, pull.includes(n)))
+const neckEx = LIB.filter(e => sandbox.splitById('neck').mus.indexOf(e.pri) !== -1).map(e => e.name)
+;['Weighted Neck Curl','Weighted Neck Extension','Weighted Side Neck Curl'].forEach(n =>
+  check(`${n} is in the Neck section`, neckEx.includes(n)))
+check('no accidental duplicate of an exercise that already existed',
+  names.filter(n => n === 'Leg Extension').length === 1 &&
+  names.filter(n => n === 'Standing Calf Raise').length === 1 &&
+  names.filter(n => n === 'Skull Crusher').length === 1)
 
 console.log(`\n${fails} failure(s)`)
 process.exit(fails ? 1 : 0)

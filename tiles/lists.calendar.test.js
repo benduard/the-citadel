@@ -316,5 +316,23 @@ check('the habit counts as missed', mix.missed === 1, JSON.stringify(mix))
 check('the one-off counts as carried', mix.carried === 1)
 check('open is the sum of both', mix.open === 2)
 
+// ---------------------------------------------------------------------------
+console.log('\n[15] a day that has not happened yet is never scored')
+S.fresh(st => {
+  st.logFrom = '2026-07-01'
+  // Today (2026-07-31, per NOW above) still has open items - the exact
+  // condition that, without a future guard, would paint every day after it
+  // as already having missed them.
+  st.lists.daily.push({ id: 'g', title: 'Gym', done: false, repeat: true, createdAt: '2026-07-01', doneAt: null })
+  st.lists.daily.push({ id: 'o', title: 'One off', done: false, repeat: false, createdAt: '2026-07-20', doneAt: null })
+})
+const tomorrow = S.dayStatus('2026-08-01')
+check('tomorrow is flagged as unrecorded', tomorrow.noRecord === true)
+check('...and claims nothing missed or carried', tomorrow.missed === 0 && tomorrow.carried === 0, JSON.stringify(tomorrow))
+check('...and is not "clear" either', tomorrow.clear === false)
+const farFuture = S.dayStatus('2027-01-01')
+check('nor is a day far in the future', farFuture.noRecord === true)
+check('today itself IS scored (not "future")', S.dayStatus('2026-07-31').noRecord === false)
+
 console.log(`\n${fails} failure(s)`)
 process.exit(fails ? 1 : 0)

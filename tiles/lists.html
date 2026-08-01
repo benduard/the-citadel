@@ -686,8 +686,12 @@
 
   // Was this tile keeping the record on that day? Before logFrom it was not,
   // and a day it never watched must never be scored as a day you missed.
+  // AFTER today is excluded too: an item still open today is open on every
+  // date forever until it is crossed, so without this guard every future day
+  // would show today's open items as things already missed that never
+  // happened yet. A day that has not occurred has nothing to score.
   function hasRecord(date){
-    return !!state.logFrom && date >= state.logFrom;
+    return !!state.logFrom && date >= state.logFrom && date <= todayLocal();
   }
 
   function dayStatus(date){

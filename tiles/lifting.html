@@ -20,11 +20,12 @@
       days:     { "YYYY-MM-DD": [ { id, ex, kg, reps, rpe, note } ] },
       notes:    { "YYYY-MM-DD": "session note" },
       routines: [ { id, name, items: [ { ex, sets, reps, kg } ] } ],
-      custom:   [ { id, name, pri, sec: [], cat, pat, bwf, w, lad: [9], cues: [] } ],
+      custom:   [ { id, name, pri, sec: [], cat, pat, bwf, w, lad: [9], cues: [], uni } ],
       claimed:  { "<weekKey>:<questId>": true },
       lvlSeen:  <number>,             // last level celebrated, so it fires once
       rankSeen: { "<exercise name>": <rank index 0-26> },
-      splits:   { "YYYY-MM-DD": "legs" | "push" | "pull" }
+      splits:   { "YYYY-MM-DD": "legs" | "push" | "pull" },
+      routineToday: { "YYYY-MM-DD": "<routine id>" }
     }
 
   splits is which of SPLITS was chosen for a given day. Per day, not one sticky
@@ -32,6 +33,13 @@
   inherits yesterday's plan. A day with no entry means no split was picked, and
   the picker opens on Everything. Added 2026-07-31; an older blob simply has
   none, which needs no migration.
+
+  routineToday is which routine "Start" was tapped for on a given day, read by
+  suggestNext() to offer that routine's next unlogged item instead of guessing
+  from the split alone. Tapping Start again the same day (a different routine,
+  or the same one) just overwrites that day's entry - most recent intent wins,
+  nothing to undo. Old entries are never cleared; one short string per day that
+  ever used a routine is not worth the code to prune. Added 2026-07-31.
 
   v2 replaces v1 on Ruben's word, 2026-07-30. v1 held { unit, days } with the
   same set shape. A v1 blob loads its sets across rather than binning them, but
@@ -46,7 +54,12 @@
 
   DUMBBELL AND CABLE WEIGHT IS THE TOTAL ON THE BODY. Two 20kg dumbbells is
   logged as 40. One number per set, one meaning, so volume and ratios stay
-  comparable across every exercise.
+  comparable across every exercise. UNILATERAL EXERCISES (UNI_EXERCISES,
+  currently Dumbbell Row, plus any custom exercise marked unilateral) follow
+  the SAME rule from the other side: what you type is per hand, and it is
+  doubled before it is ever stored, so it is still one total on the body and
+  every rank ladder and rank.js's lifting_volume math needs zero special
+  casing. Only the label you see (setLabel) divides back by 2.
 
   reports one stream:
     key   "lifting_volume"
@@ -203,6 +216,29 @@
   .fl > span{ display:block; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
               font-size:9.5px; letter-spacing:.14em; text-transform:uppercase;
               color:var(--faint); margin-bottom:5px; }
+
+  .suggest{
+    display:flex; align-items:center; gap:9px; margin-bottom:10px;
+    padding:9px 11px; border-radius:10px;
+    background:var(--volt-soft); border:1px solid var(--volt-line);
+    font-size:12.5px; color:var(--text);
+  }
+  .suggest b{ color:var(--volt); font-weight:600; }
+  .suggest button{ margin-left:auto; flex:none; }
+
+  .list li.editing{ background:var(--volt-soft); border-radius:8px; }
+
+  .list li.muscleHead{
+    border-top:0; display:flex; align-items:baseline; gap:8px; padding:10px 0 4px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
+  }
+  .list li.muscleHead:first-child{ padding-top:0; }
+  .muscleHead .n{ margin-left:auto; font-size:9.5px; letter-spacing:.06em; text-transform:none; color:var(--faint); }
+
+  .checkRow{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--muted); cursor:pointer; }
+  .checkRow input{ width:17px; height:17px; flex:none; }
+  .checkRow input:disabled{ opacity:.45; cursor:not-allowed; }
 
   input[type="text"],input[type="number"],input[type="search"],select,textarea{
     width:100%; min-width:0; background:rgba(255,255,255,.04);
@@ -396,7 +432,14 @@
 <body>
 
 <!-- ============ POSTER FACE (no controls: the host owns the tap) ============ -->
-<div class="posterView rise">
+<!-- NOT class="rise": six sealed tiles mount at once on boot, and Chromium
+     sometimes never starts a fresh cross-origin iframe's CSS animation before
+     its own paint budget runs out - the poster then sits at opacity:0
+     forever. Confirmed flaky with Playwright (2026-07-31), see
+     vault/decisions.md. .rise is untouched and still safe on pgHead/#wSeg
+     below: those only render inside the full page view, opened one iframe at
+     a time, never racing five siblings for the compositor's attention. -->
+<div class="posterView">
   <div class="pTop">
     <div>
       <p class="eyebrow">Lifting</p>
@@ -443,6 +486,12 @@
              muscles that day trains. Filled by renderSplit(). -->
         <div class="splitRow" id="splitRow"></div>
         <p class="note" id="splitNote" style="margin-bottom:8px"></p>
+        <!-- A suggestion, never a default: a routine's next unlogged item if
+             one was started today, else the least-recently-trained exercise
+             in today's split. Filled by renderSuggest(). Empty when neither
+             applies - no split picked and no routine started is not enough
+             context to guess from. -->
+        <div id="suggestBox"></div>
 
         <div class="row" style="margin-bottom:8px">
           <label class="fl grow" style="flex:1 1 100%"><span>Exercise</span>
@@ -453,7 +502,7 @@
              set, so set 2 today is aimed at set 2 then. Filled by renderLast(). -->
         <div id="lastTime"></div>
         <div class="row three" style="margin-bottom:8px">
-          <label class="fl grow"><span>Weight (<i id="fUnit">kg</i>)</span>
+          <label class="fl grow"><span><i id="fWeightWord">Weight</i> (<i id="fUnit">kg</i>)</span>
             <input id="fKg" type="number" inputmode="decimal" step="0.5" min="0" placeholder="0" disabled>
           </label>
           <label class="fl grow"><span>Reps</span>
@@ -465,6 +514,7 @@
         </div>
         <div class="row">
           <button class="btn primary grow" id="bLog" disabled>Log set</button>
+          <button class="btn small" id="bEditCancel" type="button" hidden>Cancel</button>
           <button class="btn small" id="bRest" disabled>Rest</button>
         </div>
         <div class="rest" id="restBox" hidden style="margin-top:14px">
@@ -477,6 +527,10 @@
       <div class="card">
         <h3>Today</h3>
         <p class="note" id="todayNote">Nothing logged yet.</p>
+        <div class="seg" id="todayGroupSeg" style="margin-bottom:10px">
+          <button type="button" data-todaygroup="order" aria-pressed="true">By order</button>
+          <button type="button" data-todaygroup="muscle" aria-pressed="false">By body part</button>
+        </div>
         <ul class="list" id="todayList"></ul>
         <label class="fl" style="margin-top:12px"><span>Session note</span>
           <textarea id="fNote" placeholder="How it felt, what to change next time" disabled></textarea>
@@ -564,6 +618,9 @@
             <label class="fl grow"><span>Main muscle</span><select id="cMus" disabled></select></label>
             <label class="fl grow"><span>Pattern</span><select id="cPat" disabled></select></label>
           </div>
+          <label class="checkRow" style="margin-bottom:10px">
+            <input type="checkbox" id="cUni" disabled> Unilateral - typed weight is per hand
+          </label>
           <button class="btn small" id="bAddCustom" disabled>Add exercise</button>
         </div>
       </div>
@@ -954,10 +1011,28 @@
     ['Back Extension','lowerback','glutes,hams','core','hinge',1,1,[1.00,1.10,1.22,1.36,1.52,1.70,1.90,2.14,2.40],'Log added weight only. Your bodyweight is counted for you.|Round or stay flat, pick one and own it.|Do not hyperextend at the top.']
   ];
 
+  /**
+   * Exercises logged one side at a time. A lookup by name, not a tenth
+   * column on RAW: RAW's rank ladders are a hand-calibrated table and every
+   * row would need editing (and re-checking) just to add one boolean most
+   * rows do not use. This stays a name away from that table entirely.
+   *
+   * WHAT "PER HAND" MEANS FOR VOLUME. Typed weight is per hand, and it is
+   * DOUBLED before it is ever stored - so 20kg logged here becomes 40 in
+   * S.days, the exact convention every other dumbbell exercise already
+   * uses ("two 20kg dumbbells is 40" - see this file's header comment).
+   * Nothing about setVolume, effLoad, e1rm, or a rank ladder's ratios needs
+   * to change: the stored number already means what they expect it to
+   * mean. Only setLabel() and the log form divide back by 2, to show the
+   * number you actually typed.
+   */
+  var UNI_EXERCISES = { 'Dumbbell Row': true };
+
   function mkEx(r){
     return {
       name: r[0], pri: r[1], sec: r[2] ? r[2].split(',') : [], cat: r[3],
-      pat: r[4], bwf: r[5], w: r[6], lad: r[7], cues: r[8].split('|'), custom: false
+      pat: r[4], bwf: r[5], w: r[6], lad: r[7], cues: r[8].split('|'), custom: false,
+      uni: !!UNI_EXERCISES[r[0]]
     };
   }
   var LIB = RAW.map(mkEx);
@@ -1011,11 +1086,25 @@
   var S = {
     v:2, unit:'kg', bw:null, weekTarget:3, rest:120,
     days:{}, notes:{}, routines:[], custom:[], claimed:{}, lvlSeen:1, rankSeen:{},
-    splits:{}
+    splits:{}, routineToday:{}
   };
   var loaded = false;
   var trouble = '';
   var view = 'home';
+  var todayGroup = 'order'; // 'order' | 'muscle' - how the Today card lists its sets
+  /**
+   * The id of the set currently being edited, or null.
+   *
+   * TODAY'S SETS ONLY, and that is a deliberate limit rather than a missing
+   * feature. A PR here is "the heaviest set actually performed" and rank and
+   * XP are derived from history precisely so they cannot be farmed
+   * (vault/decisions.md). Letting any past day be rewritten would quietly
+   * undo that guarantee. Fixing a number you fat-fingered a minute ago is a
+   * different thing from editing last month, and only the first one is on
+   * offer. Older mistakes are still fixable the honest way: remove the row
+   * and log it again.
+   */
+  var editingSet = null;
   var wtab = 'routines';
   var bgMode = 'rank';
   var bgPick = '';
@@ -1025,7 +1114,7 @@
   var restTimer = null, restLeft = 0, restTotal = 0;
   var searchTerm = '';
 
-  function allEx(){ return LIB.concat(S.custom.map(function(c){ var o = mkEx([c.name,c.pri,(c.sec||[]).join(','),c.cat||'custom',c.pat||'curl',c.bwf||0,c.w||1,c.lad||null,(c.cues||[]).join('|')||'Yours.']); o.custom = true; if (!c.lad) o.lad = null; return o; })); }
+  function allEx(){ return LIB.concat(S.custom.map(function(c){ var o = mkEx([c.name,c.pri,(c.sec||[]).join(','),c.cat||'custom',c.pat||'curl',c.bwf||0,c.w||1,c.lad||null,(c.cues||[]).join('|')||'Yours.']); o.custom = true; if (!c.lad) o.lad = null; o.uni = !!c.uni; return o; })); }
   function findEx(n){ var a = allEx(); for (var i=0;i<a.length;i++) if (a[i].name === n) return a[i]; return null; }
 
   /* ============================ maths ============================ */
@@ -1053,6 +1142,9 @@
     var carried = e && e.bwf && S.bw;
     if (carried && !s.kg) return 'bodyweight x ' + s.reps;
     if (carried) return 'bodyweight + ' + showW(s.kg) + ' ' + unitLabel() + ' x ' + s.reps;
+    // Stored kg is the total across both hands (see UNI_EXERCISES) - halve it
+    // back to what was actually typed for one hand.
+    if (e && e.uni) return showW(s.kg / 2) + ' ' + unitLabel() + ' per hand x ' + s.reps;
     return showW(s.kg) + ' ' + unitLabel() + ' x ' + s.reps;
   }
 
@@ -1486,6 +1578,73 @@
     return { cls:'same', text:'matched' };
   }
 
+  /**
+   * The next exercise worth doing, or null when there is not enough context
+   * to say so honestly (no split picked, no routine started).
+   *
+   * Order: a routine started today wins, always - it is explicit intent, and
+   * guessing from history when he already told us the plan would be worse
+   * than the plan. Its next UNLOGGED item is offered, in the routine's own
+   * order; once every item in it has a set today, it has nothing left to say
+   * and falls through to the split.
+   *
+   * Without an active routine: the split's own exercise with the FEWEST
+   * sessions in the last 14 days - the one going stale relative to the rest
+   * of that day's work. Ties broken by highest w, the same "biggest lift
+   * first" rule fillSelect() already sorts by. Anything already logged today
+   * is excluded, or a leg day would keep re-suggesting the squat he did an
+   * hour ago.
+   */
+  function suggestNext(){
+    var k = today();
+    var loggedToday = {};
+    (S.days[k] || []).forEach(function(s){ loggedToday[s.ex] = true; });
+
+    var rid = S.routineToday[k];
+    if (rid){
+      var r = S.routines.filter(function(x){ return x.id === rid; })[0];
+      if (r){
+        for (var i=0;i<r.items.length;i++){
+          if (!loggedToday[r.items[i].ex]) return { name: r.items[i].ex, why: 'next in ' + r.name };
+        }
+      }
+    }
+
+    var sp = splitFor(k);
+    if (!sp) return null;
+    var split = splitById(sp);
+    var candidates = allEx().filter(function(e){
+      return split.mus.indexOf(e.pri) !== -1 && !loggedToday[e.name];
+    });
+    if (!candidates.length) return null;
+
+    candidates.sort(function(a, b){
+      var da = sessionsInLast14(a.name), db = sessionsInLast14(b.name);
+      if (da !== db) return da - db;
+      return (b.w || 0) - (a.w || 0);
+    });
+    return { name: candidates[0].name, why: 'least trained on ' + split.name + ' lately' };
+  }
+
+  function sessionsInLast14(exName){
+    var k = today(), n = 0;
+    for (var i=0;i<14;i++){
+      var kk = shift(k, -i);
+      var day = S.days[kk] || [];
+      if (day.some(function(s){ return s.ex === exName; })) n++;
+    }
+    return n;
+  }
+
+  function renderSuggest(){
+    var box = $('suggestBox');
+    if (!box) return;
+    var s = suggestNext();
+    if (!s){ box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="suggest">Try <b>' + esc(s.name) + '</b> - ' + esc(s.why) + '.' +
+      '<button class="btn small" type="button" data-suggest-use="' + esc(s.name) + '">Use</button></div>';
+  }
+
   function renderSplit(){
     var row = $('splitRow'), note = $('splitNote');
     if (!row || !note) return;
@@ -1522,7 +1681,18 @@
     note.textContent = bits.join('  ·  ');
   }
 
+  // The log form's weight label follows whichever exercise is selected, so
+  // "Weight per hand" only shows up when it is actually true - never a
+  // static hint that would be wrong for every other exercise.
+  function updateWeightLabel(){
+    var w = $('fWeightWord');
+    if (!w) return;
+    var e = findEx($('fEx').value);
+    w.textContent = (e && e.uni) ? 'Weight per hand' : 'Weight';
+  }
+
   function renderLast(){
+    updateWeightLabel();
     var box = $('lastTime');
     if (!box) return;
     var ex = $('fEx').value;
@@ -1571,6 +1741,122 @@
     box.innerHTML = html + '</div>';
   }
 
+  // One completed-set row. Shared by both today-list layouts so "by body
+  // part" is a different ORDER of the exact same rows, never a second
+  // rendering path that could drift from the real one (repeat/remove keep
+  // working identically either way, since these are the same DOM nodes the
+  // order view already built).
+  function buildTodayRow(s){
+    var li = document.createElement('li');
+    var e = findEx(s.ex);
+    var d = document.createElement('div'); d.className = 'grow';
+    var l1 = document.createElement('div'); l1.className = 'l1'; l1.textContent = s.ex;
+    var bits = [setLabel(s, e)];
+    if (s.rpe) bits.push('RPE ' + s.rpe);
+    if (e && e.bwf && !S.bw) bits.push('bodyweight not set, so it is not counted');
+    if (s.note) bits.push(s.note);
+    var l2 = document.createElement('div'); l2.className = 'l2'; l2.textContent = bits.join('  ·  ');
+    d.appendChild(l1); d.appendChild(l2);
+    li.appendChild(d);
+    if (editingSet === s.id) li.classList.add('editing');
+    var ed = document.createElement('button');
+    ed.className = 'btn small ghost'; ed.type = 'button';
+    ed.setAttribute('data-editset', s.id);
+    ed.textContent = editingSet === s.id ? 'Editing' : 'Edit';
+    li.appendChild(ed);
+    var rep = document.createElement('button');
+    rep.className = 'btn small ghost'; rep.type = 'button';
+    rep.setAttribute('data-repeat', s.id); rep.textContent = 'Repeat';
+    li.appendChild(rep);
+    var del = document.createElement('button');
+    del.className = 'btn small ghost'; del.type = 'button';
+    del.setAttribute('data-del', s.id); del.textContent = 'Remove';
+    li.appendChild(del);
+    return li;
+  }
+
+  /**
+   * Bucket a day's sets by PRIMARY muscle - same taxonomy SPLITS and the
+   * exercise picker already use, so "by body part" means the same thing
+   * everywhere in this file. Order within a bucket is preserved (the order
+   * they were actually logged), and buckets themselves are ordered by
+   * MUSCLES' own key order so the list reads the same way every time rather
+   * than reshuffling as volumes change.
+   */
+  function groupByMuscle(a){
+    var buckets = {}; // muscle key -> sets[]
+    a.forEach(function(s){
+      var e = findEx(s.ex);
+      var m = (e && e.pri) || 'measure';
+      (buckets[m] = buckets[m] || []).push(s);
+    });
+    var order = Object.keys(MUSCLES).filter(function(m){ return buckets[m]; });
+    // A set logged under an exercise this board does not recognise (should
+    // not happen, but a corrupted or hand-edited slot is not impossible)
+    // still has to show up somewhere rather than silently vanishing.
+    Object.keys(buckets).forEach(function(m){ if (order.indexOf(m) === -1) order.push(m); });
+    return order.map(function(m){ return { muscle: m, sets: buckets[m] }; });
+  }
+
+  // The log form doubles as the edit form. One set of inputs, one place that
+  // knows how to read them - a second edit-only form would be a second thing
+  // to keep in step with unit conversion, per-hand doubling and validation.
+  function renderEditMode(){
+    var log = $('bLog'), cancel = $('bEditCancel');
+    if (!log || !cancel) return;
+    var on = !!editingSet;
+    log.textContent = on ? 'Save edit' : 'Log set';
+    cancel.hidden = !on;
+  }
+
+  function startEditingSet(id){
+    var s = (S.days[today()] || []).filter(function(x){ return x.id === id; })[0];
+    if (!s) return;
+    editingSet = id;
+    $('fEx').value = s.ex;
+    var e = findEx(s.ex);
+    var shownKg = (e && e.uni) ? s.kg / 2 : s.kg;
+    $('fKg').value = shownKg ? Math.round(fromKg(shownKg) * 10) / 10 : '';
+    $('fReps').value = s.reps;
+    $('fRpe').value = s.rpe == null ? '' : s.rpe;
+    renderHome();
+    $('fKg').focus();
+    msg('Editing that set. Change what is wrong and press Save edit.', true);
+  }
+
+  function cancelEditingSet(){
+    editingSet = null;
+    $('fKg').value = '';
+    $('fReps').value = '';
+    $('fRpe').value = '';
+    renderHome();
+    msg('', true);
+  }
+
+  function renderTodayList(a){
+    var ul = $('todayList');
+    ul.innerHTML = '';
+
+    if (todayGroup === 'muscle'){
+      groupByMuscle(a).forEach(function(g){
+        var head = document.createElement('li');
+        head.className = 'muscleHead';
+        var name = document.createElement('span');
+        name.textContent = MUSCLES[g.muscle] || g.muscle;
+        var n = document.createElement('span');
+        n.className = 'n';
+        n.textContent = g.sets.length + (g.sets.length === 1 ? ' set' : ' sets') +
+          '  ·  ' + num(fromKg(g.sets.reduce(function(sum, s){ return sum + setVolume(s); }, 0))) + ' ' + unitLabel();
+        head.appendChild(name); head.appendChild(n);
+        ul.appendChild(head);
+        g.sets.slice().reverse().forEach(function(s){ ul.appendChild(buildTodayRow(s)); });
+      });
+      return;
+    }
+
+    a.slice().reverse().forEach(function(s){ ul.appendChild(buildTodayRow(s)); });
+  }
+
   // Deliberately NOT called niceDate: that name is already taken above and
   // returns the short "24 Jul" the session and PR lists are built on.
   function lastTimeWhen(k){
@@ -1587,36 +1873,15 @@
 
     $('fUnit').textContent = unitLabel();
     renderSplit();
+    renderSuggest();
     renderLast();
+    renderEditMode();
 
     $('todayNote').textContent = a.length
       ? a.length + (a.length === 1 ? ' set, ' : ' sets, ') + num(fromKg(dayVolume(k))) + ' ' + unitLabel() + ' moved'
       : 'Nothing logged yet.';
 
-    var ul = $('todayList');
-    ul.innerHTML = '';
-    a.slice().reverse().forEach(function(s){
-      var li = document.createElement('li');
-      var e = findEx(s.ex);
-      var d = document.createElement('div'); d.className = 'grow';
-      var l1 = document.createElement('div'); l1.className = 'l1'; l1.textContent = s.ex;
-      var bits = [setLabel(s, e)];
-      if (s.rpe) bits.push('RPE ' + s.rpe);
-      if (e && e.bwf && !S.bw) bits.push('bodyweight not set, so it is not counted');
-      if (s.note) bits.push(s.note);
-      var l2 = document.createElement('div'); l2.className = 'l2'; l2.textContent = bits.join('  ·  ');
-      d.appendChild(l1); d.appendChild(l2);
-      li.appendChild(d);
-      var rep = document.createElement('button');
-      rep.className = 'btn small ghost'; rep.type = 'button';
-      rep.setAttribute('data-repeat', s.id); rep.textContent = 'Repeat';
-      li.appendChild(rep);
-      var del = document.createElement('button');
-      del.className = 'btn small ghost'; del.type = 'button';
-      del.setAttribute('data-del', s.id); del.textContent = 'Remove';
-      li.appendChild(del);
-      ul.appendChild(li);
-    });
+    renderTodayList(a);
 
     if ($('fNote') !== document.activeElement) $('fNote').value = S.notes[k] || '';
 
@@ -2358,9 +2623,44 @@
 
     var k = today();
     S.days[k] = S.days[k] || [];
+    // Uni: what was typed is one hand. Stored total is both, matching the
+    // convention every other dumbbell exercise already stores under.
+    var storedKg = toKg(kgRaw);
+    if (e && e.uni) storedKg *= 2;
+
+    /**
+     * Saving an edit instead of adding a set.
+     *
+     * The row is mutated in place and persist() does the rest - it already
+     * calls pushReport(), which recomputes dayVolume(today()) from whatever
+     * S.days[today()] currently holds. So the ledger's lifting_volume for
+     * today follows an edit automatically, exactly as it already follows an
+     * add or a remove. No separate resync path to forget.
+     *
+     * Scoped to today's array by construction: editingSet is only ever set
+     * from a row in S.days[today()], and this looks the id up in that same
+     * array. An id from an older day simply is not found.
+     */
+    if (editingSet){
+      var row = S.days[k].filter(function(x){ return x.id === editingSet; })[0];
+      if (!row){ editingSet = null; renderHome(); msg('That set is gone. Nothing was changed.'); return; }
+      row.ex = ex;
+      row.kg = storedKg;
+      row.reps = reps;
+      row.rpe = isFinite(rpe) ? rpe : null;
+      editingSet = null;
+      $('fReps').value = '';
+      $('fRpe').value = '';
+      buzz(12);
+      persist();          // pushReport() inside re-reports today's corrected volume
+      checkMilestones();
+      msg('Saved. Today’s volume was recounted from the corrected set.', true);
+      return;             // no rest timer: an edit is bookkeeping, not a set you just did
+    }
+
     S.days[k].push({
       id: 's' + Date.now() + Math.floor(Math.random() * 1000),
-      ex: ex, kg: toKg(kgRaw), reps: reps,
+      ex: ex, kg: storedKg, reps: reps,
       rpe: isFinite(rpe) ? rpe : null, note: ''
     });
     $('fReps').value = '';
@@ -2409,7 +2709,7 @@
 
   function enable(on){
     var ids = ['fEx','fKg','fReps','fRpe','bLog','bRest','fNote','fRoutine','bAddRoutine',
-               'fSearch','cName','cMus','cPat','bAddCustom','fBw','bBw','fTarget','fRest','ladPick'];
+               'fSearch','cName','cMus','cPat','cUni','bAddCustom','fBw','bBw','fTarget','fRest','ladPick'];
     ids.forEach(function(id){ var el = $(id); if (el) el.disabled = !on; });
   }
 
@@ -2423,6 +2723,27 @@
       var a;
 
       if ((a = t.getAttribute('data-nav'))) { setView(a); return; }
+      // A suggestion FILLS the picker, same law as the last-time Use button:
+      // it never logs anything on its own.
+      if ((a = t.getAttribute('data-suggest-use'))) {
+        $('fEx').value = a;
+        if ($('fEx').value !== a) return;   // not in the current filtered list
+        var sEx = findEx(a);
+        if (sEx && sEx.lad) ladPick = a;
+        renderLast();
+        $('fKg').focus();
+        return;
+      }
+      if ((a = t.getAttribute('data-editset'))) { startEditingSet(a); return; }
+      if (t === $('bEditCancel')) { cancelEditingSet(); return; }
+      if ((a = t.getAttribute('data-todaygroup'))) {
+        todayGroup = a;
+        document.querySelectorAll('[data-todaygroup]').forEach(function(b){
+          b.setAttribute('aria-pressed', b.getAttribute('data-todaygroup') === a ? 'true' : 'false');
+        });
+        renderHome();
+        return;
+      }
       if ((a = t.getAttribute('data-wtab'))) { wtab = a; libPick = ''; render(); return; }
       if ((a = t.getAttribute('data-bg'))) { bgMode = a; render(); return; }
       if ((a = t.getAttribute('data-unit'))) {
@@ -2458,7 +2779,9 @@
         var prevU = prevSessionFor($('fEx').value);
         var srcU = prevU && prevU.sets[parseInt(a, 10)];
         if (!srcU) return;
-        $('fKg').value = srcU.kg ? Math.round(fromKg(srcU.kg) * 10) / 10 : '';
+        var eU = findEx($('fEx').value);
+        var kgU = srcU.kg && eU && eU.uni ? srcU.kg / 2 : srcU.kg;
+        $('fKg').value = kgU ? Math.round(fromKg(kgU) * 10) / 10 : '';
         $('fReps').value = srcU.reps;
         $('fReps').focus();
         msg('Last time’s set ' + (parseInt(a, 10) + 1) + ' is in the form. Change it to what you actually do.', true);
@@ -2476,6 +2799,9 @@
         var k2 = today();
         S.days[k2] = (S.days[k2] || []).filter(function(s){ return s.id !== a; });
         if (!S.days[k2].length) delete S.days[k2];
+        // Removing the very row being edited would otherwise leave the form
+        // in Save-edit mode pointed at nothing.
+        if (editingSet === a) editingSet = null;
         persist();
         return;
       }
@@ -2490,9 +2816,13 @@
       if ((a = t.getAttribute('data-start'))) {
         var r = S.routines.filter(function(x){ return x.id === a; })[0];
         if (!r || !r.items.length) return;
+        S.routineToday[today()] = a;   // read by suggestNext() to offer its next unlogged item
         $('fEx').value = r.items[0].ex;
-        if (r.items[0].kg) $('fKg').value = Math.round(fromKg(r.items[0].kg) * 10) / 10;
+        var rEx = findEx(r.items[0].ex);
+        var rKg = (rEx && rEx.uni) ? r.items[0].kg / 2 : r.items[0].kg;
+        if (rKg) $('fKg').value = Math.round(fromKg(rKg) * 10) / 10;
         if (r.items[0].reps) $('fReps').value = r.items[0].reps;
+        persist();
         setView('home');
         msg(r.name + ' loaded. First exercise is in the form, the rest is on you.', true);
         return;
@@ -2519,7 +2849,10 @@
         var sets = parseInt($('reSets').value, 10) || 3;
         var reps = parseInt($('reReps').value, 10) || 8;
         var kg = parseFloat($('reKg').value);
-        re.items.push({ ex:name, sets:sets, reps:reps, kg: isFinite(kg) ? toKg(kg) : 0 });
+        var reEx = findEx(name);
+        var reKgStored = isFinite(kg) ? toKg(kg) : 0;
+        if (reEx && reEx.uni) reKgStored *= 2;   // per hand typed, total stored - same rule logSet() follows
+        re.items.push({ ex:name, sets:sets, reps:reps, kg: reKgStored });
         $('reKg').value = '';
         persist();
         return;
@@ -2548,8 +2881,10 @@
           return;
         }
         S.custom.push({ id:'c' + Date.now(), name:cn, pri:$('cMus').value, sec:[],
-                        cat:'custom', pat:$('cPat').value, bwf:0, w:1, lad:null, cues:['Yours.'] });
+                        cat:'custom', pat:$('cPat').value, bwf:0, w:1, lad:null, cues:['Yours.'],
+                        uni: $('cUni').checked });
         $('cName').value = '';
+        $('cUni').checked = false;
         fillSelect($('fEx'), true, splitFor());
         fillSelect($('reEx'), true);
         msg(cn + ' added. It logs and counts toward volume. No rank, because no ladder was set for it.', true);
@@ -2647,6 +2982,7 @@
         // is not a problem to fix: no split recorded means no split was
         // chosen, and the picker simply opens on Everything.
         S.splits = d.splits || {};
+        S.routineToday = d.routineToday || {};
       } else if (d.days){
         // A v1 blob. Ruben asked for a clean start on 2026-07-30, so only the
         // display unit carries over and the log begins empty.

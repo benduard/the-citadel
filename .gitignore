@@ -13,3 +13,7 @@ Thumbs.db
 # Node
 node_modules/
 npm-debug.log*
+
+# Python bytecode cache (skills ship .py scripts; cache regenerates on run)
+__pycache__/
+*.pyc

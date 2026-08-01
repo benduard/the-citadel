@@ -1,0 +1,35 @@
+<!--
+  THE CITADEL MARK, SMALL SIZES ONLY (16px and 32px browser tab favicons).
+
+  WHY A SECOND FILE. The full mark has three elements - wall, gate, keep - and
+  below about 48px they stop being three things and become one grey blob. This
+  is not a failure of the drawing, it is what happens to any detailed mark at
+  16px, which is why real identity systems ship a simplified small variant
+  rather than scaling the big one down.
+
+  WHAT SURVIVES. The keep alone, drawn to the edges, on the same graphite. It
+  is the most distinctive single silhouette in the full mark, so a tab showing
+  only this still belongs to the same family - it reads as the same object seen
+  closer, not as a different logo.
+
+  Rendered by tools/build-icons.js. Check any change at 1:1, not zoomed in.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="groundS" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#161c23"/>
+      <stop offset="100%" stop-color="#0b0e12"/>
+    </linearGradient>
+    <linearGradient id="goldS" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#f6e7c0"/>
+      <stop offset="55%"  stop-color="#dcbc7e"/>
+      <stop offset="100%" stop-color="#b08c4a"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#groundS)"/>
+
+  <!-- The keep, filling the frame. No wall, no gate: at 16px they would only
+       muddy the silhouette this is trying to protect. -->
+  <path d="M 250 470 L 512 176 L 774 470 V 872 H 250 Z" fill="url(#goldS)"/>
+</svg>

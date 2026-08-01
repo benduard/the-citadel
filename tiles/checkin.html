@@ -92,9 +92,14 @@
     height:100%;
     min-height:100vh;
     padding:20px;
-    opacity:0;
-    animation:rise .6s ease forwards;
   }
+  /* NOT opacity:0 + an entrance animation. Six sealed tiles mount at once on
+     boot, and Chromium sometimes never starts a fresh cross-origin iframe's
+     CSS animation before its own paint budget runs out - the poster then
+     sits at opacity:0 forever, invisible content in a visible card. Confirmed
+     with a Playwright smoke test (2026-07-31): flaky across repeated loads,
+     not a one-off. Content must default to visible; a fade-in is not worth
+     the risk of permanent invisibility. See vault/decisions.md. */
   .posterHero{ display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; }
   .posterHero .num{ font-size:46px; }
   .posterHero .unit{ font-size:13px; color:var(--muted); }

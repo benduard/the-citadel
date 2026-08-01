@@ -97,8 +97,11 @@
   .posterView{
     display:flex; flex-direction:column; justify-content:center;
     gap:10px; height:100%; min-height:100vh; padding:20px;
-    opacity:0; animation:rise .6s ease forwards;
   }
+  /* NOT opacity:0 + an entrance animation - see checkin.html's comment on the
+     same rule and vault/decisions.md. Six sealed tiles mount at once, and
+     Chromium sometimes never starts a fresh iframe's CSS animation, leaving
+     the poster stuck invisible forever. Confirmed flaky with Playwright. */
   .posterHero{ display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; }
   .posterHero .num{ font-size:46px; }
   .posterHero .unit{ font-size:13px; color:var(--muted); }

@@ -2,6 +2,164 @@
 
 What you decided and why, so a future session never re-litigates it.
 
+## The board has a mark, and the iPhone home screen icon finally works
+
+Decided 2026-07-31. Ruben's home screen tile was blank. The cause was not a
+weak logo - the board shipped **no icon files and no icon tags at all**, so iOS
+fell back to a screenshot of the page. There was nothing to fix, only something
+to build.
+
+THE MARK. `icons/mark.svg` is the master; every PNG is rendered from it by
+`tools/build-icons.js`. Never hand-edit a PNG. A citadel from above: the
+chamfered octagon wall, the keep standing inside it, the gate cut through the
+base. The octagon is not a shape chosen for an icon - it is the board's own
+signature cut, the same clip-path the rank panel and command surfaces already
+use, so the mark is the board's geometry rather than a logo bolted onto it.
+Gold because the design law reserves gold for identity and ceremony; petrol is
+interaction and mint/amber judge how a person is doing, which an app icon must
+never imply.
+
+THREE SOURCE FILES, and each earns its place:
+
+- `mark.svg` - the full mark, for 120px and up.
+- `mark-small.svg` - the keep alone, for the 16 and 32px favicons. Below about
+  48px the full mark's three elements stop being three things and become a
+  grey blob. Shipping a simplified small variant is what real identity systems
+  do; scaling the big one down is not.
+- `mark-maskable.svg` - the same artwork scaled to 78%, for Android adaptive
+  icons. Android crops maskable icons to a centred circle of 80% diameter, and
+  the full mark's wall corners sit at radius 429 of 1024 against a 410 safe
+  radius. Declaring the standard mark maskable would have let Android quietly
+  shave the corners off the wall. `tools/icons.test.js` recomputes that
+  geometry, so the claim cannot drift away from the artwork.
+
+THINGS TO NOT UNDO:
+
+- **apple-touch-icon must be PNG.** iOS ignores SVG for it, and ignores the
+  manifest's icons for the home screen entirely - it looks for those link tags.
+- **Those PNGs are opaque on purpose.** iOS composites WHITE behind any
+  transparency, which would put a white box behind a dark mark. The graphite
+  ground is baked in.
+- **Both `apple-mobile-web-app-capable` and `mobile-web-app-capable` are set.**
+  The Apple one is deprecated in favour of the standard one, but dropping it
+  still breaks standalone mode on iPhone.
+- `apple-mobile-web-app-title` is "Citadel", not "The Citadel", because the
+  longer name wraps under the home screen icon.
+- The header emblem in `index.html` is the same mark split in two: the
+  chamfered plate is the wall, the glyph inside it is the keep. Redrawing the
+  whole mark at 14px would be a gold smudge, for the same reason mark-small
+  exists.
+
+The first draft of the mark was drawn to look right at 1024px and checked at
+60px - the real iPhone tile - where the keep had thinned to a sliver and the
+gate had become a speck. Every weight in the file is set from the 60px render
+backwards. If you change it, re-run the build and LOOK at the small output
+before believing it.
+
+## The shell was audited against a design skill, and four AI tells were removed
+
+Decided 2026-07-31. Ruben asked for the UI to look less like it was generated,
+using the `redesign-existing-projects` skill installed the same day. It was an
+audit, not a reskin: the identity (graphite, gold, petrol, chamfered command
+deck) did not change. Four things did.
+
+**Archivo joins Inter as a display face.** Inter stays the body typeface - it
+is genuinely right at the 12-14px that is most of this board, and it is the
+design law. But Inter at EVERY size, including the headline moments, is one of
+the most recognisable generated-design tells there is, flagged independently
+by two different design skills. Archivo takes the greeting, the rank name, the
+countdown and the wordmark: a technical grotesque with real width, which suits
+an instrument panel. Never used for running text.
+
+**The three goal cards became one panel of three rows.** Three equal cards in
+a row is the single most-cited generated layout, and here it was also the
+worse design: the whole point of those three is comparing which goal is
+furthest behind today, and three columns means reading across a gap three
+times. Rows share a left edge, so the fractions line up and the answer is
+immediate. The goal needing attention is marked with a gold rule down its left
+edge rather than a differently-coloured card - a border on one card of three
+reads as a rendering glitch, a rule on one row reads as a pointer.
+
+**The rank rows are capped at 620px.** They were stretching the full panel
+width on desktop, putting a 1200px progress bar between a label at the far
+left and its status at the far right - the two things you read together, as
+far apart as the screen allows. The cap lives on `.attrs` itself rather than
+on the grid column, because TWO states render those rows (ranked, and the
+building countdown) and capping only the first left the countdown stretched.
+The building state also gained the same two-column shape the ranked state
+uses, or it grew a tall empty right half.
+
+**A real radius scale and tinted shadows.** Everything was 12-14px radius with
+pure-black shadows. Radius now tightens as elements nest (`--radius-xs` 3px
+through `--radius-lg` 14px), and shadows carry the background's blue-grey hue
+rather than neutral black, which on this ground read as dirt rather than
+depth. Tiles also lift 2px on hover - killed under `hover: none` so iOS does
+not leave a tile stuck raised after a tap.
+
+WHAT WAS DELIBERATELY NOT CHANGED, though the skill says otherwise: it advises
+picking a single accent colour. Here that would be wrong. Gold and petrol
+(shell), mint and amber (how a person is doing), and Lifting's blue are
+SEMANTIC and documented in this file - flattening them to one hue would delete
+meaning the board depends on. That rule is written for marketing sites, not
+for instruments. The background was already tinted graphite rather than pure
+black, and the grain overlay already existed.
+
+## Every tile's poster was invisible some of the time, and no test caught it
+
+Found and fixed 2026-07-31, while setting up `tools/visual-check.js` at
+Ruben's request for browser testing. Every plain-node suite in this repo was
+green the entire time this was live on the real board.
+
+THE BUG. Five tiles' poster faces (checkin, body, recovery, progress,
+lifting) started at `opacity:0` and relied on a CSS entrance animation to
+become visible. Six sealed iframes mount at once on boot, and Chromium
+sometimes never starts a fresh cross-origin iframe's CSS animation before its
+own paint budget runs out. The poster then sits at opacity:0 FOREVER - not
+slow, not delayed, permanently invisible until the page is reloaded and the
+race happens to go the other way. Confirmed flaky across 10 repeated real
+loads of the real board with a real Chromium (not a headless-only artifact -
+opacity was read from the live computed style, same as a person would see).
+
+TWO SEPARATE CAUSES, found in that order:
+
+1. `.tile`'s chamfered-corner `clip-path` (added in the shell reskin,
+   `vault/decisions.md`'s earlier entry) sat on the DIRECT PARENT of every
+   sealed iframe. With it present, the bug was not flaky - it was 100%
+   reproducible, every tile, every load. Proven by toggling clip-path off on
+   the live served file and reloading: opacity went from 0 to 1 with that one
+   property changed and nothing else. Fixed by dropping `.tile` to a plain
+   `border-radius` instead. `overflow:hidden` alone does NOT cause it and was
+   left in place - only clip-path on an iframe's ancestor does this.
+2. Even with clip-path gone, the underlying race remained: five tiles still
+   started invisible and depended on `animation:rise ... forwards` to reveal
+   themselves, and that still lost the race a fraction of the time. Fixed by
+   removing the opacity:0/animation dependency from each poster - content now
+   defaults to visible, full stop. `lists.html` never had this pattern and
+   never once failed across every test run; that was the tell.
+
+WHAT WAS DELIBERATELY NOT TOUCHED. `progress.html`'s `.quest` entrance
+animation and `lifting.html`'s `.rise` class on `pgHead`/`#wSeg` look
+identical but are NOT implicated: both only render inside a tile's full PAGE
+view, opened one iframe at a time via `openPage()`, never racing five
+siblings for the compositor on a cold boot. Confirmed by testing before
+changing anything. Only `lifting.html`'s poster instance had `rise` removed;
+the shared `.rise` class itself is untouched.
+
+THE LESSON, worth keeping: a CSS entrance animation must never be the only
+path to visibility for content inside a sealed iframe. Fade-ins are fine as
+enhancement; they are not fine as the mechanism that makes something exist on
+screen. If a future tile wants a poster fade-in, default it to visible and
+treat the animation as decoration that can silently fail to play.
+
+HOW IT WAS FOUND. `tools/visual-check.js`, a Playwright script that loads the
+real board in a real Chromium and reads real computed styles, repeated over
+several fresh loads specifically because the bug was probabilistic. Every
+suite in this repo before that point tested the CODE that produces a page,
+never the page itself, and none of them could have caught this by
+construction. See `tools/` for setup; it is optional and not part of
+`run-tests.sh`'s guaranteed-green baseline, since it needs a Chromium binary
+on disk and the board actually running.
+
 ## Projects became Lists, and it sits at the top of the board
 
 Decided 2026-07-31.

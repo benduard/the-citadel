@@ -1,0 +1,52 @@
+<!--
+  THE CITADEL MARK, MASKABLE VARIANT (Android adaptive icons).
+
+  WHY THIS EXISTS. A "maskable" icon is cropped by the launcher to whatever
+  shape it likes - circle, squircle, rounded square - and only a centred circle
+  of 80% diameter is guaranteed to survive. The full mark's wall corners sit at
+  radius 429 of 1024, past the 410 safe radius, so declaring the standard mark
+  maskable would have let Android quietly shave the corners off the wall.
+
+  The fix is padding, not redrawing: the same artwork, scaled to 78% about the
+  centre, on the same full-bleed ground. Comfortably inside the safe circle
+  with room to spare, and identical in every other respect.
+
+  Rendered by tools/build-icons.js. If the wall geometry in mark.svg changes,
+  re-check the safe radius before trusting this.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="groundM" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#161c23"/>
+      <stop offset="46%"  stop-color="#0f1319"/>
+      <stop offset="100%" stop-color="#080a0d"/>
+    </linearGradient>
+    <radialGradient id="overheadM" cx="52%" cy="2%" r="70%">
+      <stop offset="0%"   stop-color="#c8a567" stop-opacity=".20"/>
+      <stop offset="58%"  stop-color="#c8a567" stop-opacity=".05"/>
+      <stop offset="100%" stop-color="#c8a567" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="goldM" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#f3e2b4"/>
+      <stop offset="40%"  stop-color="#e2c68f"/>
+      <stop offset="100%" stop-color="#b08c4a"/>
+    </linearGradient>
+    <linearGradient id="goldKeepM" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#f8ecc9"/>
+      <stop offset="52%"  stop-color="#dcbc7e"/>
+      <stop offset="100%" stop-color="#a37c3c"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Ground stays full bleed: it is meant to be cropped. -->
+  <rect width="1024" height="1024" fill="url(#groundM)"/>
+  <rect width="1024" height="1024" fill="url(#overheadM)"/>
+
+  <!-- Everything else pulls inside the safe circle. -->
+  <g transform="translate(512 512) scale(0.78) translate(-512 -512)">
+    <path d="M 270 158 H 754 L 866 270 V 754 L 754 866 H 270 L 158 754 V 270 Z"
+          fill="none" stroke="url(#goldM)" stroke-width="74" stroke-linejoin="miter"/>
+    <rect x="428" y="812" width="168" height="104" fill="#0d1116"/>
+    <path d="M 410 452 L 512 342 L 614 452 V 726 H 410 Z" fill="url(#goldKeepM)"/>
+  </g>
+</svg>

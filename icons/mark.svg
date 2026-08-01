@@ -1,0 +1,69 @@
+<!--
+  THE CITADEL MARK. The master. Every large PNG in this folder is rendered from
+  this file by tools/build-icons.js - edit this, re-run that, never hand-edit a
+  PNG. Small sizes (16/32px) come from mark-small.svg instead; see there for
+  why a second file exists.
+
+  WHY THIS SHAPE. The chamfered octagon is not decoration picked for an icon:
+  it is already the board's signature cut, used on the rank panel, the command
+  chamber surfaces and the header emblem (index.html's clip-path polygons). The
+  mark is the board's own geometry, not a logo bolted onto it.
+
+  Read as: a citadel from above - the outer wall, the keep standing inside it,
+  and the gate cut through the base. Gold because gold is this board's identity
+  colour (the design law reserves it for identity and ceremony; petrol is
+  interaction, and mint/amber are reserved for judging how a person is doing,
+  which an app icon must never imply).
+
+  EVERYTHING IS OVERSIZED ON PURPOSE. The first version of this was drawn to
+  look right at 1024px and was checked at 60px - the real iPhone home screen
+  tile - where the keep had thinned to a sliver and the gate had become a
+  speck. Weights here are set from the 60px render backwards. If you edit this,
+  re-run tools/build-icons.js and LOOK at the 60px output before believing it.
+
+  OPAQUE ON PURPOSE. iOS composites WHITE behind any transparency in an
+  apple-touch-icon, which would put a white box behind a dark mark on the home
+  screen. The graphite ground is baked in, and it is the same graphite the
+  board's own background uses, lit from the same direction.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#161c23"/>
+      <stop offset="46%"  stop-color="#0f1319"/>
+      <stop offset="100%" stop-color="#080a0d"/>
+    </linearGradient>
+    <radialGradient id="overhead" cx="52%" cy="2%" r="70%">
+      <stop offset="0%"   stop-color="#c8a567" stop-opacity=".20"/>
+      <stop offset="58%"  stop-color="#c8a567" stop-opacity=".05"/>
+      <stop offset="100%" stop-color="#c8a567" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#f3e2b4"/>
+      <stop offset="40%"  stop-color="#e2c68f"/>
+      <stop offset="100%" stop-color="#b08c4a"/>
+    </linearGradient>
+    <linearGradient id="goldKeep" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#f8ecc9"/>
+      <stop offset="52%"  stop-color="#dcbc7e"/>
+      <stop offset="100%" stop-color="#a37c3c"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Opaque ground, full bleed and square: iOS applies its own superellipse
+       mask, so corner rounding baked in here would be masked twice. -->
+  <rect width="1024" height="1024" fill="url(#ground)"/>
+  <rect width="1024" height="1024" fill="url(#overhead)"/>
+
+  <!-- THE WALL. Chamfered octagon, the board's exact cut, drawn heavy. -->
+  <path d="M 270 158 H 754 L 866 270 V 754 L 754 866 H 270 L 158 754 V 270 Z"
+        fill="none" stroke="url(#gold)" stroke-width="74" stroke-linejoin="miter"/>
+
+  <!-- THE GATE. Cut clean through the wall's base. Wide enough to still read
+       as an opening at 60px, where the earlier 100px-wide notch vanished. -->
+  <rect x="428" y="812" width="168" height="104" fill="url(#ground)"/>
+
+  <!-- THE KEEP. Dominant, not an ornament: at 60px this is the element that
+       has to survive, so it carries most of the interior. -->
+  <path d="M 410 452 L 512 342 L 614 452 V 726 H 410 Z" fill="url(#goldKeep)"/>
+</svg>

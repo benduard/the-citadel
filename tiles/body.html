@@ -91,8 +91,11 @@
   .posterView{
     display:flex; flex-direction:column; justify-content:center;
     gap:10px; height:100%; min-height:100vh; padding:20px;
-    opacity:0; animation:rise .6s ease forwards;
   }
+  /* NOT opacity:0 + an entrance animation - see checkin.html's comment on the
+     same rule and vault/decisions.md. Six sealed tiles mount at once, and
+     Chromium sometimes never starts a fresh iframe's CSS animation, leaving
+     the poster stuck invisible forever. Confirmed flaky with Playwright. */
   .posterHero{ display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; }
   .posterHero .num{ font-size:46px; }
   .posterHero .unit{ font-size:13px; color:var(--muted); }
@@ -108,6 +111,16 @@
   html[data-mode="page"] .posterView{ display:none; }
 
   .pageHead{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  /* The host's close button is position:fixed at 16px from the VIEWPORT's
+     top right, 36px wide - so it owns the box 16-52px in from that corner,
+     regardless of this page's own centered max-width column. Below ~640px
+     that column reaches the viewport edge and the unit toggle (right-aligned
+     in .pageHead) lands directly under it, nearly unclickable. Confirmed with
+     Playwright: real overlap at 375-600px, clear by 700px. Reserve the lane
+     below the breakpoint; above it the centred 560px column never gets
+     close enough to need it. Same fix as the shell's gear-vs-sync-pill
+     collision, see vault/decisions.md. */
+  @media (max-width: 640px) { .pageHead{ padding-right:44px; } }
   .pageHero{ display:flex; align-items:baseline; gap:12px; margin:10px 0 22px; flex-wrap:wrap; }
   .pageHero .num{ font-size:56px; }
   .pageHero .unit{ font-size:14px; color:var(--muted); }

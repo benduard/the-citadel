@@ -570,3 +570,38 @@ nothing, which sent an empty list into Math.max, produced -Infinity, and PASSED.
 It now finds the path by what it is (the shape filled with the plate gradient)
 and treats unmeasurable as Infinity, so it fails loudly instead. A geometry
 test that passes when it cannot find the geometry is worse than no test.
+
+## The body map colours by sets, and says its attribution is a convention
+
+Decided 2026-08-01.
+
+Ruben asked for an anatomy chart showing what he trained hardest that week and
+what he neglected, weighted by the exercises he did and how he performed on
+them. It lives in Lifting under Workouts > Body map: a front and a back figure,
+mint where the work went, an amber outline where none did.
+
+Two calls in it are worth keeping written down.
+
+SETS, NOT KILOS, DRIVE THE COLOUR. The obvious build shades by volume, and it
+is wrong in a way that never announces itself: a quad moves hundreds of kilos
+and a rear delt moves tens, so a kg-shaded figure paints legs bright and
+shoulders dark every single week no matter how they were actually trained. It
+would look informative and be the same picture forever. Effective sets are the
+unit that compares between muscles, and sets per muscle per week is what
+training practice counts anyway. Volume is still shown as a number, in the
+places it informs instead of misleading.
+
+ATTRIBUTION IS A CONVENTION AND THE PANEL SAYS SO. A set of bench counts once
+for chest and half for shoulders and triceps. Nobody measured that on Ruben. It
+is the same 1.0 / 0.5 split muscleRecovery() has always used in that file, and
+it is kept identical on purpose so two panels in one tile can never disagree
+about what a set did - the test asserts there are exactly two of them in the
+file. The colour is also explicitly relative to his own hardest-hit muscle that
+window; it never claims a muscle got "enough", because that needs a target this
+board has never been given.
+
+The empty state was a real bug, caught on screen and not by the maths tests:
+with nothing logged, all sixteen muscles took the amber "you skipped this"
+outline and the whole figure read as a warning about nothing. Amber is caution,
+and caution is only honest once there is training to compare against. An empty
+log now draws neutral.

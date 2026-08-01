@@ -262,6 +262,34 @@
   .btn.ghost{ background:transparent; }
   .btn.on{ border-color:rgba(110,231,183,.5); color:var(--mint); }
 
+  /* ---------- body map ----------
+     Mint means worked, faint means not. No red anywhere on this figure: a
+     muscle he did not train this week is information, not a verdict. */
+  .bodySvg{ width:100%; max-width:330px; display:block; margin:2px auto 0; }
+  .bOut{ fill:rgba(148,163,158,.09); stroke:rgba(148,163,158,.15); stroke-width:1; }
+  .bMus{ stroke-width:1; cursor:pointer; transition:fill .18s,stroke .18s,stroke-width .18s; }
+  .bMus:hover{ stroke:var(--mint); stroke-width:1.6; }
+  .bMus.on{ stroke:var(--mint); stroke-width:2; }
+  .bCap{ fill:var(--faint); font-size:8px; letter-spacing:.16em; text-anchor:middle;
+         font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .bmScale{ display:flex; align-items:center; gap:8px; margin:12px 0 12px; }
+  .bmScale i{ flex:1; height:5px; border-radius:3px;
+              background:linear-gradient(90deg,rgba(110,231,183,.14),rgba(110,231,183,.88)); }
+  .bmScale span{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+                 font-size:9px; letter-spacing:.08em; color:var(--faint); }
+  .bmLine{ margin:0 0 7px; font-size:12.5px; color:var(--muted); line-height:1.55; }
+  .bmLine b{ color:var(--text); font-weight:600; margin-right:4px; }
+  .bmLine.idle b{ color:var(--amber); }
+  .bmLine.sub{ color:var(--faint); font-size:11.5px; }
+  .bmDet{ margin-top:14px; padding-top:12px; border-top:1px solid var(--border); }
+  .bmDetH{ margin:0 0 4px; font-size:14px; font-weight:600; color:var(--text); }
+  .bmEx{ list-style:none; margin:8px 0 0; padding:0; }
+  .bmEx li{ display:flex; align-items:center; gap:10px; padding:6px 0;
+            border-top:1px solid rgba(148,163,158,.1); font-size:13px; color:var(--muted); }
+  .bmEx li:first-child{ border-top:0; }
+  .bmEx li b{ margin-left:auto; color:var(--text); font-weight:500;
+              font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; }
+
   .seg{ display:inline-flex; border:1px solid var(--border); border-radius:999px; padding:3px; gap:3px; max-width:100%; overflow-x:auto; }
   .seg button{ border:0; background:transparent; border-radius:999px; padding:7px 13px;
                font-size:12px; color:var(--muted); cursor:pointer; white-space:nowrap; min-height:34px; }
@@ -555,6 +583,7 @@
       <div class="seg rise" id="wSeg" style="margin-bottom:14px">
         <button type="button" data-wtab="routines" aria-pressed="true">Routines</button>
         <button type="button" data-wtab="history" aria-pressed="false">History</button>
+        <button type="button" data-wtab="bodymap" aria-pressed="false">Body map</button>
         <button type="button" data-wtab="library" aria-pressed="false">Library</button>
       </div>
 
@@ -597,6 +626,26 @@
           <h3>Every session</h3>
           <p class="note" id="histNote">Newest first.</p>
           <ul class="list" id="histList"></ul>
+        </div>
+      </div>
+
+      <div data-wtab-body="bodymap" hidden>
+        <div class="card">
+          <h3>What you actually trained</h3>
+          <p class="note" id="bmNote"></p>
+          <div class="seg" id="bmWinSeg" style="margin-bottom:14px">
+            <button type="button" data-bmwin="7" aria-pressed="true">7 days</button>
+            <button type="button" data-bmwin="14" aria-pressed="false">14 days</button>
+            <button type="button" data-bmwin="30" aria-pressed="false">30 days</button>
+          </div>
+          <div id="bmFigure"></div>
+          <div id="bmLegend"></div>
+          <div id="bmDetail"></div>
+        </div>
+        <div class="card">
+          <h3>Every muscle, ranked</h3>
+          <p class="note">Effective sets over the window. A set counts once for the muscle it trains and half for the ones helping, the same split the recovery estimate uses.</p>
+          <ul class="list" id="bmList"></ul>
         </div>
       </div>
 
@@ -1150,6 +1199,8 @@
   var editingSet = null;
   var wtab = 'routines';
   var bgMode = 'rank';
+  var bmWin = 7;          // body map window, in days
+  var bmPick = '';        // muscle tapped on the figure
   var bgPick = '';
   var libPick = '';
   var ladPick = 'Barbell Bench Press';
@@ -1338,6 +1389,94 @@
       res[m2] = { pct: Math.round(100 * (1 - f)), seen: out[m2].seen };
     }
     return res;
+  }
+
+  /* ============================ body map ============================
+     Which muscles actually got worked, drawn on a body.
+
+     ATTRIBUTION IS A CONVENTION, NOT A MEASUREMENT. A set of bench press
+     counts as one set for chest and half a set for shoulders and triceps.
+     That 1.0 / 0.5 split is exactly what muscleRecovery() already uses above
+     - kept identical on purpose, so two panels in one tile can never disagree
+     about what a set did. Nobody measured those numbers on Ruben. They are a
+     reasonable convention, and the panel says so on screen rather than
+     dressing them up as fact.
+
+     SETS DRIVE THE COLOUR, NOT KILOS. Volume in kg does not compare between
+     muscles: a quad moves hundreds of kilos and a rear delt moves tens, so
+     shading by kg would paint legs bright and shoulders dark every week no
+     matter how they were trained - a chart that is wrong the same way every
+     time. Sets are the unit that compares, and sets per muscle per week is
+     what training practice counts anyway. Volume is still shown as a number,
+     where it informs instead of misleading.
+
+     THE COLOUR IS RELATIVE TO HIS OWN WEEK, and says so. It answers "what did
+     I hammer and what did I skip", which is what was asked. It deliberately
+     does NOT claim a muscle got "enough" work - that would need a target this
+     board has never been given, and inventing one would be inventing a fact. */
+
+  // The last n days, ending today. Keys, newest first.
+  function windowDays(n){
+    var out = [], k = today();
+    for (var i = 0; i < n; i++){ out.push(k); k = shift(k, -1); }
+    return out;
+  }
+
+  function muscleWork(days){
+    var out = {};
+    for (var m in MUSCLES) out[m] = { sets: 0, vol: 0, exs: {} };
+    for (var d = 0; d < days.length; d++){
+      var a = S.days[days[d]] || [];
+      for (var i = 0; i < a.length; i++){
+        var e = findEx(a[i].ex);
+        if (!e) continue;                        // a deleted custom lift
+        var targets = [[e.pri, 1]];
+        (e.sec || []).forEach(function(s){ if (MUSCLES[s]) targets.push([s, 0.5]); });
+        var v = setVolume(a[i]);
+        for (var t = 0; t < targets.length; t++){
+          var o = out[targets[t][0]];
+          if (!o) continue;
+          o.sets += targets[t][1];
+          o.vol  += v * targets[t][1];
+          o.exs[e.name] = (o.exs[e.name] || 0) + targets[t][1];
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Everything the panel draws, worked out once.
+   *
+   * The comparison window is the n days immediately BEFORE this one, so "up"
+   * and "down" mean against the same length of time. Comparing a 7 day window
+   * against a 30 day one would make every muscle look like it collapsed.
+   */
+  function bodyMapData(n){
+    var cur = muscleWork(windowDays(n));
+    var prevKeys = [], k = shift(today(), -n);
+    for (var i = 0; i < n; i++){ prevKeys.push(k); k = shift(k, -1); }
+    var prev = muscleWork(prevKeys);
+
+    var max = 0, anyWork = false;
+    for (var m in cur){
+      if (cur[m].sets > max) max = cur[m].sets;
+      if (cur[m].sets > 0) anyWork = true;
+    }
+
+    var rows = Object.keys(MUSCLES).map(function(id){
+      return {
+        id: id,
+        name: MUSCLES[id],
+        sets: cur[id].sets,
+        vol: cur[id].vol,
+        exs: cur[id].exs,
+        prevSets: prev[id].sets,
+        share: max > 0 ? cur[id].sets / max : 0
+      };
+    });
+    rows.sort(function(a, b){ return b.sets - a.sets || a.name.localeCompare(b.name); });
+    return { rows: rows, max: max, anyWork: anyWork, days: n };
   }
 
   /* ---- xp, level, streak, quests ---- */
@@ -1989,6 +2128,193 @@
   }
 
   /* ============================ page: workouts ============================ */
+  /**
+   * THE FIGURE. Two views, because half the muscles in MUSCLES are on the
+   * back and a front-only chart would have nowhere honest to put lats, traps,
+   * glutes or hamstrings.
+   *
+   * Hand-drawn simplified regions, not an anatomical illustration. It has to
+   * read at about 150px wide on a phone, where real muscle geometry turns to
+   * mush - so each region is a blocky shape big enough to see and to tap.
+   *
+   * Forearms, traps and neck appear in both views on purpose: they are visible
+   * from both sides, they share one entry in MUSCLES, and both copies are
+   * shaded from that same number. Drawing them once would leave a dead patch
+   * on whichever view lost out.
+   */
+  var BODY = {
+    // Silhouette only - head, hands, hips, knees, shins, feet. Never shaded by
+    // data: they are there so the shape reads as a person.
+    outline: [
+      'M 62 12 c 8 0 14 6 14 14 0 8 -6 15 -14 15 -8 0 -14 -7 -14 -15 0 -8 6 -14 14 -14 z',
+      'M 45 118 q 17 8 34 0 l -2 15 q -15 6 -30 0 z',
+      'M 30 136 q -1 8 4 9 q 5 -1 4 -9 z',
+      'M 86 136 q -1 8 4 9 q 5 -1 4 -9 z',
+      'M 45 187 h 13 v 10 h -13 z',
+      'M 66 187 h 13 v 10 h -13 z',
+      'M 46 198 q -2 19 0 37 h 11 q 1 -19 0 -37 z',
+      'M 67 198 q -1 18 0 37 h 11 q 2 -18 0 -37 z',
+      'M 45 236 h 12 v 7 h -14 z',
+      'M 67 236 h 12 v 7 h -14 z',
+      'M 178 12 c 8 0 14 6 14 14 0 8 -6 15 -14 15 -8 0 -14 -7 -14 -15 0 -8 6 -14 14 -14 z',
+      'M 146 136 q -1 8 4 9 q 5 -1 4 -9 z',
+      'M 202 136 q -1 8 4 9 q 5 -1 4 -9 z',
+      'M 166 188 h 12 v 9 h -12 z',
+      'M 178 188 h 12 v 9 h -12 z',
+      'M 166 233 h 12 v 7 h -14 z',
+      'M 178 233 h 12 v 7 h -14 z'
+    ],
+    muscles: {
+      neck:      ['M 55 38 h 14 v 9 h -14 z', 'M 171 38 h 14 v 9 h -14 z'],
+      traps:     ['M 55 43 L 55 49 L 43 56 L 46 48 Z', 'M 69 43 L 69 49 L 81 56 L 78 48 Z',
+                  'M 178 42 L 165 50 L 158 66 L 178 94 L 198 66 L 191 50 Z'],
+      delts:     ['M 44 52 Q 33 55 31 67 Q 30 75 35 79 Q 41 74 43 63 Z',
+                  'M 80 52 Q 91 55 93 67 Q 94 75 89 79 Q 83 74 81 63 Z'],
+      chest:     ['M 45 55 Q 54 51 61 55 L 61 77 Q 50 80 45 69 Z',
+                  'M 79 55 Q 70 51 63 55 L 63 77 Q 74 80 79 69 Z'],
+      biceps:    ['M 34 80 Q 30 90 32 101 L 40 101 Q 42 90 41 80 Z',
+                  'M 90 80 Q 94 90 92 101 L 84 101 Q 82 90 83 80 Z'],
+      forearms:  ['M 32 103 Q 29 119 30 135 L 38 135 Q 40 119 40 103 Z',
+                  'M 92 103 Q 95 119 94 135 L 86 135 Q 84 119 84 103 Z',
+                  'M 148 103 Q 145 119 146 135 L 154 135 Q 156 119 156 103 Z',
+                  'M 208 103 Q 211 119 210 135 L 202 135 Q 200 119 200 103 Z'],
+      abs:       ['M 54 79 h 16 v 39 q -8 6 -16 0 z'],
+      obliques:  ['M 46 81 h 7 v 34 q -6 -6 -7 -17 z', 'M 78 81 h -7 v 34 q 6 -6 7 -17 z'],
+      quads:     ['M 46 133 q -4 24 -2 53 h 14 q 2 -29 2 -53 z',
+                  'M 78 133 q 4 24 2 53 h -14 q -2 -29 -2 -53 z'],
+      reardelt:  ['M 160 53 Q 149 56 147 68 Q 146 76 151 80 Q 157 75 159 64 Z',
+                  'M 196 53 Q 207 56 209 68 Q 210 76 205 80 Q 199 75 197 64 Z'],
+      lats:      ['M 161 68 Q 153 84 157 106 L 175 112 L 177 92 L 169 70 Z',
+                  'M 195 68 Q 203 84 199 106 L 181 112 L 179 92 L 187 70 Z'],
+      triceps:   ['M 150 80 Q 146 90 148 101 L 156 101 Q 158 90 157 80 Z',
+                  'M 206 80 Q 210 90 208 101 L 200 101 Q 198 90 199 80 Z'],
+      lowerback: ['M 167 108 q 11 5 22 0 l -2 20 q -9 4 -18 0 z'],
+      glutes:    ['M 166 130 q 6 -4 12 -2 v 24 h -9 q -7 -6 -3 -22 z',
+                  'M 190 130 q -6 -4 -12 -2 v 24 h 9 q 7 -6 3 -22 z'],
+      hams:      ['M 168 156 q -3 17 -1 31 h 10 v -31 z', 'M 188 156 q 3 17 1 31 h -10 v -31 z'],
+      calves:    ['M 168 199 q -4 15 -1 33 h 10 v -33 z', 'M 188 199 q 4 15 1 33 h -10 v -33 z']
+    }
+  };
+
+  function bmFill(r){
+    if (r.sets <= 0) return 'rgba(148,163,158,.06)';
+    return 'rgba(110,231,183,' + (0.14 + 0.74 * r.share).toFixed(3) + ')';
+  }
+  function bmStroke(r, anyWork){
+    // With NOTHING logged in the window, amber on all sixteen muscles turns
+    // the whole figure into a warning about nothing - an empty log is an
+    // absence of data, not a training mistake. Caution is only honest once
+    // there is something to compare against.
+    if (!anyWork) return 'rgba(148,163,158,.16)';
+    // Amber is caution, and a muscle skipped in a week that had training in it
+    // is exactly that. Never red: this board does not use red for how a person
+    // is doing, and a muscle he chose not to train is not a failure to shout at.
+    return r.sets <= 0 ? 'rgba(252,211,77,.38)' : 'rgba(110,231,183,.55)';
+  }
+  function fmtSets(n){
+    if (!n) return 'nothing logged';
+    var s = Math.round(n * 10) / 10;
+    return s + (s === 1 ? ' set' : ' sets');
+  }
+  function bmChange(r){
+    if (!r.sets && !r.prevSets) return '';
+    if (!r.prevSets) return 'first work in this window';
+    var diff = Math.round((r.sets - r.prevSets) * 10) / 10;
+    if (Math.abs(diff) < 0.5) return 'about the same as the ' + bmWin + ' days before';
+    return (diff > 0 ? 'up ' : 'down ') + Math.abs(diff) + ' vs the ' + bmWin + ' days before';
+  }
+
+  function renderBodyMap(){
+    var wrap = $('bmFigure');
+    if (!wrap) return;
+    var d = bodyMapData(bmWin);
+    var by = {};
+    d.rows.forEach(function(r){ by[r.id] = r; });
+
+    var wb = document.querySelectorAll('[data-bmwin]');
+    for (var i = 0; i < wb.length; i++){
+      wb[i].setAttribute('aria-pressed', Number(wb[i].getAttribute('data-bmwin')) === bmWin ? 'true' : 'false');
+    }
+
+    $('bmNote').textContent = d.anyWork
+      ? 'Shaded by how much work each muscle got, next to your hardest hit muscle in the same window. An amber outline means nothing was logged for it.'
+      : 'Nothing logged in the last ' + bmWin + ' days, so there is nothing to shade.';
+
+    var svg = ['<svg viewBox="0 0 240 256" class="bodySvg" role="img" aria-label="Muscles trained in the last ' + bmWin + ' days">'];
+    BODY.outline.forEach(function(p){ svg.push('<path class="bOut" d="' + p + '"/>'); });
+    Object.keys(BODY.muscles).forEach(function(id){
+      var r = by[id] || { sets: 0, share: 0 };
+      BODY.muscles[id].forEach(function(p){
+        svg.push('<path class="bMus' + (bmPick === id ? ' on' : '') + '" data-bmmus="' + id +
+          '" d="' + p + '" fill="' + bmFill(r) + '" stroke="' + bmStroke(r, d.anyWork) + '">' +
+          '<title>' + esc(MUSCLES[id]) + ': ' + esc(fmtSets(r.sets)) + '</title></path>');
+      });
+    });
+    svg.push('<text x="62" y="253" class="bCap">FRONT</text>');
+    svg.push('<text x="178" y="253" class="bCap">BACK</text>');
+    svg.push('</svg>');
+    wrap.innerHTML = svg.join('');
+
+    // ---- the summary the ask was actually about ----
+    var trained = d.rows.filter(function(r){ return r.sets > 0; });
+    var idle    = d.rows.filter(function(r){ return r.sets <= 0; });
+    var out = '';
+    if (d.anyWork){
+      out += '<div class="bmScale"><span>less</span><i></i><span>more</span></div>';
+      out += '<p class="bmLine"><b>Most trained</b> ' +
+        esc(trained.slice(0, 3).map(function(r){ return r.name + ' (' + fmtSets(r.sets) + ')'; }).join(', ')) + '</p>';
+      if (idle.length){
+        out += '<p class="bmLine idle"><b>Nothing logged</b> ' +
+          esc(idle.map(function(r){ return r.name; }).join(', ')) + '</p>';
+      } else {
+        // Every muscle got something, so "neglected" has to mean least, not none.
+        var least = trained.slice(-3).reverse();
+        out += '<p class="bmLine idle"><b>Least work</b> ' +
+          esc(least.map(function(r){ return r.name + ' (' + fmtSets(r.sets) + ')'; }).join(', ')) + '</p>';
+      }
+      out += '<p class="bmLine sub">Tap a muscle for what hit it.</p>';
+    }
+    $('bmLegend').innerHTML = out;
+
+    // ---- tapped muscle ----
+    var pick = bmPick ? by[bmPick] : null;
+    if (!pick){ $('bmDetail').innerHTML = ''; }
+    else {
+      var exs = Object.keys(pick.exs).sort(function(a, b){ return pick.exs[b] - pick.exs[a]; });
+      var det = '<div class="bmDet"><p class="bmDetH">' + esc(pick.name) + '</p>' +
+        '<p class="bmLine">' + esc(fmtSets(pick.sets)) +
+        (pick.vol ? ' · ' + esc(showW(pick.vol)) + ' ' + esc(unitLabel()) + ' of volume' : '') +
+        (bmChange(pick) ? ' · ' + esc(bmChange(pick)) : '') + '</p>';
+      det += exs.length
+        ? '<ul class="bmEx">' + exs.map(function(n){
+            return '<li>' + esc(n) + '<b>' + (Math.round(pick.exs[n] * 10) / 10) + '</b></li>';
+          }).join('') + '</ul>'
+        : '<p class="bmLine sub">Nothing logged for this one in the window.</p>';
+      det += '</div>';
+      $('bmDetail').innerHTML = det;
+    }
+
+    // ---- the full ranked list ----
+    var ul = $('bmList');
+    ul.innerHTML = '';
+    d.rows.forEach(function(r){
+      var li = document.createElement('li');
+      var box = document.createElement('div'); box.className = 'grow';
+      var l1 = document.createElement('div'); l1.className = 'l1'; l1.textContent = r.name;
+      var l2 = document.createElement('div'); l2.className = 'l2';
+      l2.textContent = r.sets > 0
+        ? fmtSets(r.sets) + (r.vol ? '  ·  ' + showW(r.vol) + ' ' + unitLabel() : '') +
+          (bmChange(r) ? '  ·  ' + bmChange(r) : '')
+        : 'nothing logged in the last ' + bmWin + ' days';
+      // Same rule as the figure: amber only once there is training to compare
+      // against, so an untouched log does not read as sixteen warnings.
+      if (r.sets <= 0 && d.anyWork) l2.style.color = 'var(--amber)';
+      box.appendChild(l1); box.appendChild(l2);
+      li.appendChild(box);
+      ul.appendChild(li);
+    });
+  }
+
   function renderWorkouts(){
     var btns = document.querySelectorAll('[data-wtab]');
     for (var i=0;i<btns.length;i++)
@@ -1996,6 +2322,10 @@
     var bodies = document.querySelectorAll('[data-wtab-body]');
     for (var j=0;j<bodies.length;j++)
       bodies[j].hidden = bodies[j].getAttribute('data-wtab-body') !== wtab;
+
+    // The body map walks every logged day in its window, so it is only built
+    // when it is the tab actually on screen.
+    if (wtab === 'bodymap') renderBodyMap();
 
     // plans
     var pl = $('planList');
@@ -2761,9 +3091,25 @@
     buildNav();
 
     document.addEventListener('click', function(ev){
+      // A muscle on the body map is an SVG <path>, not a button, so it has to
+      // be caught BEFORE the closest('button') bail below or the tap dies here.
+      var mus = ev.target.closest ? ev.target.closest('[data-bmmus]') : null;
+      if (mus){
+        var mid = mus.getAttribute('data-bmmus');
+        bmPick = (bmPick === mid) ? '' : mid;      // tapping it again closes it
+        renderBodyMap();
+        return;
+      }
+
       var t = ev.target.closest ? ev.target.closest('button') : null;
       if (!t) return;
       var a;
+
+      if ((a = t.getAttribute('data-bmwin'))) {
+        bmWin = Number(a);
+        renderBodyMap();
+        return;
+      }
 
       if ((a = t.getAttribute('data-nav'))) { setView(a); return; }
       // A suggestion FILLS the picker, same law as the last-time Use button:

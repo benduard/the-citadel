@@ -13,9 +13,11 @@ node tiles/lifting.unilateral.test.js
 node tiles/lifting.grouping.test.js
 node tiles/lifting.suggest.test.js
 node tiles/lists.test.js
+node tiles/lists.calendar.test.js
 echo "All suites passed."
 
-# The visual check is optional and not part of the "all suites passed" line
+# The visual checks (paint + close-button collision) are optional and not part
+# of the "all suites passed" line
 # above ON PURPOSE: it needs a Chromium binary on disk and the board actually
 # running on :3000, neither of which the plain-node suites require, and this
 # script should stay usable with nothing installed. Skip quietly rather than
@@ -24,7 +26,7 @@ echo "All suites passed."
 # the first time it ran and why it exists.
 if [ -d tools/node_modules ]; then
   echo
-  echo "Running the visual check too (tools/node_modules present)..."
+  echo "Running the visual checks too (tools/node_modules present)..."
   (cd tools && npm run check)
 else
   echo

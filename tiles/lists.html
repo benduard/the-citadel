@@ -16,7 +16,7 @@
 
   store shape saved via Vitality.save/load:
     {
-      v: 2,
+      v: 3,
       lists: {
         daily:    [ { id, title, done, repeat, createdAt, doneAt } ],
         weekly:   [ { id, title, done, repeat, createdAt, doneAt } ],
@@ -25,13 +25,43 @@
         someday:  [ { id, title, done, createdAt, doneAt } ]
       },
       archive: [ { title, list, doneAt } ],   // last 200 finished, newest first
+      done: {                                 // THE CALENDAR'S RECORD, see below
+        "YYYY-MM-DD": [ { id, title, list, repeat, createdAt } ]
+      },
+      logFrom: "YYYY-MM-DD",                  // first day the record was kept
       rolledOn: "YYYY-MM-DD",                 // day the daily list last rolled
       rolledWeek: "YYYY-MM-DD"                // Monday the weekly list last rolled
     }
 
+  logFrom, and the difference between "no record" and "you failed". Before v3
+  nothing tracked what was left undone on a given day, so a calendar that
+  worked backwards from createdAt would paint every day since an item was made
+  as a day of misses - including days before this tile recorded anything at
+  all. That is inventing failures. logFrom is stamped once, on the first v3
+  boot, and no day before it is ever scored: those days show whatever real
+  crossed-off marks exist and nothing else.
+
+  THE done LOG, and why it is not derived. The obvious move is to build the
+  calendar out of what was already here - every item carries doneAt, and the
+  archive keeps finished one-offs with their date. That would have been wrong,
+  and quietly: roll() UNCHECKS a repeating item and sets its doneAt back to
+  null, and a repeating item never enters the archive at all. So a daily habit
+  ticked every day for a month - the exact thing a calendar is for - left no
+  trace anywhere by the next morning. `done` records the day at the moment it
+  is crossed, so that history survives the roll. Capped at DONE_DAYS_CAP days.
+
+  What the calendar can and cannot know. Crossed-out is exact: it is what the
+  log recorded. "Still open on that day" is DERIVED - an item counts if it
+  existed by then (createdAt) and was not crossed until later - which is why
+  createdAt is copied into the log entry as well as living on the item. Days
+  before this version shipped hold only what doneAt and the archive had really
+  recorded; a repeating item ticked back then is gone for good and is not
+  guessed at.
+
   v1 was { projects: [ ... ] } with the same item shape. It migrates: those
   items become lists.projects untouched, so nothing logged before today moves
-  or disappears.
+  or disappears. v2 migrates by backfilling `done` from the doneAt values and
+  archive dates that were already recorded - real dates only, nothing invented.
 
   reports ONE stream, unchanged from v1 on purpose:
     key   "projects_done"
@@ -46,10 +76,13 @@
   its own entry in lib/rank.js - a decision, not a side effect of this file.
 
   ROLLING. On a new day the daily list rolls: repeating items uncheck, one-off
-  items that were finished move to `archive`. On a new week the weekly list
-  does the same. Nothing is deleted - a finished item keeps its text and its
-  date in the archive, because a list that quietly eats what you did is a list
-  that cannot be trusted.
+  items that were finished move to `archive`, and ANYTHING NOT FINISHED STAYS
+  ON THE LIST - it follows you into the next day, and the next, until it is
+  crossed off. That carry-forward is the whole point of a rolling list, so the
+  item says how long it has been carrying rather than sitting there looking
+  new. On a new week the weekly list does the same. Nothing is deleted - a
+  finished item keeps its text and its date in the archive, because a list
+  that quietly eats what you did is a list that cannot be trusted.
 -->
 <style>
   :root{
@@ -121,6 +154,18 @@
     display:block; max-width:640px; margin:0 auto; padding:22px 18px 40px;
   }
   .head{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:16px; }
+  /* The host floats its close button over the top right of every page tile,
+     and this pill sits exactly under it - "1 done" was already being clipped
+     before the calendar existed, the longer "0 days clear" only made it
+     obvious. Reserve the lane below the breakpoint; above it the centred
+     640px column never comes close. Same fix as the Body tile's unit toggle
+     and the shell's gear-vs-sync-pill, see vault/decisions.md.
+
+     760px, NOT the Body tile's 640. Measured, not copied: the close button
+     sits at viewport-52, and this page's column is 640 wide against Body's
+     560, so the content edge stays right of the button until about 708px.
+     Reusing 640 here left a 4px overlap at 700. */
+  @media (max-width: 760px){ .head{ padding-right:44px; } }
   .headNum{ font-size:34px; }
 
   .tabs{ display:flex; gap:6px; overflow-x:auto; padding-bottom:4px; margin-bottom:14px; }
@@ -199,6 +244,77 @@
   .iconBtn:hover{ color:var(--text); }
   .iconBtn svg{ width:14px; height:14px; }
 
+  /* ---------- view switch ---------- */
+  .views{ display:flex; gap:6px; margin-bottom:14px; }
+  .vBtn{
+    flex:1; min-height:40px; cursor:pointer; font-family:inherit;
+    border:1px solid var(--border); border-radius:10px;
+    background:var(--card2); color:var(--muted);
+    font-size:12.5px; font-weight:600; letter-spacing:-.01em;
+    transition:border-color .16s,color .16s,background .16s;
+  }
+  .vBtn:hover{ color:var(--text); }
+  .vBtn.on{ border-color:rgba(110,231,183,.4); color:var(--mint); background:rgba(110,231,183,.08); }
+
+  /* ---------- calendar ----------
+     Mint means cleared, faint means still owed. Deliberately no red and no
+     amber on a day cell: a day you did not finish is a day, not a verdict. */
+  .calHead{ display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .calMonth{
+    flex:1; text-align:center;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--text);
+  }
+  .calNav{
+    flex:none; width:36px; height:36px; border-radius:9px; cursor:pointer;
+    border:1px solid var(--border); background:var(--card2); color:var(--muted);
+    font-size:17px; line-height:1; font-family:inherit;
+  }
+  .calNav:hover:not(:disabled){ color:var(--text); border-color:var(--muted); }
+  .calNav:disabled{ opacity:.3; cursor:default; }
+  .calDow,.calGrid{ display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+  .calDow{ margin-bottom:5px; }
+  .calDow span{
+    text-align:center; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:9px; letter-spacing:.08em; color:var(--faint);
+  }
+  .cell{
+    aspect-ratio:1; border-radius:9px; padding:0; cursor:pointer;
+    border:1px solid transparent; background:var(--card2);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:11.5px; color:var(--muted);
+    transition:border-color .16s,color .16s,background .16s;
+  }
+  .cell.blank{ background:transparent; cursor:default; }
+  /* Outside the record: still a real day, still tappable, but visibly not
+     part of anything being scored. */
+  .cell.norec{ background:transparent; border-color:rgba(148,163,158,.09); color:var(--faint); }
+  .cell.future{ opacity:.3; cursor:default; }
+  .cell:not(.blank):not(.future):hover{ color:var(--text); border-color:var(--border); }
+  .cell.clear{ color:var(--text); }
+  .cell.today{ border-color:rgba(110,231,183,.4); }
+  .cell.on{ border-color:var(--mint); background:rgba(110,231,183,.1); color:var(--text); }
+  .cell .bar{
+    width:58%; height:3px; border-radius:2px;
+    background:rgba(148,163,158,.22); overflow:hidden;
+  }
+  .cell .bar > i{ display:block; height:100%; border-radius:2px; background:var(--mint); }
+  .cell .odot{ width:3px; height:3px; border-radius:50%; background:var(--mint); opacity:.65; }
+  .cell .gap{ height:3px; }
+
+  .calNote{ margin:14px 0 0; font-size:11.5px; color:var(--faint); line-height:1.5; }
+  .calDate{
+    margin:18px 0 2px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
+  }
+  .calSum{ margin:0 0 6px; font-size:13px; color:var(--text); line-height:1.5; }
+  .carry{
+    flex:none; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:9px; letter-spacing:.06em; color:var(--amber);
+    border:1px solid rgba(252,211,77,.3); border-radius:5px; padding:2px 5px;
+  }
+
   .empty{ padding:24px 2px; color:var(--faint); font-size:13px; line-height:1.5; }
   .trouble{
     margin:0 0 12px; padding:10px 12px; border-radius:10px;
@@ -238,25 +354,44 @@
   <p class="trouble" id="trouble" hidden></p>
   <p class="rolled" id="rolled" hidden></p>
 
-  <div class="tabs" id="tabs"></div>
-  <p class="why" id="why"></p>
-
-  <div class="addRow">
-    <input id="newTitle" type="text" placeholder="Add" maxlength="120" disabled>
-    <button class="addBtn" id="addBtn" type="button" disabled>Add</button>
+  <div class="views">
+    <button class="vBtn on" id="viewLists" type="button" aria-pressed="true">Lists</button>
+    <button class="vBtn" id="viewCal" type="button" aria-pressed="false">Calendar</button>
   </div>
-  <label class="repToggle" id="repWrap" hidden>
-    <input type="checkbox" id="repeats" disabled> Repeats every day
-  </label>
 
-  <div class="list" id="openList"></div>
-  <div id="doneWrap" hidden>
-    <div class="secLabel"><span>Done</span><button type="button" id="clearDone">Clear finished</button></div>
-    <div class="list" id="doneList"></div>
+  <div id="listsWrap">
+    <div class="tabs" id="tabs"></div>
+    <p class="why" id="why"></p>
+
+    <div class="addRow">
+      <input id="newTitle" type="text" placeholder="Add" maxlength="120" disabled>
+      <button class="addBtn" id="addBtn" type="button" disabled>Add</button>
+    </div>
+    <label class="repToggle" id="repWrap" hidden>
+      <input type="checkbox" id="repeats" disabled> Repeats every day
+    </label>
+
+    <div class="list" id="openList"></div>
+    <div id="doneWrap" hidden>
+      <div class="secLabel"><span>Done</span><button type="button" id="clearDone">Clear finished</button></div>
+      <div class="list" id="doneList"></div>
+    </div>
+    <div id="archWrap" hidden>
+      <div class="secLabel"><span>Recently finished</span><span class="c" id="archCount"></span></div>
+      <div class="list" id="archList"></div>
+    </div>
   </div>
-  <div id="archWrap" hidden>
-    <div class="secLabel"><span>Recently finished</span><span class="c" id="archCount"></span></div>
-    <div class="list" id="archList"></div>
+
+  <div id="calWrap" hidden>
+    <div class="calHead">
+      <button class="calNav" id="calPrev" type="button" aria-label="Previous month">&#8249;</button>
+      <span class="calMonth" id="calMonth"></span>
+      <button class="calNav" id="calNext" type="button" aria-label="Next month">&#8250;</button>
+    </div>
+    <div class="calDow" id="calDow"></div>
+    <div class="calGrid" id="calGrid"></div>
+    <p class="calNote" id="calNote"></p>
+    <div id="calDay"></div>
   </div>
 </div>
 
@@ -372,11 +507,16 @@
   }
 
   var ARCHIVE_CAP = 200;
+  // A bit over a year of crossed-out days, so a calendar can look back a full
+  // year and still be reading real record rather than a trimmed stump.
+  var DONE_DAYS_CAP = 400;
 
   var state = {
-    v: 2,
+    v: 3,
     lists: { daily:[], weekly:[], grocery:[], projects:[], someday:[] },
     archive: [],
+    done: {},
+    logFrom: '',
     rolledOn: '',
     rolledWeek: ''
   };
@@ -387,14 +527,23 @@
   var trouble = '';
   var rolledNote = '';
   var tab = 'daily';
+  var view = 'lists';        // 'lists' | 'calendar'
+  var calY = 0, calM = 0;    // month on screen, set from today at boot
+  var calPick = '';          // the day whose detail is open
 
   /* ---------------- dates ---------------- */
+  // ONE formatter. The roll, the done log and the calendar grid all key off
+  // the same string, so there is no way for them to disagree about which day
+  // a thing happened on. Local time on purpose: a day is the day you lived,
+  // not a UTC boundary that turns over mid-evening.
+  function dateKey(y, m, d){
+    var mm = String(m + 1); if (mm.length < 2) mm = '0' + mm;
+    var dd = String(d);     if (dd.length < 2) dd = '0' + dd;
+    return y + '-' + mm + '-' + dd;
+  }
   function todayLocal(){
     var d = new Date();
-    var y = d.getFullYear();
-    var m = String(d.getMonth() + 1); if (m.length < 2) m = '0' + m;
-    var day = String(d.getDate()); if (day.length < 2) day = '0' + day;
-    return y + '-' + m + '-' + day;
+    return dateKey(d.getFullYear(), d.getMonth(), d.getDate());
   }
   // Monday of the current week, as a date key, so the weekly list rolls once a
   // week rather than once a day.
@@ -402,10 +551,16 @@
     var d = new Date();
     var off = (d.getDay() + 6) % 7;         // 0 = Monday
     d.setDate(d.getDate() - off);
-    var y = d.getFullYear();
-    var m = String(d.getMonth() + 1); if (m.length < 2) m = '0' + m;
-    var day = String(d.getDate()); if (day.length < 2) day = '0' + day;
-    return y + '-' + m + '-' + day;
+    return dateKey(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+  // Whole days from a to b, both "YYYY-MM-DD". Built on Date.UTC so a clock
+  // change or a DST hop cannot make a day count come out at 0 or 2.
+  function daysBetween(a, b){
+    if (!a || !b) return 0;
+    var pa = a.split('-'), pb = b.split('-');
+    return Math.round(
+      (Date.UTC(+pb[0], +pb[1] - 1, +pb[2]) - Date.UTC(+pa[0], +pa[1] - 1, +pa[2])) / 86400000
+    );
   }
   function uid(){
     return 'p_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
@@ -422,6 +577,161 @@
   // Unchanged from v1 and it must stay that way: this is what projects_done
   // has always counted, and the ledger's history depends on it.
   function doneCount(){ return doneOf('projects').length; }
+
+  /* ---------------- the crossed-out log ---------------- */
+  /**
+   * Identity for a logged item. Prefer the item's own id; fall back to
+   * list+title for entries backfilled out of the archive, which never carried
+   * an id. Without this, unticking something would fail to find its own log
+   * entry and the calendar would keep insisting you did it.
+   */
+  function doneKeyOf(x, listId){
+    return x && x.id ? 'id:' + x.id : 'nm:' + listId + '|' + (x ? x.title : '');
+  }
+  function logDone(x, listId, date){
+    if (!date || !x || !x.title) return;
+    var day = state.done[date] || (state.done[date] = []);
+    var k = doneKeyOf(x, listId);
+    for (var i = 0; i < day.length; i++){
+      if (doneKeyOf(day[i], day[i].list) === k) return;   // already recorded
+    }
+    day.push({
+      id: x.id || '', title: x.title, list: listId,
+      repeat: !!x.repeat, createdAt: x.createdAt || date
+    });
+  }
+  // Unticking is not a correction to be argued with: if it is not crossed, it
+  // was not done, and the calendar must stop saying it was.
+  function unlogDone(x, listId, date){
+    if (!date || !state.done[date]) return;
+    var k = doneKeyOf(x, listId);
+    state.done[date] = state.done[date].filter(function(e){
+      return doneKeyOf(e, e.list) !== k;
+    });
+    if (!state.done[date].length) delete state.done[date];
+  }
+  function trimDoneLog(){
+    var keys = Object.keys(state.done).sort();
+    while (keys.length > DONE_DAYS_CAP) delete state.done[keys.shift()];
+  }
+
+  /**
+   * Move what was ALREADY recorded into the log, on upgrade from v2. Every
+   * date used here is one the tile really wrote down: a live item's doneAt, or
+   * an archive entry's doneAt. Nothing is reconstructed, spread out or guessed
+   * at to make the calendar look fuller than the record is.
+   *
+   * What this cannot recover, and does not pretend to: a repeating item ticked
+   * before v3 had its doneAt set back to null by the next roll, and the item
+   * never entered the archive. That day is simply not in the record, so the
+   * calendar shows nothing there rather than inventing a tick.
+   */
+  function backfillDone(){
+    LISTS.forEach(function(L){
+      items(L.id).forEach(function(x){
+        if (x.done && x.doneAt) logDone(x, L.id, x.doneAt);
+      });
+    });
+    state.archive.forEach(function(a){
+      if (a && a.doneAt && a.title){
+        logDone({ title: a.title, createdAt: a.createdAt || a.doneAt }, a.list, a.doneAt);
+      }
+    });
+    trimDoneLog();
+  }
+
+  /* ---------------- what a given day looked like ---------------- */
+  // Crossed out on that day. Exact: this is the record, not a reconstruction.
+  function crossedOn(date, listId){
+    var day = state.done[date] || [];
+    return listId ? day.filter(function(e){ return e.list === listId; }) : day.slice();
+  }
+
+  /**
+   * Still open on that day, i.e. on the list and not crossed off, so it rolled
+   * into the next day. Derived from two honest sources and nothing else:
+   *   - a live item, if it existed by then and was not already finished by then
+   *   - a since-crossed item, if it existed by then and was crossed LATER
+   * An item created after that day was not on the list, which is the whole
+   * reason createdAt rides along in the log entry.
+   */
+  function openOn(date, listId){
+    var out = [], seen = {};
+    // What was crossed that day is crossed, not carried.
+    crossedOn(date, listId).forEach(function(e){ seen[doneKeyOf(e, listId)] = 1; });
+
+    function take(e, born){
+      if (!born || born > date) return;                 // not on the list yet
+      var k = doneKeyOf(e, listId);
+      if (seen[k]) return;
+      seen[k] = 1;
+      out.push({ id: e.id || '', title: e.title, list: listId, repeat: !!e.repeat, createdAt: born });
+    }
+
+    items(listId).forEach(function(x){
+      if (x.done && x.doneAt && x.doneAt <= date) return;   // already finished by then
+      take(x, x.createdAt);
+    });
+    Object.keys(state.done).forEach(function(d){
+      if (d <= date) return;                                // crossed later -> open then
+      crossedOn(d, listId).forEach(function(e){ take(e, e.createdAt); });
+    });
+    return out;
+  }
+
+  // The rolling lists are the ones a calendar day can be "clear" of: they are
+  // the lists that carry unfinished work forward. Grocery, Projects and
+  // Someday have no notion of being owed on a given day.
+  var ROLLING = ['daily', 'weekly'];
+
+  // Was this tile keeping the record on that day? Before logFrom it was not,
+  // and a day it never watched must never be scored as a day you missed.
+  function hasRecord(date){
+    return !!state.logFrom && date >= state.logFrom;
+  }
+
+  function dayStatus(date){
+    var crossed = 0, missed = 0, carried = 0;
+    ROLLING.forEach(function(id){
+      crossed += crossedOn(date, id).length;
+      if (hasRecord(date)){
+        openOn(date, id).forEach(function(e){
+          // A habit is missed that day. A one-off is owed, and follows you.
+          if (e.repeat) missed++; else carried++;
+        });
+      }
+    });
+    var other = crossedOn(date).filter(function(e){
+      return ROLLING.indexOf(e.list) === -1;
+    }).length;
+    var open = missed + carried;
+    var total = crossed + open;
+    return {
+      crossed: crossed, missed: missed, carried: carried,
+      open: open, other: other, total: total,
+      noRecord: !hasRecord(date),
+      // A day with nothing on the list is not a day you failed. It is only
+      // "clear" if there was something to clear - and a day with no record
+      // is never "clear", or one stray backfilled tick would decorate a day
+      // nobody was watching as a perfect one.
+      clear: hasRecord(date) && total > 0 && open === 0
+    };
+  }
+
+  /**
+   * The cells of a month, Monday first to match weekKey's week. Leading and
+   * trailing blanks are nulls so the grid stays a true 7-wide calendar rather
+   * than a reflowing list of days.
+   */
+  function monthCells(y, m){
+    var lead = (new Date(y, m, 1).getDay() + 6) % 7;    // 0 = Monday
+    var count = new Date(y, m + 1, 0).getDate();
+    var cells = [], i;
+    for (i = 0; i < lead; i++) cells.push(null);
+    for (i = 1; i <= count; i++) cells.push(dateKey(y, m, i));
+    while (cells.length % 7) cells.push(null);
+    return cells;
+  }
 
   function persist(){
     if (!loaded) return;
@@ -538,7 +848,7 @@
     });
   }
 
-  /* ---------------- page ---------------- */
+  /* ---------------- rows and tabs ---------------- */
   function renderItem(x, L, archived){
     var row = document.createElement('div');
     row.className = 'item' + (x.done || archived ? ' done' : '');
@@ -581,6 +891,21 @@
       row.appendChild(rp);
     }
 
+    /* How long this has been following you. Only on the lists that actually
+       roll, and never on a repeating item - a daily habit is not "carried",
+       it comes back by design. Faint for a day or two, amber once it has been
+       sitting there three days, because that is the point where the list is
+       telling you something. Never red: an old to do is not a failing. */
+    if (!x.done && !x.repeat && L.roll && x.createdAt){
+      var age = daysBetween(x.createdAt, todayLocal());
+      if (age > 0){
+        var ag = document.createElement('span');
+        ag.className = age >= 3 ? 'carry' : 'tag';
+        ag.textContent = age === 1 ? 'carried 1 day' : 'carried ' + age + ' days';
+        row.appendChild(ag);
+      }
+    }
+
     // Someday is a holding pen, so its one useful action is getting out of it.
     if (L.id === 'someday' && !x.done){
       var up = document.createElement('button');
@@ -618,15 +943,274 @@
     });
   }
 
+  /* ---------------- calendar ---------------- */
+  var DOW = ['M','T','W','T','F','S','S'];
+  var MONTHS = ['January','February','March','April','May','June',
+                'July','August','September','October','November','December'];
+  var DAYNAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+  function prettyDate(key){
+    var p = key.split('-');
+    return DAYNAMES[new Date(+p[0], +p[1]-1, +p[2]).getDay()] +
+           ' ' + (+p[2]) + ' ' + MONTHS[+p[1]-1];
+  }
+
+  function daySentence(st, isToday){
+    var bits = [];
+    if (st.crossed) bits.push(st.crossed + ' crossed off');
+    if (st.other) bits.push(st.other + ' finished on other lists');
+
+    if (st.noRecord){
+      // Say plainly that nothing was being watched, rather than showing a
+      // clean day that reads like a day with nothing to do.
+      return bits.length
+        ? bits.join(', ') + '. What was left undone was not being recorded yet.'
+        : 'No record kept for this day.';
+    }
+    if (!st.total && !st.other) return 'Nothing was on the list.';
+    if (st.clear && !st.other) return 'Day clear. All ' + st.crossed + ' crossed off.';
+    if (st.missed) bits.push(st.missed + (st.missed === 1 ? ' habit missed' : ' habits missed'));
+    if (st.carried) bits.push(st.carried + (isToday ? ' still open' : ' carried into the next day'));
+    return bits.join(', ') + '.';
+  }
+
+  function calLabel(key, st){
+    if (st.noRecord) return key + (st.crossed || st.other ? ', ' + (st.crossed + st.other) + ' crossed off' : ', no record kept');
+    if (!st.total && !st.other) return key + ', nothing on the list';
+    var bits = [];
+    if (st.crossed) bits.push(st.crossed + ' crossed off');
+    if (st.missed) bits.push(st.missed + ' habits missed');
+    if (st.carried) bits.push(st.carried + ' left');
+    if (st.other) bits.push(st.other + ' on other lists');
+    return key + ', ' + bits.join(', ');
+  }
+
+  function secLabelEl(text){
+    var d = document.createElement('div');
+    d.className = 'secLabel';
+    var s = document.createElement('span');
+    s.textContent = text;
+    d.appendChild(s);
+    return d;
+  }
+
+  function calRow(e, crossed, age){
+    var row = document.createElement('div');
+    row.className = 'item' + (crossed ? ' done' : '');
+
+    var sp = document.createElement('span');
+    sp.className = 'check';
+    if (crossed){
+      sp.style.background = 'var(--mint)';
+      sp.style.borderColor = 'var(--mint)';
+      sp.innerHTML = checkIcon();
+      sp.querySelector('svg').style.opacity = '1';
+    }
+    row.appendChild(sp);
+
+    var txt = document.createElement('div');
+    txt.className = 'txt';
+    txt.textContent = e.title;
+    row.appendChild(txt);
+
+    var lt = document.createElement('span');
+    lt.className = 'tag';
+    lt.textContent = listById(e.list).name;
+    row.appendChild(lt);
+
+    // Age is only meaningful for a one-off that is genuinely owed. A repeating
+    // item is not "27 days old", it is due again - saying otherwise turns a
+    // habit into a debt.
+    if (!crossed && !e.repeat && age > 0){
+      var ag = document.createElement('span');
+      ag.className = age >= 3 ? 'carry' : 'tag';
+      ag.textContent = age === 1 ? '1 day old' : age + ' days old';
+      row.appendChild(ag);
+    }
+    return row;
+  }
+
+  // The head, in calendar view, answers "how did this month go" rather than
+  // "how many are open in Daily".
+  function renderCalHead(){
+    var cells = monthCells(calY, calM), crossed = 0, clear = 0, t = todayLocal();
+    cells.forEach(function(k){
+      if (!k || k > t) return;
+      var st = dayStatus(k);
+      crossed += st.crossed + st.other;
+      if (st.clear) clear++;
+    });
+    document.getElementById('pageNum').textContent = String(crossed);
+    document.getElementById('pageOf').textContent = 'crossed off in ' + MONTHS[calM];
+    document.getElementById('pagePill').textContent =
+      clear + (clear === 1 ? ' day clear' : ' days clear');
+  }
+
+  function renderCalendar(){
+    var t = todayLocal();
+    var now = new Date(), thisY = now.getFullYear(), thisM = now.getMonth();
+
+    document.getElementById('calMonth').textContent = MONTHS[calM] + ' ' + calY;
+    // There is nothing recorded in the future, so there is nowhere forward to go.
+    document.getElementById('calNext').disabled =
+      calY > thisY || (calY === thisY && calM >= thisM);
+
+    var dow = document.getElementById('calDow');
+    dow.innerHTML = '';
+    DOW.forEach(function(d){
+      var s = document.createElement('span');
+      s.textContent = d;
+      dow.appendChild(s);
+    });
+
+    var grid = document.getElementById('calGrid');
+    grid.innerHTML = '';
+    monthCells(calY, calM).forEach(function(key){
+      var c = document.createElement('button');
+      c.type = 'button';
+      if (!key){
+        c.className = 'cell blank';
+        c.disabled = true;
+        grid.appendChild(c);
+        return;
+      }
+
+      var st = dayStatus(key);
+      var future = key > t;
+      c.className = 'cell' + (future ? ' future' : '') + (key === t ? ' today' : '') +
+                    (key === calPick ? ' on' : '') + (st.clear ? ' clear' : '') +
+                    (st.noRecord ? ' norec' : '');
+      c.disabled = future;
+
+      var n = document.createElement('span');
+      n.textContent = String(parseInt(key.slice(8), 10));
+      c.appendChild(n);
+
+      // A progress bar on a day nothing was being recorded would be a made-up
+      // score, so those days get at most a dot saying "something happened".
+      if (st.noRecord){
+        if (st.crossed || st.other){
+          var nd = document.createElement('span');
+          nd.className = 'odot';
+          c.appendChild(nd);
+        } else {
+          var ng = document.createElement('span');
+          ng.className = 'gap';
+          c.appendChild(ng);
+        }
+      } else if (st.total){
+        var bar = document.createElement('span');
+        bar.className = 'bar';
+        var fill = document.createElement('i');
+        fill.style.width = Math.round(st.crossed / st.total * 100) + '%';
+        bar.appendChild(fill);
+        c.appendChild(bar);
+      } else if (st.other){
+        var od = document.createElement('span');
+        od.className = 'odot';
+        c.appendChild(od);
+      } else {
+        // A spacer, so a day with nothing on it does not sit taller than its
+        // neighbours and read as different.
+        var g = document.createElement('span');
+        g.className = 'gap';
+        c.appendChild(g);
+      }
+
+      c.setAttribute('aria-label', calLabel(key, st));
+      if (!future) c.addEventListener('click', function(){ calPick = key; renderPage(); });
+      grid.appendChild(c);
+    });
+
+    var keys = Object.keys(state.done).sort();
+    document.getElementById('calNote').textContent = keys.length
+      ? 'Everything you cross off is recorded on the day you did it. This record starts ' + keys[0] + '.'
+      : 'Nothing crossed off yet. Tick something on a list and it lands here, on the day you did it.';
+
+    renderCalDay();
+  }
+
+  function renderCalDay(){
+    var wrap = document.getElementById('calDay');
+    wrap.innerHTML = '';
+    if (!calPick) return;
+
+    var isToday = calPick === todayLocal();
+    var st = dayStatus(calPick);
+
+    var h = document.createElement('p');
+    h.className = 'calDate';
+    h.textContent = prettyDate(calPick) + (isToday ? ' · today' : '');
+    wrap.appendChild(h);
+
+    var sum = document.createElement('p');
+    sum.className = 'calSum';
+    sum.textContent = daySentence(st, isToday);
+    wrap.appendChild(sum);
+
+    var crossed = crossedOn(calPick);
+    if (crossed.length){
+      wrap.appendChild(secLabelEl('Crossed off'));
+      var cl = document.createElement('div');
+      cl.className = 'list';
+      crossed.forEach(function(e){ cl.appendChild(calRow(e, true, 0)); });
+      wrap.appendChild(cl);
+    }
+
+    // Before the record began there is nothing honest to say about what was
+    // left undone, so nothing is said.
+    var open = [];
+    if (!st.noRecord){
+      ROLLING.forEach(function(id){ open = open.concat(openOn(calPick, id)); });
+    }
+    var missed = open.filter(function(e){ return e.repeat; });
+    var carried = open.filter(function(e){ return !e.repeat; });
+
+    function section(label, rows){
+      if (!rows.length) return;
+      wrap.appendChild(secLabelEl(label));
+      var el = document.createElement('div');
+      el.className = 'list';
+      rows.forEach(function(e){
+        el.appendChild(calRow(e, false, daysBetween(e.createdAt, calPick)));
+      });
+      wrap.appendChild(el);
+    }
+    section(isToday ? 'Not done yet' : 'Not done that day', missed);
+    section(isToday ? 'Still open today' : 'Not crossed, moved to the next day', carried);
+
+    if (!crossed.length && !open.length && !st.noRecord){
+      var e2 = document.createElement('div');
+      e2.className = 'empty';
+      e2.textContent = 'Nothing on the list that day.';
+      wrap.appendChild(e2);
+    }
+  }
+
+  /* ---------------- page ---------------- */
   function renderPage(){
     if (mode !== 'page') return;
-    var L = listById(tab);
 
     var tEl = document.getElementById('trouble');
     tEl.hidden = !trouble; tEl.textContent = trouble;
     var rEl = document.getElementById('rolled');
     rEl.hidden = !rolledNote; rEl.textContent = rolledNote;
 
+    var vl = document.getElementById('viewLists'), vc = document.getElementById('viewCal');
+    vl.className = 'vBtn' + (view === 'lists' ? ' on' : '');
+    vc.className = 'vBtn' + (view === 'calendar' ? ' on' : '');
+    vl.setAttribute('aria-pressed', view === 'lists' ? 'true' : 'false');
+    vc.setAttribute('aria-pressed', view === 'calendar' ? 'true' : 'false');
+    document.getElementById('listsWrap').hidden = view !== 'lists';
+    document.getElementById('calWrap').hidden = view !== 'calendar';
+
+    if (view === 'calendar'){
+      renderCalHead();
+      renderCalendar();
+      return;
+    }
+
+    var L = listById(tab);
     var open = openOf(tab), done = doneOf(tab);
     document.getElementById('pageNum').textContent = String(open.length);
     document.getElementById('pageOf').textContent = 'open in ' + L.name;
@@ -682,8 +1266,15 @@
     var arr = items(listId);
     for (var i=0;i<arr.length;i++){
       if (arr[i].id === id){
+        var was = arr[i].doneAt;
         arr[i].done = !arr[i].done;
         arr[i].doneAt = arr[i].done ? todayLocal() : null;
+        // The calendar's record is written HERE, at the moment it is crossed,
+        // and not derived later from doneAt - roll() wipes doneAt on repeating
+        // items, so deriving it would lose every habit the next morning.
+        if (arr[i].done) logDone(arr[i], listId, arr[i].doneAt);
+        else unlogDone(arr[i], listId, was || todayLocal());
+        trimDoneLog();
         break;
       }
     }
@@ -759,7 +1350,29 @@
     });
     var cd = document.getElementById('clearDone');
     if (cd) cd.addEventListener('click', clearDone);
+
+    document.getElementById('viewLists').addEventListener('click', function(){
+      view = 'lists'; renderPage();
+    });
+    document.getElementById('viewCal').addEventListener('click', function(){
+      view = 'calendar';
+      if (!calPick) calPick = todayLocal();
+      renderPage();
+    });
+    document.getElementById('calPrev').addEventListener('click', function(){
+      calM--; if (calM < 0){ calM = 11; calY--; }
+      renderPage();
+    });
+    document.getElementById('calNext').addEventListener('click', function(){
+      calM++; if (calM > 11){ calM = 0; calY++; }
+      renderPage();
+    });
   }
+
+  var bootNow = new Date();
+  calY = bootNow.getFullYear();
+  calM = bootNow.getMonth();
+  calPick = todayLocal();
 
   wire();
   enable(false);
@@ -778,22 +1391,33 @@
     }
     var d = res.data;
     if (d && typeof d === 'object'){
-      if (d.v === 2){
+      if (d.v === 2 || d.v === 3){
         LISTS.forEach(function(L){
           state.lists[L.id] = (d.lists && Array.isArray(d.lists[L.id])) ? d.lists[L.id] : [];
         });
         state.archive = Array.isArray(d.archive) ? d.archive : [];
         state.rolledOn = d.rolledOn || '';
         state.rolledWeek = d.rolledWeek || '';
+        // v3 carries its own log. v2 never had one, so it is built from the
+        // dates v2 did record - and only from those.
+        var hasLog = d.done && typeof d.done === 'object' && !Array.isArray(d.done);
+        state.done = hasLog ? d.done : {};
+        state.logFrom = d.logFrom || '';
+        if (!hasLog) backfillDone();
       } else if (Array.isArray(d.projects)){
         // v1. Its items ARE the projects list, carried across untouched so
         // nothing logged before today moves or disappears.
         state.lists.projects = d.projects;
+        backfillDone();
       }
     }
     loaded = true;
     enable(true);
-    if (roll()) persist();
+    var changed = roll();
+    // Stamped once, the first time this version ever runs. Everything before
+    // this day is shown as unrecorded rather than scored, because it was.
+    if (!state.logFrom){ state.logFrom = todayLocal(); changed = true; }
+    if (changed) persist();
     renderAll();
     reportDone();
   });

@@ -476,3 +476,56 @@ findings fixed.
 
 Consequence to remember: data is per account now, not per browser. Signed out,
 the board still runs on this device's local storage exactly as the seed did.
+
+## The Lists calendar records completions, it does not derive them
+
+Decided 2026-07-31.
+
+Ruben asked for a calendar tied to the daily checklist: cross something off and
+it crosses off on that day, and anything not crossed moves to the next day
+until it is.
+
+The carry-forward half already existed. `roll()` has always kept unfinished
+items on the list day after day. What was missing was making it visible, so an
+uncrossed item now says how long it has been following you: faint for a day or
+two, amber at three, never red. An old to do is not a failing.
+
+The calendar itself could not be a new tile. Sealed tiles cannot read each
+other, so a separate calendar tile physically cannot see the checklist. It
+lives inside Lists as a second view. Architecture decided that, not taste.
+
+It records rather than derives, and that was the real decision. The obvious
+build reads doneAt and the archive, and it fails silently: `roll()` sets a
+repeating item's doneAt back to null and a repeating item never reaches the
+archive, so a habit ticked every day for a month left no trace by the next
+morning. The exact thing a calendar is for. `state.done` writes the day at the
+moment it is crossed. The test for this asserts BOTH that the record survives
+a roll and that no other trace of it is left, so nobody can ever "simplify"
+the log away.
+
+`logFrom` is the honesty line. Working backwards from createdAt would paint
+every day since an item was made as a day of misses, including days before
+this tile recorded anything. That is inventing failures. Days before logFrom
+show whatever real crossed-off marks exist and are never scored.
+
+A missed habit is not a carried task. A one-off is owed and accumulates age; a
+repeating item is due again. Calling a habit "27 days old" turns a rhythm into
+a debt, so it does not.
+
+## The close-button lane now has a permanent check
+
+Decided 2026-07-31.
+
+The host floats a close button over the top right of every page tile. Three
+separate times something in a tile's own header ended up underneath it: the
+shell's Library gear vs the sync pill, the Body tile's unit toggle, and the
+Lists count pill, which had been clipped since before the calendar existed.
+Every plain-node suite stayed green through all three, because the overlap only
+exists once a real browser has laid both documents out.
+
+`tools/collision-check.js` now measures every page tile against the button
+across sixteen widths. The trap it exists to catch: there is no single correct
+breakpoint. The button sits at viewport-52, so the width where a tile clears it
+depends on that tile's own column. Copying the Body tile's 640px into the wider
+Lists tile left a 4px overlap at 700px, which is how the number 760 was
+arrived at - measured, not inherited.

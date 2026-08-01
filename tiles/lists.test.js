@@ -45,6 +45,7 @@ vm.runInContext(`
   var ARCHIVE_CAP = 200;
   var state, loaded = true, rolledNote = '';
   function listById(id){ for (var i=0;i<LISTS.length;i++) if (LISTS[i].id===id) return LISTS[i]; return LISTS[0]; }
+  ${grab('dateKey')}
   ${grab('todayLocal')}
   ${grab('weekKey')}
   ${grab('items')}

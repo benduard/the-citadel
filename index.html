@@ -652,12 +652,16 @@ body {
 
     <div class="cmdbar">
       <!-- The same mark as the app icon, split across its two parts: the
-           chamfered plate below IS the wall (that clip-path is the identical
-           cut icons/mark.svg draws), and this glyph is the keep standing in
-           it. Redrawing the whole mark at 14px would just be a gold smudge -
-           see icons/mark-small.svg for the same reasoning. -->
+           hexagonal plate below is the plate icons/mark.svg draws, to the same
+           proportions, and this glyph is the battlement standing on it.
+           Redrawing all three towers at 14px would just be a gold smudge - see
+           icons/mark-small.svg, which makes the same trade at 16px.
+
+           Two merlons, not the master's three: at 14px a merlon needs about
+           3px to survive, which on this 24-unit viewBox means 6 units, and
+           three of those leave no room for notches. -->
       <span class="emblem" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 11.2 12 3.6l7 7.6V21H5Z"/></svg>
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 20V9h6v2.5h4V9h6v11Z"/></svg>
       </span>
       <span class="wordmark">THE CITADEL</span>
       <div class="cmdbar-spacer"></div>

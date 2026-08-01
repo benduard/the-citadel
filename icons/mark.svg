@@ -4,49 +4,65 @@
   PNG. Small sizes (16/32px) come from mark-small.svg instead; see there for
   why a second file exists.
 
-  WHY THIS SHAPE. The chamfered octagon is not decoration picked for an icon:
-  it is already the board's signature cut, used on the rank panel, the command
-  chamber surfaces and the header emblem (index.html's clip-path polygons). The
-  mark is the board's own geometry, not a logo bolted onto it.
+  WHAT IT IS. A citadel in elevation: a crenellated curtain wall, three towers
+  rising from it, a gate arch through the centre and arrow slits in each tower.
+  It sits on the hexagonal plate the header emblem uses (index.html's .emblem
+  clip-path), so the icon and the thing at the top of the board are the same
+  object. An earlier version claimed that link and did not have it - the emblem
+  plate is a six-sided hexagon and the old mark drew an eight-sided chamfered
+  octagon. They are the same shape now because the numbers are the same.
 
-  Read as: a citadel from above - the outer wall, the keep standing inside it,
-  and the gate cut through the base. Gold because gold is this board's identity
-  colour (the design law reserves it for identity and ceremony; petrol is
-  interaction, and mint/amber are reserved for judging how a person is doing,
-  which an app icon must never imply).
+  Gold on graphite because the design law reserves gold for identity: petrol is
+  interaction, and mint and amber are for judging how a person is doing, which
+  an app icon must never imply.
 
-  EVERYTHING IS OVERSIZED ON PURPOSE. The first version of this was drawn to
-  look right at 1024px and was checked at 60px - the real iPhone home screen
-  tile - where the keep had thinned to a sliver and the gate had become a
-  speck. Weights here are set from the 60px render backwards. If you edit this,
-  re-run tools/build-icons.js and LOOK at the 60px output before believing it.
+  DETAIL IS BUDGETED FROM THE RENDER, NOT THE CANVAS. The home screen tile is
+  180 physical pixels on a 3x iPhone, so one unit in this file is 180/1024 of a
+  pixel and nothing finer than about 20 units survives. Every merlon, notch and
+  slit here is at least 24 units wide, which lands at 4px or more. That is the
+  whole reason it can carry this much detail and still read: the constraint is
+  the 180px render, not the 60pt box it sits in.
+
+  ONE PATH, EVENODD. The gate and the slits are subpaths of the citadel rather
+  than shapes painted over it. They are therefore holes, and the plate shows
+  through them exactly as it is - paint them in a background colour instead and
+  they stop matching the moment the plate's tint changes.
 
   OPAQUE ON PURPOSE. iOS composites WHITE behind any transparency in an
-  apple-touch-icon, which would put a white box behind a dark mark on the home
-  screen. The graphite ground is baked in, and it is the same graphite the
-  board's own background uses, lit from the same direction.
+  apple-touch-icon, which would put a white box behind a dark mark. The
+  graphite ground is baked in, and it is the board's own background colour.
+
+  GRADIENTS ARE userSpaceOnUse ON PURPOSE. The default (objectBoundingBox)
+  rescales a gradient into whatever shape uses it, so a small shape filled with
+  the ground gradient gets the entire ramp squeezed into it and comes out
+  visibly lighter than the ground it was meant to match.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <defs>
-    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="ground" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="1024">
       <stop offset="0%"   stop-color="#161c23"/>
       <stop offset="46%"  stop-color="#0f1319"/>
       <stop offset="100%" stop-color="#080a0d"/>
     </linearGradient>
-    <radialGradient id="overhead" cx="52%" cy="2%" r="70%">
-      <stop offset="0%"   stop-color="#c8a567" stop-opacity=".20"/>
+    <radialGradient id="overhead" gradientUnits="userSpaceOnUse" cx="532" cy="20" r="720">
+      <stop offset="0%"   stop-color="#c8a567" stop-opacity=".22"/>
       <stop offset="58%"  stop-color="#c8a567" stop-opacity=".05"/>
       <stop offset="100%" stop-color="#c8a567" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"   stop-color="#f3e2b4"/>
-      <stop offset="40%"  stop-color="#e2c68f"/>
-      <stop offset="100%" stop-color="#b08c4a"/>
+    <!-- The header emblem's plate: linear-gradient(155deg, .22 -> .04). -->
+    <linearGradient id="plate" gradientUnits="userSpaceOnUse" x1="850" y1="120" x2="200" y2="900">
+      <stop offset="0%"   stop-color="#c8a567" stop-opacity=".26"/>
+      <stop offset="100%" stop-color="#c8a567" stop-opacity=".05"/>
     </linearGradient>
-    <linearGradient id="goldKeep" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="plateEdge" gradientUnits="userSpaceOnUse" x1="512" y1="72" x2="512" y2="952">
+      <stop offset="0%"   stop-color="#e8cf9e" stop-opacity=".85"/>
+      <stop offset="100%" stop-color="#c8a567" stop-opacity=".38"/>
+    </linearGradient>
+    <!-- Lit from above, the same direction as every surface on the board. -->
+    <linearGradient id="stone" gradientUnits="userSpaceOnUse" x1="512" y1="340" x2="512" y2="780">
       <stop offset="0%"   stop-color="#f8ecc9"/>
-      <stop offset="52%"  stop-color="#dcbc7e"/>
-      <stop offset="100%" stop-color="#a37c3c"/>
+      <stop offset="34%"  stop-color="#e2c68f"/>
+      <stop offset="100%" stop-color="#a87f3c"/>
     </linearGradient>
   </defs>
 
@@ -55,15 +71,47 @@
   <rect width="1024" height="1024" fill="url(#ground)"/>
   <rect width="1024" height="1024" fill="url(#overhead)"/>
 
-  <!-- THE WALL. Chamfered octagon, the board's exact cut, drawn heavy. -->
-  <path d="M 270 158 H 754 L 866 270 V 754 L 754 866 H 270 L 158 754 V 270 Z"
-        fill="none" stroke="url(#gold)" stroke-width="74" stroke-linejoin="miter"/>
+  <!-- Everything that is not the ground lives in #art, so the maskable variant
+       can be produced by scaling this one group and nothing else. The ground
+       stays full bleed underneath, because a maskable icon is meant to be
+       cropped. See tools/build-icons.js - there is deliberately no second copy
+       of this artwork in the repo to drift out of sync. -->
+  <g id="art">
 
-  <!-- THE GATE. Cut clean through the wall's base. Wide enough to still read
-       as an opening at 60px, where the earlier 100px-wide notch vanished. -->
-  <rect x="428" y="812" width="168" height="104" fill="url(#ground)"/>
+  <!-- THE PLATE. The header emblem's hexagon, to the same proportions:
+       (50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%). -->
+  <path d="M 512 72 L 912 292 V 732 L 512 952 L 112 732 V 292 Z"
+        fill="url(#plate)" stroke="url(#plateEdge)" stroke-width="12" stroke-linejoin="miter"/>
 
-  <!-- THE KEEP. Dominant, not an ornament: at 60px this is the element that
-       has to survive, so it carries most of the interior. -->
-  <path d="M 410 452 L 512 342 L 614 452 V 726 H 410 Z" fill="url(#goldKeep)"/>
+  <!-- THE CITADEL. The outer subpath is the silhouette, walked clockwise from
+       the bottom left; the gate and the three slits follow it as holes.
+
+       The transform is placement, not drawing: the coordinates below are the
+       readable ones (base at 760, centre 512,565) and this lifts the whole
+       thing 40 units and grows it 8%. Drawn flat it sat below the hexagon's
+       full-width band, between y 292 and 732, which read as bottom-heavy with
+       dead plate above it. Raised, the base lands on the widest line and the
+       citadel sits in the body of the plate rather than hanging off it. -->
+  <path transform="translate(0 -40) translate(512 565) scale(1.08) translate(-512 -565)"
+        fill-rule="evenodd" fill="url(#stone)" d="
+    M 256 760
+    L 256 470
+    L 294 470 L 294 500 L 330 500 L 330 470 L 368 470
+    L 368 600
+    L 398 600 L 398 626 L 422 626 L 422 600 L 452 600
+    L 452 370
+    L 492 370 L 492 400 L 532 400 L 532 370 L 572 370
+    L 572 600
+    L 602 600 L 602 626 L 626 626 L 626 600 L 656 600
+    L 656 470
+    L 694 470 L 694 500 L 730 500 L 730 470 L 768 470
+    L 768 760
+    Z
+    M 476 760 L 476 700 A 36 36 0 0 1 548 700 L 548 760 Z
+    M 500 455 A 12 12 0 0 1 524 455 L 524 500 L 500 500 Z
+    M 300 555 A 12 12 0 0 1 324 555 L 324 592 L 300 592 Z
+    M 700 555 A 12 12 0 0 1 724 555 L 724 592 L 700 592 Z
+  "/>
+
+  </g>
 </svg>

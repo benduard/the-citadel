@@ -54,17 +54,63 @@ const maskable = manifest.icons.filter(i => (i.purpose || '').includes('maskable
 check('exactly one maskable icon declared', maskable.length === 1, String(maskable.length))
 check('and it is the PADDED variant, not the full-bleed mark',
   maskable.length === 1 && maskable[0].src.includes('maskable'), maskable.map(m => m.src).join(','))
-// The real geometry check: the wall corners of the padded mark must sit inside
-// the 40%-radius safe circle Android guarantees.
-const mask = fs.readFileSync(path.join(ROOT, 'icons', 'mark-maskable.svg'), 'utf8')
-const scale = parseFloat((mask.match(/scale\(([\d.]+)\)/) || [])[1])
-check('padded variant declares a scale', isFinite(scale), String(scale))
-const corners = [[270,158],[754,158],[866,270],[866,754],[754,866],[270,866],[158,754],[158,270]]
-const worst = Math.max(...corners.map(([x, y]) => Math.hypot((x - 512) * scale, (y - 512) * scale)))
-check(`scaled wall corner (${worst.toFixed(0)}) fits the safe radius (409.6)`, worst <= 409.6, worst.toFixed(1))
+
+// The real geometry check, recomputed from the artwork rather than trusted.
+// Android guarantees only a centred circle of 40% radius (409.6 of 1024); the
+// plate is the outermost thing drawn, so its corners are what must fit.
+const mark = fs.readFileSync(path.join(ROOT, 'icons', 'mark.svg'), 'utf8')
+const build = fs.readFileSync(path.join(__dirname, 'build-icons.js'), 'utf8')
+
+const scale = parseFloat((build.match(/MASKABLE_SCALE\s*=\s*([\d.]+)/) || [])[1])
+check('build-icons.js declares a maskable scale', isFinite(scale), String(scale))
+check('and applies it to #art, not the whole svg (the ground must stay full bleed)',
+  /#art\{[^}]*transform:scale\(/.test(build.replace(/\s+/g, '')) ||
+  /#art\{.*transform:scale\(/.test(build))
+check('mark.svg actually has the #art group that scaling depends on',
+  /<g id="art">/.test(mark))
+check('there is no second copy of the artwork to drift',
+  !fs.existsSync(path.join(ROOT, 'icons', 'mark-maskable.svg')))
+
+// Pull the plate's own path out of mark.svg and walk it. Absolute M/L/H/V/Z is
+// all this path uses, and asserting that keeps the parser honest.
+// Found by what it IS (the thing filled with the plate gradient), never by its
+// starting coordinates. An earlier version of this matched the literal "M 512
+// 72" and, when the plate moved, silently matched nothing - which sent an
+// empty point list into Math.max, produced -Infinity, and PASSED the safe
+// radius check. A geometry test that passes when it cannot find the geometry
+// is worse than no test at all.
+const plateD = (mark.match(/<path\s+d="([^"]+)"[^>]*fill="url\(#plate\)"/) || [])[1] || ''
+check('found the plate path in mark.svg', !!plateD)
+check('the plate uses only absolute M/L/H/V/Z, as this check assumes',
+  !!plateD && !/[mlhvcsqtaz]/.test(plateD.replace(/Z/g, '')))
+
+const pts = []
+let cx = 0, cy = 0
+;(plateD.match(/[MLHV]\s*[-\d.\s]+/g) || []).forEach(tok => {
+  const cmd = tok[0]
+  const n = tok.slice(1).trim().split(/[\s,]+/).map(Number)
+  if (cmd === 'M' || cmd === 'L') { for (let i = 0; i < n.length; i += 2) { cx = n[i]; cy = n[i + 1]; pts.push([cx, cy]) } }
+  else if (cmd === 'H') { cx = n[n.length - 1]; pts.push([cx, cy]) }
+  else if (cmd === 'V') { cy = n[n.length - 1]; pts.push([cx, cy]) }
+})
+check('parsed every corner of the plate', pts.length >= 6, String(pts.length))
+
+const strokeW = parseFloat((mark.match(/stroke-width="(\d+)"/) || [])[1]) || 0
+// Infinity, not -Infinity, when there is nothing to measure: an unmeasurable
+// plate must FAIL the safe-radius check, never sail through it.
+const rawWorst = pts.length
+  ? Math.max(...pts.map(([x, y]) => Math.hypot(x - 512, y - 512))) + strokeW / 2
+  : Infinity
+const worst = rawWorst * scale
+check(`plate corner ${rawWorst.toFixed(0)} scaled by ${scale} = ${worst.toFixed(0)}, fits the safe radius (409.6)`,
+  worst <= 409.6, worst.toFixed(1))
+// The other half of the same claim: padding it so hard the mark goes tiny is
+// not a fix either. Android's own guidance puts the icon around 60-80% of the
+// canvas, so anything under half is a mistake, not caution.
+check('...and is not padded into a speck', worst >= 205, worst.toFixed(1))
 
 console.log('\n[6] the sources the PNGs are built from are committed')
-;['mark.svg', 'mark-small.svg', 'mark-maskable.svg'].forEach(f =>
+;['mark.svg', 'mark-small.svg'].forEach(f =>
   check(`icons/${f} present`, fs.existsSync(path.join(ROOT, 'icons', f))))
 
 console.log(`\n${fails} failure(s)`)

@@ -1,26 +1,31 @@
 <!--
   THE CITADEL MARK, SMALL SIZES ONLY (16px and 32px browser tab favicons).
 
-  WHY A SECOND FILE. The full mark has three elements - wall, gate, keep - and
-  below about 48px they stop being three things and become one grey blob. This
-  is not a failure of the drawing, it is what happens to any detailed mark at
+  WHY A SECOND FILE. The full mark has three towers, a crenellated wall, a gate
+  and three slits. At 16px those are sub-pixel and collapse into one gold blob.
+  That is not a fault in the drawing, it is what happens to any detailed mark at
   16px, which is why real identity systems ship a simplified small variant
   rather than scaling the big one down.
 
-  WHAT SURVIVES. The keep alone, drawn to the edges, on the same graphite. It
-  is the most distinctive single silhouette in the full mark, so a tab showing
-  only this still belongs to the same family - it reads as the same object seen
-  closer, not as a different logo.
+  WHAT SURVIVES. One gate tower, drawn to the edges: a battlemented top and an
+  arch through the base. Both are the full mark's own vocabulary, so a tab
+  showing this reads as the same object seen closer, not a different logo. It
+  is deliberately TWO merlons rather than the master's three - at 16px a merlon
+  needs to be about 3px to survive, which on this canvas means 200 units, and
+  three of those do not fit across a shape that also has to leave notches.
 
-  Rendered by tools/build-icons.js. Check any change at 1:1, not zoomed in.
+  Everything here is sized from the 16px render backwards. Check any change at
+  1:1 in a real tab, not zoomed in - zoomed in, anything looks fine.
+
+  Rendered by tools/build-icons.js.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <defs>
-    <linearGradient id="groundS" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="groundS" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="1024">
       <stop offset="0%"   stop-color="#161c23"/>
       <stop offset="100%" stop-color="#0b0e12"/>
     </linearGradient>
-    <linearGradient id="goldS" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="goldS" gradientUnits="userSpaceOnUse" x1="512" y1="210" x2="512" y2="890">
       <stop offset="0%"   stop-color="#f6e7c0"/>
       <stop offset="55%"  stop-color="#dcbc7e"/>
       <stop offset="100%" stop-color="#b08c4a"/>
@@ -29,7 +34,22 @@
 
   <rect width="1024" height="1024" fill="url(#groundS)"/>
 
-  <!-- The keep, filling the frame. No wall, no gate: at 16px they would only
-       muddy the silhouette this is trying to protect. -->
-  <path d="M 250 470 L 512 176 L 774 470 V 872 H 250 Z" fill="url(#goldS)"/>
+  <!-- The plate carries this, not the building. At 16px a hexagon is still a
+       hexagon - it is the one element of the master that survives at any size,
+       and it is what the header emblem shows at 26px too. -->
+  <path d="M 512 62 L 950 300 V 724 L 512 962 L 74 724 V 300 Z"
+        fill="none" stroke="url(#goldS)" stroke-width="86" stroke-linejoin="miter"/>
+
+  <!-- A battlement inside it: wider than it is tall, with shallow notches.
+       Both of those are deliberate. An earlier version was a tall block with a
+       deep notch and a gate arch, and at 16px it read as a capital H - the
+       counters of a letterform, not a building. Wide and shallow cannot. -->
+  <path fill="url(#goldS)" d="
+    M 330 740
+    L 330 470
+    L 424 470 L 424 542 L 488 542 L 488 470
+    L 536 470 L 536 542 L 600 542 L 600 470
+    L 694 470
+    L 694 740 Z
+  "/>
 </svg>

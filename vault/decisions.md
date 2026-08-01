@@ -529,3 +529,44 @@ breakpoint. The button sits at viewport-52, so the width where a tile clears it
 depends on that tile's own column. Copying the Body tile's 640px into the wider
 Lists tile left a 4px overlap at 700px, which is how the number 760 was
 arrived at - measured, not inherited.
+
+## The mark is a citadel, and there is only one copy of it
+
+Decided 2026-07-31.
+
+The home screen showed a plain letter C. Not a design problem: the board had
+never been deployed with any icons, so iOS fell back to generating a letter
+tile from the page title. The mark below is the redesign Ruben asked for on
+top of that; the C was fixed by pushing.
+
+It is a citadel in elevation now - crenellated wall, three towers, a gate arch,
+arrow slits - on the hexagonal plate the header emblem uses. The old mark was a
+top-down chamfered octagon whose code comment claimed it was the same shape as
+the emblem. It was not: the emblem plate has six sides and that mark had eight.
+They match now because the numbers are the same numbers.
+
+Detail is budgeted from the render, not the canvas. The iPhone tile is 180
+physical pixels on a 3x screen, so a unit of the 1024 canvas is 180/1024 of a
+pixel and nothing under about 20 units survives. Every merlon, notch and slit
+is at least 24. That is why the mark can carry this much detail at all, and it
+is the number to check against before adding more.
+
+The maskable variant is no longer a second file. It was a hand-kept copy of the
+artwork and it had already drifted an entire redesign behind the master. Now
+tools/build-icons.js scales the master's #art group and leaves the ground full
+bleed, so there is one drawing. tools/icons.test.js recomputes the plate's real
+corner radius out of mark.svg and checks the scale still clears Android's 409.6
+safe radius, in both directions - too big fails, and so does padded-to-a-speck.
+
+Two things the small sizes taught, both found by looking rather than reasoning:
+a tall block with a deep notch and a gate reads as a capital H at 16px, and at
+that size the hexagon is the only element that survives at all. The 16/32px
+variant is therefore the plate with a wide, shallow battlement inside it, and
+the header emblem uses two merlons rather than three for the same reason.
+
+One test lesson worth keeping. The maskable geometry check used to find the
+plate by its literal starting coordinates. Moving the plate made it match
+nothing, which sent an empty list into Math.max, produced -Infinity, and PASSED.
+It now finds the path by what it is (the shape filled with the plate gradient)
+and treats unmeasurable as Infinity, so it fails loudly instead. A geometry
+test that passes when it cannot find the geometry is worse than no test.

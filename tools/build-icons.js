@@ -21,7 +21,30 @@ const path = require('path')
 const ICONS = path.join(__dirname, '..', 'icons')
 const FULL = fs.readFileSync(path.join(ICONS, 'mark.svg'), 'utf8')
 const SMALL = fs.readFileSync(path.join(ICONS, 'mark-small.svg'), 'utf8')
-const MASKABLE = fs.readFileSync(path.join(ICONS, 'mark-maskable.svg'), 'utf8')
+
+/**
+ * MASKABLE_SCALE - the Android safe zone, and why this is a number here rather
+ * than a second SVG file.
+ *
+ * A "maskable" icon is cropped by the launcher to whatever shape it likes, and
+ * only a centred circle of 80% diameter is guaranteed to survive: radius 409.6
+ * of 1024. The plate's widest corners sit at radius 456.5, plus half of its
+ * 12-unit stroke, so the artwork has to pull in.
+ *
+ * This used to be a hand-maintained icons/mark-maskable.svg holding a SECOND
+ * COPY of the artwork - which had already silently drifted a whole redesign
+ * behind the master by the time anyone looked. The maskable is now the same
+ * file, with only #art scaled and the ground left full bleed (it is meant to
+ * be cropped). One drawing, one source of truth.
+ *
+ * tools/icons.test.js recomputes the real geometry out of mark.svg and checks
+ * this number still clears the safe radius, so changing the plate cannot
+ * quietly invalidate the claim.
+ */
+const MASKABLE_SCALE = 0.85
+const MASKABLE_STYLE =
+  `<style>#art{transform-box:view-box;transform-origin:512px 512px;` +
+  `transform:scale(${MASKABLE_SCALE})}</style>`
 
 // Every size, and what actually consumes it. Nothing here is speculative:
 // a size is in this list because a real surface asks for it.
@@ -48,7 +71,9 @@ const SIZES = [
     // no scaling, no resampling, no soft edges.
     await page.setContent(
       `<style>html,body{margin:0;padding:0;background:#0f1319}
-       svg{display:block;width:${s.px}px;height:${s.px}px}</style>${s.small ? SMALL : s.maskable ? MASKABLE : FULL}`,
+       svg{display:block;width:${s.px}px;height:${s.px}px}</style>` +
+      (s.maskable ? MASKABLE_STYLE : '') +
+      (s.small ? SMALL : FULL),
       { waitUntil: 'load' }
     )
     await page.screenshot({ path: path.join(ICONS, s.file), omitBackground: false })

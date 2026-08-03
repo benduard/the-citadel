@@ -19,8 +19,8 @@ node tiles/lists.test.js
 node tiles/lists.calendar.test.js
 echo "All suites passed."
 
-# The visual checks (paint + close-button collision) are optional and not part
-# of the "all suites passed" line
+# The browser checks (paint, close-button collision, touch targets) are
+# optional and not part of the "all suites passed" line
 # above ON PURPOSE: it needs a Chromium binary on disk and the board actually
 # running on :3000, neither of which the plain-node suites require, and this
 # script should stay usable with nothing installed. Skip quietly rather than

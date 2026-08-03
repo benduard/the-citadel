@@ -299,6 +299,7 @@
                font-size:12px; color:var(--muted); cursor:pointer; white-space:nowrap; min-height:34px; }
   .seg button[aria-pressed="true"]{ background:rgba(255,255,255,.07); color:var(--text); }
 
+
   .list{ list-style:none; margin:0; padding:0; }
   .list li{ display:flex; align-items:center; gap:10px; padding:10px 0;
             border-top:1px solid rgba(148,163,158,.1); }
@@ -463,6 +464,29 @@
     .cel .ring{ animation:none; opacity:.35; transform:scale(1.2); }
     .bar > i{ transition:none; }
     .btn:active,.nav button:active{ transform:none; }
+  }
+
+  /* TOUCH TARGETS, and this block is LAST on purpose.
+     34-40px reads fine under a mouse and is under Apple's 44px minimum under a
+     thumb - and these are the controls this tile is navigated with, tapped
+     more than anything else in it. Raised only for a coarse pointer, so the
+     desktop layout keeps its density.
+
+     A media query adds NO specificity. Sitting this block higher up the sheet
+     left .splitBtn{min-height:40px} winning on source order alone, so the
+     split buttons silently stayed at 40 while everything around them grew.
+     Anything added here has to stay below the rule it is overriding. */
+  @media (pointer: coarse){
+    .seg button{ min-height:44px; min-width:44px; }
+    .btn, .btn.small{ min-height:44px; }
+    .splitBtn{ min-height:44px; }
+    select, input[type="number"], input[type="text"], input[type="search"]{ min-height:44px; }
+    .checkRow{ min-height:44px; }
+    /* The last-time panel's inline Use/Edit buttons stay compact: they sit
+       inside a dense row of sets and a 44px minimum would break that row
+       apart. They are not navigation, and there is a full-size path to the
+       same thing in every case. */
+    .lt .btn{ min-height:0; }
   }
 </style>
 </head>

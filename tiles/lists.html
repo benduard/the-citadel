@@ -198,11 +198,17 @@
     font-size:14px; font-weight:700; font-family:inherit;
   }
   .addBtn:disabled{ opacity:.4; cursor:default; }
+  /* This decides whether a new item becomes a standing habit or just today's
+     work - the two now live in separate sections, so getting it wrong is not
+     cosmetic. It was a 22px row with a 16px box, which is a small thing to hit
+     for a switch that changes where the item lands. The whole row is the
+     target because the input sits inside the label. */
   .repToggle{
-    display:flex; align-items:center; gap:7px; margin-bottom:14px;
-    font-size:12px; color:var(--muted); cursor:pointer; user-select:none;
+    display:flex; align-items:center; gap:10px; margin-bottom:12px;
+    min-height:44px;
+    font-size:12.5px; color:var(--muted); cursor:pointer; user-select:none;
   }
-  .repToggle input{ width:16px; height:16px; }
+  .repToggle input{ width:20px; height:20px; flex:none; }
 
   .secLabel{
     display:flex; align-items:center; gap:8px; margin:18px 0 8px;
@@ -273,6 +279,15 @@
   }
   .calNav:hover:not(:disabled){ color:var(--text); border-color:var(--muted); }
   .calNav:disabled{ opacity:.3; cursor:default; }
+  /* Month stepping on a phone: 36px is under the minimum, and these two sit
+     either side of the month name where a miss lands on nothing. */
+  @media (pointer: coarse){
+    .calNav{ width:44px; height:44px; }
+    .vBtn{ min-height:44px; }
+    .tab{ min-height:44px; }
+    .addBtn, .addRow input{ min-height:44px; }
+    .secLabel button{ min-height:44px; }
+  }
   .calDow,.calGrid{ display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
   .calDow{ margin-bottom:5px; }
   .calDow span{

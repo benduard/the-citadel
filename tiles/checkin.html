@@ -203,6 +203,14 @@
   }
   .toggle[aria-pressed="true"]{ background:rgba(110,231,183,.18); border-color:var(--mint); }
   .toggle[aria-pressed="true"] .knob{ transform:translateX(24px); background:var(--mint); }
+  /* 56x32 is the familiar switch size and it stays that size. On a touch
+     screen it is under the 44px minimum though, so the HIT AREA is grown
+     invisibly instead of the switch - the thing you see is unchanged, the
+     thing your thumb has to find is 12px taller. .knob is a real child, so
+     ::after is free for this. */
+  @media (pointer: coarse){
+    .toggle::after{ content:''; position:absolute; left:0; right:0; top:-6px; bottom:-6px; }
+  }
 
   textarea{
     width:100%;

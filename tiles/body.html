@@ -136,6 +136,12 @@
   }
   .unitToggle:hover{ color:var(--mint); border-color:rgba(110,231,183,.5); }
   .unitToggle:disabled{ opacity:.4; cursor:not-allowed; }
+  /* 36px is fine under a mouse and under the 44px minimum under a thumb, and
+     this one sits in the top corner where a miss does nothing at all. */
+  @media (pointer: coarse){
+    .unitToggle{ min-height:44px; min-width:44px; }
+    .saveBtn, input[type="number"], input[type="date"]{ min-height:44px; }
+  }
 
   .trouble{
     margin:0 0 16px; padding:10px 14px;

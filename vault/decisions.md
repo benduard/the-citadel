@@ -679,3 +679,37 @@ second heading on Grocery is just furniture.
 One trap worth naming: the empty state. With the one-off list empty but habits
 still open, "Nothing open" would have been a lie with the answer visible three
 lines below it. It reads "Nothing just for today. The standing ones are below."
+
+## Touch targets get a permanent check, because every one was found by hand
+
+Decided 2026-08-03.
+
+Every mobile sizing problem on this board was reported by Ruben from his phone
+rather than caught by anything here: the close button under the status bar, the
+Body tile's unit toggle behind it, and then a whole set of 32-40px controls
+that read fine with a mouse and sit under Apple's 44px minimum with a thumb.
+
+tools/touch-check.js now drives a real touch context and measures every
+control, on every tab of every tile. It found 18 the first time it ran - the
+split buttons, every segmented control, the Lists tabs, the exercise pickers,
+the Lists "Repeats every day" row at 22px, and the Body unit toggle. All were
+live on his phone.
+
+The fixes are scoped to @media (pointer: coarse) so the desktop layout keeps
+its density. Two things learned doing it:
+
+A MEDIA QUERY ADDS NO SPECIFICITY. The first version of Lifting's block sat
+high in the sheet, so .splitBtn{min-height:40px} further down won on source
+order and the split buttons silently stayed at 40 while everything around them
+grew. The block is last in the file now, with a comment saying why.
+
+GROW THE HIT AREA, NOT ALWAYS THE CONTROL. The Check in switch is 56x32, which
+is the familiar size for a switch and worth keeping. Its ::after is padded 6px
+top and bottom instead, so it looks identical and measures 44. The check reads
+the padded box rather than the border box, or it would have flagged a control
+that is genuinely fine.
+
+The check also knows what NOT to flag: an input inside a label is tapped
+through the label, and a label with no control inside is a caption pointing at
+a field, not a target. Measuring those produced four false positives on the
+first run, and there is a Recovery caption at 145x11 that is not a bug.

@@ -4,9 +4,10 @@
   "description": "Playwright, for actually looking at the board. Scoped to this folder on purpose - the board itself stays zero-build. node_modules here is gitignored like anywhere else in the repo.",
   "scripts": {
     "install-browser": "playwright install chromium",
-    "check": "node visual-check.js && node collision-check.js",
+    "check": "node visual-check.js && node collision-check.js && node touch-check.js",
     "check:paint": "node visual-check.js",
-    "check:collision": "node collision-check.js"
+    "check:collision": "node collision-check.js",
+    "check:touch": "node touch-check.js"
   },
   "dependencies": {
     "playwright": "1.62.1"

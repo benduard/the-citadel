@@ -896,6 +896,18 @@
     },
 
     report: function (stream) { post('report', { stream: stream }); },
+
+    /**
+     * Ask the host to push a notification when a rest timer runs out, so it
+     * still arrives with the phone locked. Fire and forget, and deliberately
+     * so: the countdown on screen is the real timer, this is only the backup
+     * that survives the page being closed.
+     *
+     * A host that has never heard of this - the hosted Vitality board - simply
+     * ignores the message, and the timer behaves exactly as it always did.
+     * That is why this is safe to add to a shared tile file.
+     */
+    restTimer: function (seconds, label) { post('restTimer', { seconds: seconds, label: label }); },
     onWriteError: function (fn) { writeErrorHandlers.push(fn); }
   };
 })();
@@ -3191,7 +3203,11 @@
 
   function startRest(){
     stopRest();
-    var secs = restFor($('fEx') ? $('fEx').value : '');
+    var ex = $('fEx') ? $('fEx').value : '';
+    var secs = restFor(ex);
+    // The backup that survives a locked phone. Guarded only on the function
+    // existing, so an older host - or the hosted board - is simply unaffected.
+    if (window.Vitality && Vitality.restTimer) Vitality.restTimer(secs, ex || null);
     restTotal = secs;
     restLeft = secs;
     $('restBox').hidden = false;

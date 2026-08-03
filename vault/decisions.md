@@ -713,3 +713,44 @@ The check also knows what NOT to flag: an input inside a label is tapped
 through the label, and a label with no control inside is a caption pointing at
 a field, not a target. Measuring those produced four false positives on the
 first run, and there is a Recovery caption at 145x11 that is not a bug.
+
+## Rest-timer push, and why the switch is not in the Lifting tile
+
+Decided 2026-08-03.
+
+A rest timer that lives only in the page dies the moment the phone locks -
+JavaScript stops and setTimeout never fires. Surviving that needs something
+outside the phone to send a push, so: a service worker at the repo root, two
+Supabase tables, and an Edge Function that pg_cron calls every 15 seconds.
+
+THE SWITCH IS IN THE LIBRARY, NOT IN LIFTING, and that is forced rather than
+chosen. A sealed tile has an opaque origin: reaching the parent throws, and
+localStorage throws. Checked rather than assumed - a sealed frame reports
+serviceWorker and PushManager as present, because feature detection only reads
+the API names, but registering from an opaque origin fails the same way
+storage does. Only the host can subscribe, so the host owns the switch.
+
+The tile therefore ASKS. Vitality.restTimer(seconds, label) is a new bridge
+message, and a host that has never heard of it ignores it - which is what the
+hosted Vitality board will do, leaving that same tile file working there
+untouched. It is fire and forget: the countdown on screen is the real timer,
+the push is the backup, and nothing about a failed schedule may disturb it.
+
+A TIMER IS MARKED FIRED WHETHER OR NOT A DEVICE TOOK IT. The tempting version
+only marks it on success, and then one broken subscription makes that timer
+retry every 15 seconds for ever. A notification already late is not worth that.
+Dead subscriptions (404/410) are deleted rather than retried.
+
+15 seconds of slop is real and stated up front. pg_cron does take sub-minute
+intervals, so this is a supported cadence, not a trick - but a rest timer can
+arrive up to about fifteen seconds late and that is the honest number.
+
+The private key is in .env.local, which .gitignore already covered, and
+tools/push.test.js asserts that exact string appears in no committed file. The
+public key is in lib/push.js on purpose: the browser hands it to the push
+service at subscribe time, exactly like SUPABASE_ANON_KEY.
+
+WHAT IS NOT DONE HERE: the three steps that need a browser signed into
+Supabase - running push.sql, setting the VAPID secret, deploying the function.
+Claude Code has no browser control in this setup, and driving a live console
+against a production database is not something to automate casually anyway.

@@ -693,6 +693,11 @@ body {
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="lib/supabase-config.js"></script>
 <script src="lib/vault-remote.js"></script>
+<!-- Rest-timer push. After vault-remote, because turning it on writes the
+     subscription straight into the vault. It registers nothing and asks for
+     nothing on load - everything in it runs from an explicit tap in the
+     Library's account panel. -->
+<script src="lib/push.js"></script>
 
 <script>
 // ── The host contract. Host present, it uses the dashboard's store. No host,

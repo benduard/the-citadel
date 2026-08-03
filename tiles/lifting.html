@@ -16,7 +16,10 @@
       unit: "kg" | "lb",              // DISPLAY only, see below
       bw: <number|null>,              // bodyweight, KG always. rank maths only
       weekTarget: <number>,           // sessions a week that keep a streak alive
-      rest: <number>,                 // rest timer default, seconds
+      rest: <number>,                 // rest timer, seconds, when restAuto is false
+      restAuto: <boolean>,            // true: rest length follows the exercise
+                                      //   (REST_TIERS). Missing on an older
+                                      //   blob and treated as true.
       days:     { "YYYY-MM-DD": [ { id, ex, kg, reps, rpe, note } ] },
       notes:    { "YYYY-MM-DD": "session note" },
       routines: [ { id, name, items: [ { ex, sets, reps, kg } ] } ],
@@ -755,10 +758,15 @@
           <label class="fl grow"><span>Sessions a week that keep it</span>
             <input id="fTarget" type="number" inputmode="numeric" min="1" max="7" step="1" disabled>
           </label>
-          <label class="fl grow"><span>Rest timer (seconds)</span>
+          <label class="fl grow" id="fRestWrap"><span>Rest timer (seconds)</span>
             <input id="fRest" type="number" inputmode="numeric" min="10" max="600" step="5" disabled>
           </label>
         </div>
+        <div class="seg" id="restModeSeg" style="margin-top:12px">
+          <button type="button" data-restmode="auto" aria-pressed="true">Rest follows the exercise</button>
+          <button type="button" data-restmode="fixed" aria-pressed="false">One fixed rest</button>
+        </div>
+        <p class="note" id="restNote" style="margin-top:8px"></p>
       </div>
 
       <div class="card">
@@ -1176,7 +1184,7 @@
 
   /* ============================ state ============================ */
   var S = {
-    v:2, unit:'kg', bw:null, weekTarget:3, rest:120,
+    v:2, unit:'kg', bw:null, weekTarget:3, rest:120, restAuto:true,
     days:{}, notes:{}, routines:[], custom:[], claimed:{}, lvlSeen:1, rankSeen:{},
     splits:{}, routineToday:{}
   };
@@ -1875,6 +1883,7 @@
 
   function renderLast(){
     updateWeightLabel();
+    updateRestLabel();
     var box = $('lastTime');
     if (!box) return;
     var ex = $('fEx').value;
@@ -2884,6 +2893,20 @@
     if ($('fTarget') !== document.activeElement) $('fTarget').value = S.weekTarget;
     if ($('fRest') !== document.activeElement) $('fRest').value = S.rest;
 
+    var rm = document.querySelectorAll('[data-restmode]');
+    for (var rq = 0; rq < rm.length; rq++){
+      rm[rq].setAttribute('aria-pressed',
+        (rm[rq].getAttribute('data-restmode') === 'auto') === !!S.restAuto ? 'true' : 'false');
+    }
+    // The fixed number is only shown when it is the one actually in use, so
+    // there is never a stale seconds box implying it governs anything.
+    $('fRestWrap').hidden = !!S.restAuto;
+    $('restNote').textContent = S.restAuto
+      ? 'Heavy compounds rest ' + fmtRest(REST_TIERS.heavy) + ', other compounds ' +
+        fmtRest(REST_TIERS.compound) + ', isolation ' + fmtRest(REST_TIERS.isolation) +
+        '. The Rest button on the log form always says which one the picked exercise gets.'
+      : 'Every exercise rests the same. Switch back to follow the exercise and heavy lifts get longer on their own.';
+
     var st = streakWeeks();
     var wk = weekStats(weekKey(today()));
     $('streakNote').textContent = sortedDays().length
@@ -2953,10 +2976,80 @@
   }
 
   /* ============================ rest timer ============================ */
+  /**
+   * HOW LONG TO REST, BY EXERCISE.
+   *
+   * Three tiers, because three is what the evidence actually separates:
+   *
+   *   300s  Heavy multi-joint barbell work - squat, deadlift, bench, overhead
+   *         press, heavy rows. These are limited by systemic and central
+   *         fatigue, not just by the muscle, so a short rest costs reps on the
+   *         next set outright. Reviews of maximal multi-joint work land on a
+   *         3-5 minute range; this takes the top of it.
+   *   180s  Other multi-joint work - machine and dumbbell presses, pulldowns,
+   *         rows, lunges, leg press, dips. Real compound demand, far less
+   *         whole-body cost. Three minutes rather than one because the trained
+   *         -lifter work comparing them found 3 min beat 1 min on BOTH
+   *         strength and size; the short rest only ever saved time.
+   *   120s  Single-joint isolation - curls, extensions, raises, calves, abs,
+   *         neck. Local fatigue only, and it clears quickly. Shorter would be
+   *         defensible; two minutes is the cautious end of the range.
+   *
+   * WHERE THE TIER COMES FROM. `w` is the per-exercise weight the rank maths
+   * already carries and it already encodes roughly how big a lift is, so the
+   * tier is read from it rather than from a fourth hand-kept column that could
+   * drift out of step. But `w` was calibrated for RANKING, not for fatigue,
+   * and it gets a handful wrong. Those are named below rather than ignored.
+   *
+   * THIS IS A DEFAULT, NOT A LAW. Profile switches rest back to one fixed
+   * number, and that number is left exactly where it was.
+   */
+  var REST_TIERS = { heavy: 300, compound: 180, isolation: 120 };
+  var REST_OVERRIDE = {
+    'Leg Press':            REST_TIERS.compound, // w:1, but genuinely multi-joint
+    'Walking Lunge':        REST_TIERS.compound, // w:1, both legs, loaded
+    'Goblet Squat':         REST_TIERS.compound, // w:1, still a squat
+    'Front Squat':          REST_TIERS.heavy,    // w:2, but a maximal barbell squat
+    'Romanian Deadlift':    REST_TIERS.heavy,    // w:2, but a heavily loaded hinge
+    'Incline Barbell Press': REST_TIERS.heavy,   // w:2, but a maximal barbell press
+    'Pendlay Row':          REST_TIERS.heavy     // w:2, but a heavy row from the floor
+  };
+
+  function restFor(name){
+    if (!S.restAuto) return S.rest;
+    if (REST_OVERRIDE[name]) return REST_OVERRIDE[name];
+    var e = findEx(name);
+    // Nothing picked, or a custom lift that no longer resolves: fall back to
+    // his own number rather than guessing a tier for a lift we cannot see.
+    if (!e) return S.rest;
+    if (e.w >= 3) return REST_TIERS.heavy;
+    if (e.w >= 2) return REST_TIERS.compound;
+    return REST_TIERS.isolation;
+  }
+  function restWhy(name){
+    if (!S.restAuto) return 'One fixed rest for every exercise.';
+    var s = restFor(name);
+    if (s === REST_TIERS.heavy)    return 'Heavy compound. The long rest is the point.';
+    if (s === REST_TIERS.compound) return 'Compound lift.';
+    return 'Isolation work.';
+  }
+  function fmtRest(s){ return Math.floor(s / 60) + ':' + pad(s % 60); }
+
+  // The Rest button says how long it will run, so a five minute timer on a
+  // squat is never a surprise after tapping it.
+  function updateRestLabel(){
+    var b = $('bRest');
+    if (!b) return;
+    var ex = $('fEx') ? $('fEx').value : '';
+    b.textContent = 'Rest ' + fmtRest(restFor(ex));
+    b.title = restWhy(ex);
+  }
+
   function startRest(){
     stopRest();
-    restTotal = S.rest;
-    restLeft = S.rest;
+    var secs = restFor($('fEx') ? $('fEx').value : '');
+    restTotal = secs;
+    restLeft = secs;
     $('restBox').hidden = false;
     $('restBox').classList.remove('done');
     tickRest();
@@ -3146,6 +3239,13 @@
         return;
       }
       if (t === $('bLog')) { logSet(); return; }
+      if ((a = t.getAttribute('data-restmode'))) {
+        S.restAuto = (a === 'auto');
+        persist();
+        updateRestLabel();
+        render();
+        return;
+      }
       if (t === $('bRest')) { startRest(); return; }
       if (t === $('bRestStop')) { stopRest(); return; }
 
@@ -3360,6 +3460,11 @@
         S.bw = typeof d.bw === 'number' ? d.bw : null;
         S.weekTarget = d.weekTarget || 3;
         S.rest = d.rest || 120;
+        // Added 2026-08-01. A blob saved before it has no restAuto key, and
+        // gets the new per-exercise behaviour - which is the point of adding
+        // it. His own fixed number is kept above, untouched, so switching back
+        // to Fixed restores exactly what he had.
+        S.restAuto = d.restAuto !== false;
         S.days = d.days || {};
         S.notes = d.notes || {};
         S.routines = d.routines || [];

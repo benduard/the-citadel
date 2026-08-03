@@ -13,6 +13,7 @@ node tiles/lifting.unilateral.test.js
 node tiles/lifting.grouping.test.js
 node tiles/lifting.suggest.test.js
 node tiles/lifting.bodymap.test.js
+node tiles/lifting.rest.test.js
 node tiles/lists.test.js
 node tiles/lists.calendar.test.js
 echo "All suites passed."

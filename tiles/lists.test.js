@@ -191,5 +191,27 @@ check('grocery and projects never roll',
   sandbox.listById('grocery').roll === null && sandbox.listById('projects').roll === null)
 check('every list explains itself on screen', sandbox.LISTS.every(l => l.why && l.why.length > 20))
 
+// ── 11. habits are split out from the day's own work ──────────────────────
+console.log('\n[11] repeating items get their own section, below the day\'s work')
+check('the section exists in the markup', /id="repWrapList"/.test(src))
+check('the split is by the repeat flag',
+  /open\.filter\(function\(x\)\{ return !x\.repeat; \}\)/.test(src) &&
+  /open\.filter\(function\(x\)\{ return x\.repeat; \}\)/.test(src))
+check('one-offs render into the FIRST list, habits into the second',
+  src.indexOf('id="openList"') < src.indexOf('id="repWrapList"'))
+check('only lists that can repeat get the split',
+  /if \(L\.repeatable\)\{\s*\n\s*oneOff = open\.filter/.test(src))
+check('a list with no habits hides the section entirely',
+  /rw\.hidden = !repeating\.length/.test(src))
+check('the daily wording says every morning, the weekly says every Monday',
+  /come back every morning/.test(src) && /come back every Monday/.test(src))
+// The trap: an empty one-off list with habits still open must not read as
+// "nothing to do", because there plainly is something to do just below it.
+check('an empty day with habits left does not claim there is nothing to do',
+  /Nothing just for today\. The standing ones are below\./.test(src))
+check('nothing is dropped - every open item lands in one of the two lists',
+  /oneOff\.forEach\(function\(x\)\{ openEl\.appendChild/.test(src) &&
+  /repeating\.forEach\(function\(x\)\{ rl2\.appendChild/.test(src))
+
 console.log(`\n${fails} failure(s)`)
 process.exit(fails ? 1 : 0)

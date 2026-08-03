@@ -641,3 +641,41 @@ lib/rank.js. That reads the LEDGER, which is one shape for every tile
 (key, value, date, source) - teaching it about deload weeks would mean widening
 that shape for one tile's concept. Not worth it, so the rank still reads a
 deload as a quiet week. Said plainly here rather than half-built.
+
+## The close button clears the notch, and habits sit apart from the day
+
+Decided 2026-08-03.
+
+THE CLOSE BUTTON. Reported from a real iPhone: it overlapped the status bar and
+was hard to hit. Two causes. It was 36px, under Apple's 44px minimum, and it
+was positioned at a bare top:14px while index.html ships viewport-fit=cover
+with a black-translucent status bar - so the overlay genuinely runs underneath
+the clock and battery. It is 46px now.
+
+The inset went on the OVERLAY, not only on the button, and the reason is worth
+keeping. The button is position:fixed, so it measures from the viewport, not
+from the frame. Pushing only the button down by the notch would have driven it
+into the tile's content instead of lining it up with the tile's header - a
+different bug wearing the same fix. Padding .vPage moves the frame's top edge
+instead, so inside the frame the geometry is identical to desktop, which is the
+arrangement collision-check.js already proves has a clear lane at every width.
+It also does not depend on env() resolving inside a sealed iframe, which is not
+a thing this repo can test.
+
+NONE OF THIS IS VERIFIABLE HERE, and that is stated in host.js next to the
+code. Headless Chromium has no notch, so env(safe-area-inset-top) is 0 in every
+check we can run and the button measures 12px from the top. The calc is
+confirmed valid (it computes to 12, not to auto) and the size is asserted in
+lib/shell.test.js, but the real inset only exists on the device.
+
+HABITS VS THE DAY'S WORK. Daily mixed two different jobs into one list. A
+one-off is today's actual work and changes every day; a repeating item is a
+habit that returns on its own. Mixed together, the habits sit there every
+morning making a short day look long, and the things genuinely due today get
+buried under them. The day's own work leads now, and standing habits get their
+own section beneath it. Only lists that can repeat get the split - an empty
+second heading on Grocery is just furniture.
+
+One trap worth naming: the empty state. With the one-off list empty but habits
+still open, "Nothing open" would have been a lie with the answer visible three
+lines below it. It reads "Nothing just for today. The standing ones are below."

@@ -182,6 +182,7 @@
   .tab .c{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10px; opacity:.75; margin-left:5px; }
 
   .why{ font-size:12px; color:var(--muted); line-height:1.5; margin:0 0 12px; }
+  .repNote{ font-size:11.5px; color:var(--faint); line-height:1.5; margin:0 0 4px; }
 
   .addRow{ display:flex; gap:8px; margin-bottom:8px; }
   .addRow input{
@@ -372,6 +373,11 @@
     </label>
 
     <div class="list" id="openList"></div>
+    <div id="repWrapList" hidden>
+      <div class="secLabel"><span id="repLabel">Every day</span><span class="c" id="repCount"></span></div>
+      <p class="repNote" id="repWhy"></p>
+      <div class="list" id="repList"></div>
+    </div>
     <div id="doneWrap" hidden>
       <div class="secLabel"><span>Done</span><button type="button" id="clearDone">Clear finished</button></div>
       <div class="list" id="doneList"></div>
@@ -1228,17 +1234,50 @@
     repWrap.hidden = !L.repeatable;
     if (!L.repeatable) document.getElementById('repeats').checked = false;
 
+    /* THE TWO KINDS OF OPEN ITEM ARE NOT THE SAME JOB.
+       A one-off is today's actual work and it changes every day. A repeating
+       item is a habit that comes back on its own no matter what today holds.
+       Mixed into one list, the habits sit there every morning making a short
+       day look long, and the things that are genuinely today's get buried
+       under them. So the day's own work leads, and the standing habits get
+       their own section underneath it.
+       Only lists that repeat get the split - Grocery has no habits in it, and
+       an empty second heading is just furniture. */
+    var oneOff = open, repeating = [];
+    if (L.repeatable){
+      oneOff = open.filter(function(x){ return !x.repeat; });
+      repeating = open.filter(function(x){ return x.repeat; });
+    }
+
     var openEl = document.getElementById('openList');
     openEl.innerHTML = '';
-    if (!open.length){
+    if (!oneOff.length){
       var e = document.createElement('div');
       e.className = 'empty';
-      e.textContent = done.length
-        ? (L.roll ? 'Nothing open. What is finished clears on its own.' : 'Nothing open. Clear the finished ones when you are ready.')
-        : 'Nothing here yet. Add the first one above.';
+      // The empty line has to know about the habits below it, or a day with
+      // five habits still open would read as "nothing to do".
+      e.textContent = repeating.length
+        ? 'Nothing just for today. The standing ones are below.'
+        : (done.length
+            ? (L.roll ? 'Nothing open. What is finished clears on its own.' : 'Nothing open. Clear the finished ones when you are ready.')
+            : 'Nothing here yet. Add the first one above.');
       openEl.appendChild(e);
     } else {
-      open.forEach(function(x){ openEl.appendChild(renderItem(x, L, false)); });
+      oneOff.forEach(function(x){ openEl.appendChild(renderItem(x, L, false)); });
+    }
+
+    var rw = document.getElementById('repWrapList');
+    rw.hidden = !repeating.length;
+    if (repeating.length){
+      var weekly = L.roll === 'week';
+      document.getElementById('repLabel').textContent = weekly ? 'Every week' : 'Every day';
+      document.getElementById('repCount').textContent = repeating.length;
+      document.getElementById('repWhy').textContent = weekly
+        ? 'These come back every Monday. Ticking one keeps the record; it unchecks itself when the week turns.'
+        : 'These come back every morning. Ticking one keeps the record; it unchecks itself overnight.';
+      var rl2 = document.getElementById('repList');
+      rl2.innerHTML = '';
+      repeating.forEach(function(x){ rl2.appendChild(renderItem(x, L, false)); });
     }
 
     var dw = document.getElementById('doneWrap');

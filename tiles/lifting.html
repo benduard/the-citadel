@@ -27,8 +27,9 @@
       claimed:  { "<weekKey>:<questId>": true },
       lvlSeen:  <number>,             // last level celebrated, so it fires once
       rankSeen: { "<exercise name>": <rank index 0-26> },
-      splits:   { "YYYY-MM-DD": "legs" | "push" | "pull" },
-      routineToday: { "YYYY-MM-DD": "<routine id>" }
+      splits:   { "YYYY-MM-DD": "legs" | "push" | "pull" | "neck" },
+      routineToday: { "YYYY-MM-DD": "<routine id>" },
+      deloads:  { "<weekKey, the Monday>": true }   // weeks gone light on purpose
     }
 
   splits is which of SPLITS was chosen for a given day. Per day, not one sticky
@@ -353,6 +354,11 @@
   .ltRow.now .n{ color:var(--volt); }
   .ltRow.now .w{ color:var(--volt); }
   .lt .ltNote{ padding:8px 11px; font-size:11px; color:var(--muted); line-height:1.45; }
+  /* Mint: this is the good news line, and it is the only place in the panel
+     that earns a colour. Not amber - being ready for more weight is not a
+     caution. */
+  .lt .ltNote.prog{ color:var(--mint); border-top:1px solid rgba(110,231,183,.18);
+                    background:rgba(110,231,183,.05); }
   .lt .btn{ padding:4px 9px; font-size:11px; }
 
   .scrollx{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
@@ -591,6 +597,14 @@
       </div>
 
       <div data-wtab-body="routines">
+        <div class="card">
+          <h3>This week</h3>
+          <p class="note" id="deloadNote"></p>
+          <div class="seg" id="deloadSeg">
+            <button type="button" data-deload="0" aria-pressed="true">Normal week</button>
+            <button type="button" data-deload="1" aria-pressed="false">Deload week</button>
+          </div>
+        </div>
         <div class="card">
           <h3>Plans</h3>
           <p class="note">Written by hand, not generated in the app. There is no AI key in here and there never will be. Ask in Claude Code for a plan built round your numbers and it gets added to this list.</p>
@@ -1140,6 +1154,18 @@
   // Plans are written by hand, here, and shipped with the tile. There is no
   // model in this file and there never will be: no AI key in the app, ever.
   var PLANS = [
+    // Ruben's own split, first in the list because it is the one he actually
+    // runs. Written from the machines he told us he uses on 2026-08-01, so
+    // loading it produces routines he can follow without substituting
+    // anything. Neck is its own short routine rather than tacked onto a day,
+    // the same way it is its own section in the picker.
+    { id:'ruben3', name:'Your split, 3 days', why:'Legs, then chest and shoulders with abs, then back and arms. Built from the machines you actually use.',
+      routines:[
+        { name:'Legs', items:[['Back Squat',4,5,0],['Hack Squat',3,8,0],['Romanian Deadlift',3,8,0],['Lying Hamstring Curl',3,10,0],['Leg Extension',3,12,0],['Adductor/Abductor Machine',3,15,0],['Standing Calf Raise',4,12,0],['Seated Calf Raise',3,15,0]] },
+        { name:'Chest & Shoulders + Abs', items:[['Barbell Bench Press',4,5,0],['Incline Plate-Loaded Machine Press',3,8,0],['Plate-Loaded Machine Shoulder Press',3,8,0],['Chest Fly Machine',3,12,0],['Seated Machine Lateral Raise',4,15,0],['Hanging Leg Raise',3,12,0],['Weighted Crunch',3,15,0]] },
+        { name:'Back & Arms', items:[['Deadlift',3,4,0],['Lat Pulldown',4,10,0],['Chest Supported T-Bar Row',3,10,0],['Seated Cable Row',3,10,0],['Rear Delt Fly Machine',3,15,0],['Machine Preacher Curl',3,10,0],['Incline Dumbbell Curl',3,12,0],['Dip',3,8,0],['Rope Triceps Pushdown',3,12,0]] },
+        { name:'Neck', items:[['Weighted Neck Curl',3,15,0],['Weighted Neck Extension',3,15,0],['Weighted Side Neck Curl',3,15,0]] }
+      ] },
     { id:'ul4', name:'Upper lower, 4 days', why:'The default for someone who can train four times a week and wants every lift moving.',
       routines:[
         { name:'Upper A', items:[['Barbell Bench Press',4,5,0],['Barbell Row',4,6,0],['Overhead Press',3,8,0],['Lat Pulldown',3,10,0],['Barbell Curl',3,10,0],['Cable Triceps Pushdown',3,12,0]] },
@@ -1186,7 +1212,7 @@
   var S = {
     v:2, unit:'kg', bw:null, weekTarget:3, rest:120, restAuto:true,
     days:{}, notes:{}, routines:[], custom:[], claimed:{}, lvlSeen:1, rankSeen:{},
-    splits:{}, routineToday:{}
+    splits:{}, routineToday:{}, deloads:{}
   };
   var loaded = false;
   var trouble = '';
@@ -1742,6 +1768,63 @@
      Two sessions on one calendar day read as one day - that is what a date key
      means here, and inventing a session boundary inside a day would be
      guessing at something never recorded. */
+  /* ---- deload weeks ----
+     A week you deliberately went light. The app cannot know intent, so this is
+     set by hand and never inferred: a light week and a bad week look identical
+     in a log, and guessing which one it was would put a made-up fact into the
+     progression maths. */
+  function isDeloadWeek(k){ return !!S.deloads[weekKey(k)]; }
+
+  /**
+   * READY TO ADD WEIGHT?
+   *
+   * The signal is a plateau on load with no regression in reps: the same top
+   * set weight three sessions running, with the newest session's reps at that
+   * weight at least matching the oldest. That is a lift that has stopped
+   * being challenging, which is the honest moment to put more on it.
+   *
+   * DELIBERATELY NOT A REP TARGET. A rep range only exists when a routine
+   * supplies one, and picking a number out of the air - "8 is the top of your
+   * range" - would be inventing a fact about how he trains. Three sessions of
+   * no movement on load is observable from the log by itself.
+   *
+   * Deload weeks are skipped outright. Light weight there was the plan, so
+   * counting it would both break a real streak and, worse, tell him to add
+   * weight in a week meant to be easy.
+   *
+   * It only ever suggests. Nothing here writes a set or changes a routine.
+   */
+  function progressionFor(name){
+    if (!name) return null;
+    var k = today();
+    var keys = sortedDays().filter(function(d){
+      if (d >= k || isDeloadWeek(d)) return false;
+      return (S.days[d] || []).some(function(s){ return s.ex === name; });
+    });
+    if (keys.length < 3) return null;
+
+    var last3 = keys.slice(-3);              // oldest to newest of the three
+    var tops = last3.map(function(d){
+      var sets = S.days[d].filter(function(s){ return s.ex === name; });
+      var w = 0, reps = 0;
+      sets.forEach(function(s){ if (s.kg > w) w = s.kg; });
+      sets.forEach(function(s){ if (s.kg === w && s.reps > reps) reps = s.reps; });
+      return { day: d, kg: w, reps: reps };
+    });
+
+    var w0 = tops[0].kg;
+    if (!w0) return null;                                   // bodyweight only, nothing to load
+    for (var i = 1; i < tops.length; i++){
+      if (tops[i].kg !== w0) return null;                   // the weight is already moving
+    }
+    if (tops[2].reps < tops[0].reps) return null;           // going backwards, not plateaued
+
+    var e = findEx(name);
+    // Real plate jumps rather than a percentage that lands on 3.7kg.
+    var step = (e && e.w >= 3) ? 5 : 2.5;
+    return { kg: w0, step: step, reps: tops[2].reps, days: last3 };
+  }
+
   function prevSessionFor(ex){
     if (!ex) return null;
     var k = today();
@@ -1927,6 +2010,16 @@
           ? 'Set ' + (done.length + 1) + ' is past last time’s ' + prev.sets.length + '. Extra volume, nothing to match.'
           : 'That is every set from last time. Anything more is new ground.') +
         '</div>';
+    }
+
+    // A suggestion, never an instruction: it does not prefill the weight box
+    // or touch a routine, the same law the "Try X" exercise hint follows.
+    var prog = progressionFor(ex);
+    if (prog){
+      html += '<div class="ltNote prog">Three sessions now at ' + esc(showW(prog.kg)) + ' ' +
+        esc(unitLabel()) + ', last one for ' + prog.reps +
+        (prog.reps === 1 ? ' rep' : ' reps') + '. Ready for ' +
+        esc(showW(prog.kg + prog.step)) + ' ' + esc(unitLabel()) + '?</div>';
     }
 
     box.innerHTML = html + '</div>';
@@ -2336,6 +2429,16 @@
     // when it is the tab actually on screen.
     if (wtab === 'bodymap') renderBodyMap();
 
+    var thisWeekDeload = isDeloadWeek(today());
+    var dsb = document.querySelectorAll('[data-deload]');
+    for (var dq = 0; dq < dsb.length; dq++){
+      dsb[dq].setAttribute('aria-pressed',
+        (dsb[dq].getAttribute('data-deload') === '1') === thisWeekDeload ? 'true' : 'false');
+    }
+    $('deloadNote').textContent = thisWeekDeload
+      ? 'Marked as a deload. Nothing logged this week counts toward "ready for more weight", so a light week on purpose does not read as a stall.'
+      : 'Going light on purpose this week? Mark it, and it stops counting toward "ready for more weight" - the app cannot tell a planned easy week from a bad one, so it never guesses.';
+
     // plans
     var pl = $('planList');
     pl.innerHTML = '';
@@ -2406,6 +2509,23 @@
         l2.textContent = it.sets + ' x ' + it.reps + (it.kg ? '  ·  ' + showW(it.kg) + ' ' + unitLabel() : '');
         d.appendChild(l1); d.appendChild(l2);
         li.appendChild(d);
+        // Order is the order you do them in, so it has to be editable. Plain
+        // up/down rather than drag: this list lives in a sealed iframe on a
+        // phone, where a drag fights the page scroll.
+        var up = document.createElement('button');
+        up.className = 'btn small ghost'; up.type = 'button';
+        up.setAttribute('data-iup', String(idx));
+        up.setAttribute('aria-label', 'Move ' + it.ex + ' up');
+        up.textContent = '↑';
+        up.disabled = idx === 0;
+        li.appendChild(up);
+        var dn = document.createElement('button');
+        dn.className = 'btn small ghost'; dn.type = 'button';
+        dn.setAttribute('data-idown', String(idx));
+        dn.setAttribute('aria-label', 'Move ' + it.ex + ' down');
+        dn.textContent = '↓';
+        dn.disabled = idx === r.items.length - 1;
+        li.appendChild(dn);
         var x = document.createElement('button');
         x.className = 'btn small ghost'; x.type = 'button';
         x.setAttribute('data-idel', String(idx)); x.textContent = 'Remove';
@@ -3239,6 +3359,13 @@
         return;
       }
       if (t === $('bLog')) { logSet(); return; }
+      if ((a = t.getAttribute('data-deload'))) {
+        var wk = weekKey(today());
+        if (a === '1') S.deloads[wk] = true;
+        else delete S.deloads[wk];   // deleted, not set false, so the blob stays small
+        persist();
+        return;
+      }
       if ((a = t.getAttribute('data-restmode'))) {
         S.restAuto = (a === 'auto');
         persist();
@@ -3327,6 +3454,20 @@
       if ((a = t.getAttribute('data-idel'))) {
         var rr = S.routines.filter(function(x){ return x.id === editRoutine; })[0];
         if (rr) rr.items.splice(parseInt(a, 10), 1);
+        persist();
+        return;
+      }
+      // Reorder: a plain index swap. persist() re-renders, so the list redraws
+      // with the buttons re-disabled at whichever ends they now sit at.
+      if ((a = t.getAttribute('data-iup')) || (a = t.getAttribute('data-idown'))) {
+        var dir = t.hasAttribute('data-iup') ? -1 : 1;
+        var ro = S.routines.filter(function(x){ return x.id === editRoutine; })[0];
+        if (ro) {
+          var i0 = parseInt(a, 10), i1 = i0 + dir;
+          if (i1 >= 0 && i1 < ro.items.length) {
+            var tmp = ro.items[i0]; ro.items[i0] = ro.items[i1]; ro.items[i1] = tmp;
+          }
+        }
         persist();
         return;
       }
@@ -3477,6 +3618,9 @@
         // chosen, and the picker simply opens on Everything.
         S.splits = d.splits || {};
         S.routineToday = d.routineToday || {};
+        // Added 2026-08-01. No key on an older blob simply means no week was
+        // ever marked as a deload, which needs no migration.
+        S.deloads = d.deloads || {};
       } else if (d.days){
         // A v1 blob. Ruben asked for a clean start on 2026-07-30, so only the
         // display unit carries over and the log begins empty.

@@ -605,3 +605,39 @@ with nothing logged, all sixteen muscles took the amber "you skipped this"
 outline and the whole figure read as a warning about nothing. Amber is caution,
 and caution is only honest once there is training to compare against. An empty
 log now draws neutral.
+
+## Rest follows the lift, and progression is suggested from a plateau
+
+Decided 2026-08-01.
+
+REST. One fixed rest number gave a five rep squat and a set of neck curls the
+same two minutes. It now reads from the exercise: 5:00 heavy barbell compounds,
+3:00 other multi-joint work, 2:00 single-joint isolation. The tiers come from
+what the evidence separates - heavy compounds are limited by systemic fatigue
+rather than by the muscle, and cutting their rest costs reps outright, while
+isolation clears fast. The Rest button says the length before it is tapped.
+
+The tier is derived from `w`, the weight the rank maths already carries, rather
+than a fourth hand-kept column that could drift out of step with the library.
+But `w` was calibrated for RANKING, not fatigue, and gets a handful wrong -
+those are named in REST_OVERRIDE. Two of them, Incline Barbell Press and
+Pendlay Row, were found only because the test walks the entire library and
+asserts a sane tier for every lift; spot-checking the obvious ones missed both.
+
+PROGRESSION. The suggestion fires on a plateau in load with no regression in
+reps: same top-set weight three sessions running, newest reps at least matching
+the oldest. Deliberately NOT a rep target - a rep range only exists when a
+routine supplies one, and asserting "8 is the top of your range" would be
+inventing a fact about how he trains. Three sessions of no movement on load is
+observable from the log by itself.
+
+DELOAD is set by hand and never inferred. A planned light week and a bad week
+are identical in a log, and guessing between them would feed a made-up fact
+into the progression maths. A marked week stops counting toward "ready for more
+weight".
+
+What deload does NOT do, and why: it does not reach the board-wide rank in
+lib/rank.js. That reads the LEDGER, which is one shape for every tile
+(key, value, date, source) - teaching it about deload weeks would mean widening
+that shape for one tile's concept. Not worth it, so the rank still reads a
+deload as a quiet week. Said plainly here rather than half-built.

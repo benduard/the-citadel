@@ -3087,8 +3087,8 @@
     // there is never a stale seconds box implying it governs anything.
     $('fRestWrap').hidden = !!S.restAuto;
     $('restNote').textContent = S.restAuto
-      ? 'Heavy compounds rest ' + fmtRest(REST_TIERS.heavy) + ', other compounds ' +
-        fmtRest(REST_TIERS.compound) + ', isolation ' + fmtRest(REST_TIERS.isolation) +
+      ? 'Multi-joint lifts rest ' + fmtRest(REST_TIERS.compound) + ', isolation ' +
+        fmtRest(REST_TIERS.isolation) +
         '. The Rest button on the log form always says which one the picked exercise gets.'
       : 'Every exercise rests the same. Switch back to follow the exercise and heavy lifts get longer on their own.';
 
@@ -3164,40 +3164,45 @@
   /**
    * HOW LONG TO REST, BY EXERCISE.
    *
-   * Three tiers, because three is what the evidence actually separates:
+   * TWO tiers, set by Ruben on 2026-08-04: nothing rests less than three
+   * minutes, and anything multi-joint rests five.
    *
-   *   300s  Heavy multi-joint barbell work - squat, deadlift, bench, overhead
-   *         press, heavy rows. These are limited by systemic and central
-   *         fatigue, not just by the muscle, so a short rest costs reps on the
-   *         next set outright. Reviews of maximal multi-joint work land on a
-   *         3-5 minute range; this takes the top of it.
-   *   180s  Other multi-joint work - machine and dumbbell presses, pulldowns,
-   *         rows, lunges, leg press, dips. Real compound demand, far less
-   *         whole-body cost. Three minutes rather than one because the trained
-   *         -lifter work comparing them found 3 min beat 1 min on BOTH
-   *         strength and size; the short rest only ever saved time.
-   *   120s  Single-joint isolation - curls, extensions, raises, calves, abs,
-   *         neck. Local fatigue only, and it clears quickly. Shorter would be
-   *         defensible; two minutes is the cautious end of the range.
+   *   300s  Multi-joint work. Every press, squat, hinge, row, pulldown, dip
+   *         and lunge - barbell, dumbbell and machine alike. A flat dumbbell
+   *         press sits here, which is the change he asked for by name: it was
+   *         being treated as a lesser press than the barbell version when the
+   *         demand is the same shape. These lifts are limited by systemic
+   *         fatigue rather than by one muscle, so a short rest costs reps on
+   *         the next set outright.
+   *   180s  Single-joint isolation - curls, extensions, raises, calves, abs,
+   *         neck, flyes. Local fatigue only, and it clears faster. Three
+   *         minutes is more than the evidence demands here; it is the floor he
+   *         wants, and resting longer than necessary costs nothing but time.
+   *
+   * IT USED TO BE THREE TIERS (300/180/120) split heavy / other compound /
+   * isolation. Collapsed because the middle tier no longer exists: everything
+   * that was in it is multi-joint and now rests the full five.
    *
    * WHERE THE TIER COMES FROM. `w` is the per-exercise weight the rank maths
    * already carries and it already encodes roughly how big a lift is, so the
-   * tier is read from it rather than from a fourth hand-kept column that could
-   * drift out of step. But `w` was calibrated for RANKING, not for fatigue,
-   * and it gets a handful wrong. Those are named below rather than ignored.
+   * tier is read from it rather than from a hand-kept column that could drift
+   * out of step with the library. But `w` was calibrated for RANKING, not for
+   * fatigue, and it puts a few genuinely multi-joint lifts at 1. Those are
+   * named below rather than ignored.
    *
    * THIS IS A DEFAULT, NOT A LAW. Profile switches rest back to one fixed
    * number, and that number is left exactly where it was.
    */
-  var REST_TIERS = { heavy: 300, compound: 180, isolation: 120 };
+  var REST_TIERS = { compound: 300, isolation: 180 };
+  // Multi-joint lifts that `w` rates as 1, because w is about how much a lift
+  // is worth to a rank, not about how much it takes out of you. Every entry
+  // here changes the answer; anything that agrees with the rule belongs in the
+  // rule, not in a list that has to be kept in step by hand.
   var REST_OVERRIDE = {
-    'Leg Press':            REST_TIERS.compound, // w:1, but genuinely multi-joint
-    'Walking Lunge':        REST_TIERS.compound, // w:1, both legs, loaded
-    'Goblet Squat':         REST_TIERS.compound, // w:1, still a squat
-    'Front Squat':          REST_TIERS.heavy,    // w:2, but a maximal barbell squat
-    'Romanian Deadlift':    REST_TIERS.heavy,    // w:2, but a heavily loaded hinge
-    'Incline Barbell Press': REST_TIERS.heavy,   // w:2, but a maximal barbell press
-    'Pendlay Row':          REST_TIERS.heavy     // w:2, but a heavy row from the floor
+    'Leg Press':     REST_TIERS.compound, // w:1, but a loaded multi-joint press
+    'Walking Lunge': REST_TIERS.compound, // w:1, both legs, loaded
+    'Goblet Squat':  REST_TIERS.compound, // w:1, still a squat
+    'Push Up':       REST_TIERS.compound  // w:1, but the same joints as a bench
   };
 
   function restFor(name){
@@ -3207,15 +3212,15 @@
     // Nothing picked, or a custom lift that no longer resolves: fall back to
     // his own number rather than guessing a tier for a lift we cannot see.
     if (!e) return S.rest;
-    if (e.w >= 3) return REST_TIERS.heavy;
+    // w >= 2 is every multi-joint lift in the library, checked exercise by
+    // exercise in tiles/lifting.rest.test.js rather than assumed.
     if (e.w >= 2) return REST_TIERS.compound;
     return REST_TIERS.isolation;
   }
   function restWhy(name){
     if (!S.restAuto) return 'One fixed rest for every exercise.';
     var s = restFor(name);
-    if (s === REST_TIERS.heavy)    return 'Heavy compound. The long rest is the point.';
-    if (s === REST_TIERS.compound) return 'Compound lift.';
+    if (s === REST_TIERS.compound) return 'Multi-joint lift. The long rest is the point.';
     return 'Isolation work.';
   }
   function fmtRest(s){ return Math.floor(s / 60) + ':' + pad(s % 60); }

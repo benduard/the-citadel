@@ -961,3 +961,33 @@ clears it.
 The cost of the old behaviour was invisible in every test, because every test
 asserted the gate was THERE. A test can only protect the behaviour someone
 thought to want.
+
+## Rest is two tiers now: five minutes multi-joint, three minutes floor
+
+Set by Ruben, 2026-08-04. Nothing rests under three minutes, and anything
+multi-joint rests five - he named the flat dumbbell press specifically, which
+had been sitting on the middle tier as though it were a lesser press than the
+barbell version when the demand is the same shape.
+
+THE MIDDLE TIER IS GONE RATHER THAN RETUNED. It held "other multi-joint work" -
+machine and dumbbell presses, pulldowns, rows, dips, lunges - and every one of
+those is multi-joint, so under the new rule they all move up and the tier has
+nothing left in it. Keeping an empty tier around would be a number nobody uses
+and everybody has to reason about.
+
+That collapse made four REST_OVERRIDE entries redundant in one stroke: Front
+Squat, Romanian Deadlift, Incline Barbell Press and Pendlay Row were all
+overrides onto the heavy tier from w:2, and w:2 now lands there on its own.
+They were deleted rather than left agreeing with the rule, because an override
+that agrees with the rule is a line somebody has to keep in step by hand for no
+benefit. The test asserts every override actually changes the answer, which is
+what catches the next set.
+
+Push Up was ADDED as an override. It is w:1 - the rank maths does not rate a
+bodyweight press highly - but it presses the same joints as a bench, and the
+rule here is about what the movement asks of you rather than what it is worth
+to a rank.
+
+The whole library was printed and read, not spot-checked: 33 multi-joint at
+5:00, 34 isolation at 3:00, nothing below the floor. Verified in a browser too,
+because the tier only becomes real once the Rest button says it.

@@ -68,38 +68,48 @@ const T = S.REST_TIERS
 
 // ---------------------------------------------------------------------------
 console.log('\n[1] the tiers are the ones asked for')
-check('heavy compounds rest 5 minutes', T.heavy === 300, String(T.heavy))
-check('other compounds rest 3 minutes', T.compound === 180, String(T.compound))
-check('isolation rests 2 minutes', T.isolation === 120, String(T.isolation))
-check('and they are strictly ordered', T.heavy > T.compound && T.compound > T.isolation)
+// Set by Ruben on 2026-08-04: nothing under three minutes, multi-joint gets five.
+check('multi-joint lifts rest 5 minutes', T.compound === 300, String(T.compound))
+check('isolation rests 3 minutes', T.isolation === 180, String(T.isolation))
+check('THE FLOOR: nothing in the whole library rests under 3 minutes',
+  S.LIB.every(e => S.restFor(e.name) >= 180),
+  S.LIB.filter(e => S.restFor(e.name) < 180).map(e => e.name).join(', '))
+check('the old middle tier is gone, not left dangling', T.heavy === undefined)
+check('and the two are ordered', T.compound > T.isolation)
 
-console.log('\n[2] the big barbell lifts get the long rest')
+console.log('\n[2] multi-joint work gets the long rest')
+// Dumbbell Flat Press is named because it is the one he asked for by name -
+// it was on the middle tier, treated as a lesser press than the barbell.
 ;['Back Squat', 'Deadlift', 'Sumo Deadlift', 'Barbell Bench Press', 'Overhead Press',
-  'Barbell Row', 'Front Squat', 'Romanian Deadlift'].forEach(n =>
-  check(`${n} rests ${T.heavy}s`, S.restFor(n) === T.heavy, String(S.restFor(n))))
+  'Barbell Row', 'Front Squat', 'Romanian Deadlift', 'Dumbbell Flat Press',
+  'Incline Dumbbell Press', 'Lat Pulldown', 'Seated Cable Row', 'Dip', 'Hack Squat',
+  'Chest Supported T-Bar Row', 'Plate-Loaded Machine Shoulder Press'].forEach(n =>
+  check(`${n} rests ${T.compound}s`, S.restFor(n) === T.compound, String(S.restFor(n))))
 
-console.log('\n[3] isolation gets the short rest')
+console.log('\n[3] isolation gets the floor, which is now three minutes')
 ;['Barbell Curl', 'Lateral Raise', 'Cable Triceps Pushdown', 'Leg Extension',
   'Seated Calf Raise', 'Rear Delt Fly Machine', 'Standing Forearm Curl',
-  'Weighted Neck Curl', 'Cable Crunch'].forEach(n =>
+  'Weighted Neck Curl', 'Cable Crunch', 'Chest Fly Machine'].forEach(n =>
   check(`${n} rests ${T.isolation}s`, S.restFor(n) === T.isolation, String(S.restFor(n))))
 
 console.log('\n[4] EVERY exercise in the library lands in a sane tier')
-// Anything single-joint must NOT be sitting on a five minute rest, and nothing
-// multi-joint and heavy should be on two minutes. Encoded as the two mistakes
-// that actually matter rather than a full hand-written expectation per lift.
+// The mistake worth catching now is a single-joint lift sitting on the long
+// rest, or a multi-joint one on the short. Named by movement rather than by
+// listing all 67 by hand, so adding an exercise is covered automatically.
 const ISOLATION_WORDS = /curl|raise|extension|fly|pushdown|shrug|crunch|skull|face pull|adductor/i
-const HEAVY_NAMES = /^(Back Squat|Front Squat|Deadlift|Sumo Deadlift|Romanian Deadlift|Barbell Bench Press|Incline Barbell Press|Overhead Press|Barbell Row|Pendlay Row|Pull Up)$/
+const COMPOUND_NAMES = /^(Back Squat|Front Squat|Deadlift|Sumo Deadlift|Romanian Deadlift|Barbell Bench Press|Incline Barbell Press|Dumbbell Flat Press|Overhead Press|Barbell Row|Pendlay Row|Pull Up|Chin Up|Dip|Leg Press|Hack Squat|Pendulum Squat|Lat Pulldown|Seated Cable Row)$/
 let odd = []
 S.LIB.forEach(e => {
   const r = S.restFor(e.name)
-  check(`${e.name} -> ${S.fmtRest(r)}`, r === T.heavy || r === T.compound || r === T.isolation, String(r))
-  // A single-joint movement on the maximum rest is the mistake worth catching.
+  check(`${e.name} -> ${S.fmtRest(r)}`, r === T.compound || r === T.isolation, String(r))
+  // Romanian Deadlift and Leg/Lying Hamstring Curl both match ISOLATION_WORDS
+  // by name while differing in kind - the hinge is multi-joint, the curls are
+  // not - so the hinge is excluded explicitly rather than by a looser regex.
   const looksIsolation = ISOLATION_WORDS.test(e.name) && e.name !== 'Romanian Deadlift'
-  if (looksIsolation && r === T.heavy) odd.push(`${e.name} (isolation on ${r}s)`)
-  if (HEAVY_NAMES.test(e.name) && r !== T.heavy) odd.push(`${e.name} (heavy on ${r}s)`)
+  if (looksIsolation && r === T.compound) odd.push(`${e.name} (isolation on ${r}s)`)
+  if (COMPOUND_NAMES.test(e.name) && r !== T.compound) odd.push(`${e.name} (multi-joint on ${r}s)`)
 })
-check('no single-joint lift is on the 5 minute rest, and no big barbell lift is short',
+check('no single-joint lift is on the 5 minute rest, and no multi-joint lift is short',
   odd.length === 0, odd.join('; '))
 
 console.log('\n[5] the overrides exist because `w` gets them wrong')
@@ -107,17 +117,24 @@ check('Leg Press is w:1 but not treated as isolation',
   S.findEx('Leg Press').w === 1 && S.restFor('Leg Press') === T.compound)
 check('Walking Lunge likewise',
   S.findEx('Walking Lunge').w === 1 && S.restFor('Walking Lunge') === T.compound)
-check('Front Squat is w:2 but gets the heavy rest',
-  S.findEx('Front Squat').w === 2 && S.restFor('Front Squat') === T.heavy)
+check('Push Up is w:1 but presses the same joints as a bench',
+  S.findEx('Push Up').w === 1 && S.restFor('Push Up') === T.compound)
 check('every override names a real exercise, so none is dead weight',
   Object.keys(S.REST_OVERRIDE).every(n => !!S.findEx(n)),
   Object.keys(S.REST_OVERRIDE).filter(n => !S.findEx(n)).join(', '))
+// An override that agrees with the rule is a line someone has to keep in step
+// by hand for no benefit. The old heavy-tier overrides became exactly that
+// when the tiers collapsed, and this is what catches the next ones.
 check('and every override actually changes the answer',
   Object.keys(S.REST_OVERRIDE).every(n => {
     const e = S.findEx(n)
-    const derived = e.w >= 3 ? T.heavy : e.w >= 2 ? T.compound : T.isolation
+    const derived = e.w >= 2 ? T.compound : T.isolation
     return S.REST_OVERRIDE[n] !== derived
-  }))
+  }),
+  Object.keys(S.REST_OVERRIDE).filter(n => {
+    const e = S.findEx(n)
+    return S.REST_OVERRIDE[n] === (e.w >= 2 ? T.compound : T.isolation)
+  }).join(', '))
 
 console.log('\n[6] fixed mode gives back exactly the old behaviour')
 S.S.restAuto = false
@@ -125,7 +142,7 @@ check('a squat uses his own number', S.restFor('Back Squat') === 90, String(S.re
 check('so does a curl', S.restFor('Barbell Curl') === 90)
 check('and the reason says so', /fixed/i.test(S.restWhy('Back Squat')))
 S.S.restAuto = true
-check('switching back restores the tier', S.restFor('Back Squat') === T.heavy)
+check('switching back restores the tier', S.restFor('Back Squat') === T.compound)
 
 console.log('\n[7] nothing picked, or a lift that no longer exists')
 check('empty selection falls back to his number, not a guessed tier',

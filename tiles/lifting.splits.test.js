@@ -30,7 +30,7 @@ const sandbox = { console }
 vm.createContext(sandbox)
 vm.runInContext(`
   var MUSCLES = ${block(/var MUSCLES\s*=/)};
-  var SPLITS = ${block(/var SPLITS\s*=/)};
+  var SCHEMES = ${block(/var SCHEMES\s*=/)};
   var RAW = ${block(/var RAW\s*=/)};
   var RETIRED = ${block(/var RETIRED_EXERCISES\s*=/)};
   function mkEx(r){
@@ -38,10 +38,13 @@ vm.runInContext(`
              pat:r[4], bwf:r[5], w:r[6], lad:r[7], custom:false };
   }
   var LIB = RAW.map(mkEx);
+  // The scheme the board runs by default, and the one his history is stored
+  // under. Everything below that talks about "the split" means this one.
+  var SPLITS = SCHEMES[0].splits;
   function splitById(id){ for (var i=0;i<SPLITS.length;i++) if (SPLITS[i].id===id) return SPLITS[i]; return null; }
 `, sandbox)
 
-const { MUSCLES, SPLITS, LIB, RETIRED } = sandbox
+const { MUSCLES, SCHEMES, SPLITS, LIB, RETIRED } = sandbox
 let fails = 0
 const check = (label, cond, extra) => {
   console.log(`  ${cond ? 'PASS' : 'FAIL'}  ${label}${cond || !extra ? '' : '  -> ' + extra}`)
@@ -55,16 +58,23 @@ check('chest and shoulders + abs', !!sandbox.splitById('push'))
 check('back and arms', !!sandbox.splitById('pull'))
 check('neck, its own always-available section', !!sandbox.splitById('neck'))
 
-console.log('\n[2] THE INVARIANT: every muscle in exactly one split')
+console.log('\n[2] THE INVARIANT: every muscle in exactly one split, in EVERY scheme')
+// Per scheme, not across the file. Push exists in three schemes now and means
+// something slightly different in each, so whole-file uniqueness would be
+// meaningless. What still has to hold is that no scheme drops a muscle (its
+// exercises would vanish from every day of that scheme with no error) and no
+// scheme lists one twice (the same lift turns up on two days).
 const all = Object.keys(MUSCLES)
-const seen = {}
-SPLITS.forEach(s => s.mus.forEach(m => { seen[m] = (seen[m] || 0) + 1 }))
-const missing = all.filter(m => !seen[m])
-const twice = all.filter(m => seen[m] > 1)
-const unknown = Object.keys(seen).filter(m => all.indexOf(m) === -1)
-check('no muscle left out of every split', missing.length === 0, missing.join(', '))
-check('no muscle on two different days', twice.length === 0, twice.join(', '))
-check('no split names a muscle that does not exist', unknown.length === 0, unknown.join(', '))
+SCHEMES.forEach(sc => {
+  const seen = {}
+  sc.splits.forEach(s => s.mus.forEach(m => { seen[m] = (seen[m] || 0) + 1 }))
+  const missing = all.filter(m => !seen[m])
+  const twice = all.filter(m => seen[m] > 1)
+  const unknown = Object.keys(seen).filter(m => all.indexOf(m) === -1)
+  check(`${sc.name}: no muscle left out`, missing.length === 0, missing.join(', '))
+  check(`${sc.name}: no muscle on two days`, twice.length === 0, twice.join(', '))
+  check(`${sc.name}: names no muscle that does not exist`, unknown.length === 0, unknown.join(', '))
+})
 
 console.log('\n[3] every exercise is reachable from some split')
 const orphans = LIB.filter(e => !SPLITS.some(s => s.mus.indexOf(e.pri) !== -1))
@@ -159,6 +169,54 @@ check('so findEx can still resolve sets already logged under it',
   !!(old && old.lad && old.lad.length === 9))
 check('neither replacement is retired',
   !RETIRED['Hip Adduction Machine'] && !RETIRED['Hip Abduction Machine'])
+
+console.log('\n[10] split ids are unique across EVERY scheme')
+/**
+ * The one that would corrupt history silently.
+ *
+ * S.splits[date] stores a split id and nothing else - it is the record of what
+ * a session was. If two schemes both used the id 'push', then switching scheme
+ * would quietly reinterpret every push day ever logged as a different day, with
+ * different muscles, and nothing on screen would say anything had changed.
+ */
+const seenId = {}
+const collisions = []
+SCHEMES.forEach(sc => sc.splits.forEach(s => {
+  if (seenId[s.id]) collisions.push(`${s.id} (${seenId[s.id]} and ${sc.name})`)
+  seenId[s.id] = sc.name
+}))
+check('no id is used by two schemes', collisions.length === 0, collisions.join('; '))
+
+// His existing days are stored as these four exact strings. They are the one
+// set of ids that must never be namespaced, or every session already logged
+// stops resolving to the day it was logged as.
+const first = SCHEMES[0]
+;['legs','push','pull','neck'].forEach(id =>
+  check(`the default scheme still owns the bare id "${id}"`, first.splits.some(s => s.id === id)))
+const others = SCHEMES.slice(1)
+check('every other scheme namespaces all of its ids',
+  others.every(sc => sc.splits.every(s => s.id.indexOf(':') > 0)),
+  others.map(sc => sc.splits.filter(s => s.id.indexOf(':') < 1).map(s => s.id).join(',')).filter(Boolean).join('; '))
+// A custom day is built at run time and lands in the same id space as these.
+check('the custom prefix cannot collide with a built-in scheme',
+  !SCHEMES.some(sc => sc.splits.some(s => s.id.indexOf('custom:') === 0)))
+
+console.log('\n[11] the schemes on offer are real ways to train')
+check('more than one to choose from', SCHEMES.length >= 4, String(SCHEMES.length))
+SCHEMES.forEach(sc => {
+  check(`${sc.name}: has days`, sc.splits.length >= 1, String(sc.splits.length))
+  check(`${sc.name}: says what it is`, !!sc.why && sc.why.length > 20)
+  // A day with no exercises behind it is a button that filters the whole
+  // library down to nothing.
+  const empty = sc.splits.filter(s => !LIB.some(e => s.mus.indexOf(e.pri) !== -1))
+  check(`${sc.name}: no day is empty of exercises`, empty.length === 0, empty.map(s => s.name).join(', '))
+})
+// Full body is the one scheme where neck is not its own day, because one day
+// that is everything already contains it.
+const full = SCHEMES.filter(sc => sc.id === 'full')[0]
+check('full body is a single day', !!full && full.splits.length === 1)
+check('and it really does hold every muscle',
+  !!full && all.every(m => full.splits[0].mus.indexOf(m) !== -1))
 
 console.log(`\n${fails} failure(s)`)
 process.exit(fails ? 1 : 0)

@@ -30,7 +30,9 @@
       claimed:  { "<weekKey>:<questId>": true },
       lvlSeen:  <number>,             // last level celebrated, so it fires once
       rankSeen: { "<exercise name>": <rank index 0-26> },
-      splits:   { "YYYY-MM-DD": "legs" | "push" | "pull" | "neck" },
+      splits:   { "YYYY-MM-DD": "<split id>" },
+      scheme:   "yours" | "ppl" | "ul" | "bro" | "full" | "custom",
+      customSplits: [ { id: "custom:...", name, mus: [ "<muscle>" ] } ],
       routineToday: { "YYYY-MM-DD": "<routine id>" },
       deloads:  { "<weekKey, the Monday>": true }   // weeks gone light on purpose
     }
@@ -49,11 +51,24 @@
   to be: a PR is the heaviest single set actually performed, so a lighter drop
   loses to the top set on its own. No special case.
 
-  splits is which of SPLITS was chosen for a given day. Per day, not one sticky
+  splits is which day was chosen for a given date. Per day, not one sticky
   setting, so the log remembers what each session was and a new morning never
   inherits yesterday's plan. A day with no entry means no split was picked, and
   the picker opens on Everything. Added 2026-07-31; an older blob simply has
   none, which needs no migration.
+
+  scheme is how the week is divided - one of SCHEMES, or 'custom' for the days
+  in customSplits. Added 2026-08-04. An older blob has no key and defaults to
+  'yours', which is the scheme it was already running, so every date already in
+  splits keeps pointing at exactly the day it always did.
+
+  SPLIT IDS ARE FOREVER, and that is why the ids in SCHEMES are namespaced with
+  everything except the first scheme's. splits[date] is a record of what a
+  session WAS. If two schemes both used the id 'push', switching scheme would
+  silently reinterpret every push day ever logged. The first scheme keeps the
+  bare 'legs'/'push'/'pull'/'neck' because days are already stored under them;
+  every other scheme prefixes its own. splitById searches all schemes and the
+  custom days, so a date logged under a scheme since abandoned still resolves.
 
   routineToday is which routine "Start" was tapped for on a given day, read by
   suggestNext() to offer that routine's next unlogged item instead of guessing
@@ -372,6 +387,28 @@
     border-color:var(--volt-line); color:var(--volt); background:var(--volt-soft);
   }
   .splitBtn.all{ flex:0 0 auto; }
+
+  /* ---------- picking a scheme, and building one ---------- */
+  /* 44px minimum on every chip: these are the touch targets tools/touch-check.js
+     enforces, and a body part list is exactly the kind of dense control that
+     drifts under it. */
+  .musPick{ display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+  .musChip{
+    min-height:44px; padding:8px 12px; cursor:pointer;
+    border:1px solid var(--border); border-radius:10px;
+    background:var(--card2); color:var(--muted);
+    font-size:12.5px; font-weight:600; letter-spacing:-.01em;
+    transition:border-color .16s, color .16s, background .16s;
+  }
+  .musChip:hover{ color:var(--text); }
+  .musChip.on{ border-color:var(--volt-line); color:var(--volt); background:var(--volt-soft); }
+  /* Already spoken for by another day. Not an error and never red - it is just
+     a body part that already has a home, and tapping it would put the same
+     exercise on two days. */
+  .musChip.taken{ opacity:.45; }
+  .musChip:disabled{ cursor:not-allowed; }
+  .schemeOn{ color:var(--volt); font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+             font-size:10px; letter-spacing:.12em; text-transform:uppercase; }
 
   /* ---------- last time: the same exercise, set by set ---------- */
   .lt{ margin-bottom:10px; border:1px solid var(--border); border-radius:10px;
@@ -865,6 +902,33 @@
         <p class="note" id="restNote" style="margin-top:8px"></p>
       </div>
 
+      <!-- How the week is divided. The day buttons on Home are whatever this
+           scheme says they are. Changing it never touches a day already
+           logged: every split id is stored for good and still resolves. -->
+      <div class="card">
+        <h3>Your split</h3>
+        <p class="note">The days on the Home screen come from this. Switching is safe at any
+          time - sessions you have already logged keep the day they were logged as, whatever
+          you pick here.</p>
+        <ul class="list" id="schemeList"></ul>
+
+        <h3 style="margin-top:18px">Build your own</h3>
+        <p class="note" id="customSplitNote">Name a day, tick the body parts that belong to it. Add
+          as many days as you train. Every body part has to land on exactly one day, or the
+          exercises for it would have nowhere to show up.</p>
+        <ul class="list" id="customSplitList"></ul>
+        <div class="row" style="margin-top:10px">
+          <label class="fl grow"><span>Day name</span>
+            <input id="csName" type="text" maxlength="28" placeholder="Chest day" disabled>
+          </label>
+        </div>
+        <div class="musPick" id="csMus"></div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn small" id="bAddSplit" disabled>Add this day</button>
+        </div>
+        <p class="note" id="csCover" style="margin-top:10px"></p>
+      </div>
+
       <div class="card">
         <h3>Rewards</h3>
         <p class="note">Titles. They unlock at a level and that is all they do.</p>
@@ -1139,25 +1203,113 @@
    * but it is not a triceps exercise, and a picker that said so on arm day
    * would be a worse tool than no filter at all.
    *
-   * THE ONE RULE IF YOU EDIT THIS: every muscle in MUSCLES must appear in
-   * exactly one split. Miss one and its exercises quietly vanish from every
-   * split; list one twice and the same lift turns up on two different days.
-   * tiles/lifting.splits.test.js fails loudly on either, so change this freely
-   * and let the test tell you if you broke it.
+   * THE ONE RULE IF YOU EDIT THIS: within any one scheme, every muscle in
+   * MUSCLES must appear in exactly one split. Miss one and its exercises
+   * quietly vanish from every day of that scheme; list one twice and the same
+   * lift turns up on two different days. tiles/lifting.splits.test.js fails
+   * loudly on either, for every scheme including one built by hand, so change
+   * this freely and let the test tell you if you broke it.
    *
    * Neck is deliberately its own split rather than folded into Push or Pull:
    * it is not tied to one training day the way chest or back is - it is added
    * on whichever day there is time for it - so it gets its own always-visible
    * tab instead of quietly living inside another day's list.
    */
-  var SPLITS = [
-    { id:'legs', name:'Legs', mus:['quads','hams','glutes','adductors','calves'] },
-    { id:'push', name:'Chest & Shoulders + Abs', mus:['chest','delts','abs','obliques'] },
-    { id:'pull', name:'Back & Arms', mus:['lats','traps','reardelt','biceps','triceps','forearms','lowerback'] },
-    { id:'neck', name:'Neck', mus:['neck'] }
+  /**
+   * SCHEMES: a whole way of dividing the week, of which the above is one.
+   * Added 2026-08-04, because a split is a choice and the file only offered
+   * his. The built-ins are the splits people actually run.
+   *
+   * THE INVARIANT IS PER SCHEME, not across the file: every muscle in MUSCLES
+   * appears in exactly one split OF EACH SCHEME. Whole-file uniqueness would
+   * be meaningless now - Push exists in three schemes and means something
+   * slightly different in each.
+   *
+   * SPLIT IDS ARE NAMESPACED, and the first scheme's are deliberately NOT.
+   * S.splits[date] stores a split id, and that record has to keep meaning the
+   * same thing forever. His existing days are stored as 'legs' / 'push' /
+   * 'pull' / 'neck', so those four ids stay bare and keep pointing at exactly
+   * the days they always did. Every other scheme prefixes its own ('ppl:push')
+   * so that switching schemes can never silently reinterpret a day already
+   * logged. splitById searches EVERY scheme for this reason: a day recorded
+   * under a scheme he has since moved away from must still resolve, or the
+   * history of what that session was is gone.
+   *
+   * Neck is its own day in every scheme, the same reasoning as the original:
+   * it is not tied to a training day, it goes wherever there is time. Full
+   * body is the exception, since one day that is everything already contains
+   * it, and inventing a second day there would be a scheme nobody runs.
+   */
+  var SCHEMES = [
+    { id:'yours', name:'Yours', why:'Legs, then chest and shoulders with abs, then back and arms. The split this board was built around.',
+      splits:[
+        { id:'legs', name:'Legs', mus:['quads','hams','glutes','adductors','calves'] },
+        { id:'push', name:'Chest & Shoulders + Abs', mus:['chest','delts','abs','obliques'] },
+        { id:'pull', name:'Back & Arms', mus:['lats','traps','reardelt','biceps','triceps','forearms','lowerback'] },
+        { id:'neck', name:'Neck', mus:['neck'] }
+      ] },
+    { id:'ppl', name:'Push Pull Legs', why:'Everything that presses, everything that pulls, everything below the waist. Run it three or six days a week.',
+      splits:[
+        { id:'ppl:push', name:'Push', mus:['chest','delts','triceps','abs','obliques'] },
+        { id:'ppl:pull', name:'Pull', mus:['lats','traps','reardelt','biceps','forearms','lowerback'] },
+        { id:'ppl:legs', name:'Legs', mus:['quads','hams','glutes','adductors','calves'] },
+        { id:'ppl:neck', name:'Neck', mus:['neck'] }
+      ] },
+    { id:'ul', name:'Upper Lower', why:'Two days, split at the waist. The simplest way to hit everything twice a week.',
+      splits:[
+        { id:'ul:upper', name:'Upper', mus:['chest','delts','triceps','lats','traps','reardelt','biceps','forearms'] },
+        { id:'ul:lower', name:'Lower', mus:['quads','hams','glutes','adductors','calves','lowerback','abs','obliques'] },
+        { id:'ul:neck', name:'Neck', mus:['neck'] }
+      ] },
+    { id:'bro', name:'Body part', why:'One body part a day, five days. The classic bodybuilding week.',
+      splits:[
+        { id:'bro:chest', name:'Chest', mus:['chest'] },
+        { id:'bro:back', name:'Back', mus:['lats','traps','lowerback'] },
+        { id:'bro:delts', name:'Shoulders', mus:['delts','reardelt'] },
+        { id:'bro:arms', name:'Arms', mus:['biceps','triceps','forearms'] },
+        { id:'bro:legs', name:'Legs', mus:['quads','hams','glutes','adductors','calves'] },
+        { id:'bro:core', name:'Core', mus:['abs','obliques'] },
+        { id:'bro:neck', name:'Neck', mus:['neck'] }
+      ] },
+    { id:'full', name:'Full body', why:'Everything, every session. Best when you train two or three times a week.',
+      splits:[
+        { id:'full:all', name:'Full body', mus:['chest','delts','triceps','lats','traps','reardelt','biceps','forearms','abs','obliques','lowerback','quads','hams','glutes','adductors','calves','neck'] }
+      ] }
   ];
+  var CUSTOM_SCHEME = 'custom';
+
+  // The scheme on the board right now. An unknown id (a custom scheme built
+  // and then deleted, a blob from a future version) falls back to the first
+  // built-in rather than leaving the day bar empty with no way back.
+  function activeScheme(){
+    if (S.scheme === CUSTOM_SCHEME){
+      return { id:CUSTOM_SCHEME, name:'Yours, built here', why:'The days you made.', splits:S.customSplits || [] };
+    }
+    for (var i=0;i<SCHEMES.length;i++) if (SCHEMES[i].id === S.scheme) return SCHEMES[i];
+    return SCHEMES[0];
+  }
+  function activeSplits(){ return activeScheme().splits; }
+  // Which scheme a split id came from, so a day logged under one he has left
+  // can say where it is from instead of appearing as an unexplained extra
+  // button in the bar.
+  function schemeOf(id){
+    for (var i=0;i<SCHEMES.length;i++){
+      for (var j=0;j<SCHEMES[i].splits.length;j++) if (SCHEMES[i].splits[j].id === id) return SCHEMES[i];
+    }
+    return null;
+  }
+
+  // Searches EVERY scheme, including ones not currently selected and the
+  // custom days. A day logged months ago under a scheme he has moved on from
+  // still has to say what it was.
   function splitById(id){
-    for (var i=0;i<SPLITS.length;i++) if (SPLITS[i].id === id) return SPLITS[i];
+    if (!id) return null;
+    for (var i=0;i<SCHEMES.length;i++){
+      var sp = SCHEMES[i].splits;
+      for (var j=0;j<sp.length;j++) if (sp[j].id === id) return sp[j];
+    }
+    var cs = S.customSplits || [];
+    for (var k=0;k<cs.length;k++) if (cs[k].id === id) return cs[k];
     return null;
   }
   // Which split is on for a given day. Stored per DAY, not as one sticky
@@ -1369,7 +1521,10 @@
   var S = {
     v:2, unit:'kg', bw:null, weekTarget:3, rest:120, restAuto:true,
     days:{}, notes:{}, routines:[], custom:[], claimed:{}, lvlSeen:1, rankSeen:{},
-    splits:{}, routineToday:{}, deloads:{}
+    splits:{}, routineToday:{}, deloads:{},
+    // Which way the week is divided. An older blob has neither, and defaults
+    // to the scheme it was already running, so nothing on screen moves.
+    scheme:'yours', customSplits:[]
   };
   var loaded = false;
   var trouble = '';
@@ -2136,7 +2291,7 @@
     var cur = splitFor();
 
     row.innerHTML = '';
-    SPLITS.forEach(function(s){
+    activeSplits().forEach(function(s){
       var b = document.createElement('button');
       b.type = 'button';
       b.className = 'splitBtn' + (cur === s.id ? ' on' : '');
@@ -2160,10 +2315,140 @@
       return;
     }
     var sp = splitById(cur);
+    // Today was logged under a day from a scheme he has since moved away from.
+    // The record is not touched - it says what that session actually was - but
+    // it has no button in the bar any more, so it gets one, or the day would
+    // sit there filtering the exercise list with nothing on screen saying why.
+    var fromOther = null;
+    if (sp && activeSplits().indexOf(sp) === -1){
+      fromOther = schemeOf(sp.id);
+      var b2 = document.createElement('button');
+      b2.type = 'button';
+      b2.className = 'splitBtn on';
+      b2.setAttribute('data-split', sp.id);
+      b2.setAttribute('aria-pressed', 'true');
+      // Named for where it came from, or it reads as a day of the split he is
+      // running now, which it is not.
+      b2.textContent = sp.name + (fromOther ? ' · ' + fromOther.name : '');
+      b2.disabled = !loaded;
+      row.insertBefore(b2, row.firstChild);
+    }
+    if (!sp){
+      // A day recorded under a custom split he has since deleted. The date
+      // keeps its record; there is simply nothing left to describe it with.
+      note.textContent = 'This day was logged under a split that no longer exists. Pick a day to change it.';
+      return;
+    }
     var last = lastSplitDay(cur);
-    var bits = [sp.mus.map(function(m){ return MUSCLES[m] || m; }).join(', ')];
+    var bits = [];
+    if (fromOther) bits.push('Today is still set to a day from ' + fromOther.name);
+    bits.push(sp.mus.map(function(m){ return MUSCLES[m] || m; }).join(', '));
     bits.push(last ? 'last ' + sp.name + ' was ' + lastTimeWhen(last) : 'first ' + sp.name + ' day logged here');
     note.textContent = bits.join('  ·  ');
+  }
+
+  /* ---------- choosing how the week is divided ----------
+     Every scheme is offered, his own custom one included once it has a day in
+     it. Switching writes nothing but S.scheme: the day bar redraws, and every
+     session already logged keeps the split id it was logged under. */
+  function renderSchemes(){
+    var ul = $('schemeList');
+    if (!ul) return;
+    ul.innerHTML = '';
+    var act = S.scheme;
+    var opts = SCHEMES.slice();
+    if ((S.customSplits || []).length){
+      opts.push({ id:CUSTOM_SCHEME, name:'Yours, built here', why:'The days you made below.',
+                  splits:S.customSplits });
+    }
+    opts.forEach(function(sc){
+      var li = document.createElement('li');
+      var d = document.createElement('div'); d.className = 'grow';
+      var l1 = document.createElement('div'); l1.className = 'l1'; l1.textContent = sc.name;
+      var l2 = document.createElement('div'); l2.className = 'l2';
+      l2.textContent = sc.why + '  ·  ' + sc.splits.map(function(s){ return s.name; }).join(' / ');
+      d.appendChild(l1); d.appendChild(l2);
+      li.appendChild(d);
+      if (sc.id === act){
+        var on = document.createElement('span');
+        on.className = 'schemeOn'; on.textContent = 'On';
+        li.appendChild(on);
+      } else {
+        var b = document.createElement('button');
+        b.className = 'btn small'; b.type = 'button';
+        b.setAttribute('data-scheme', sc.id);
+        b.textContent = 'Use';
+        b.disabled = !loaded;
+        li.appendChild(b);
+      }
+      ul.appendChild(li);
+    });
+  }
+
+  // Which muscles the half-built day has ticked. Held outside S because it is
+  // not a decision yet - nothing is saved until "Add this day".
+  var csPick = {};
+
+  // Every muscle already claimed by one of his custom days, and by which.
+  function csTaken(){
+    var t = {};
+    (S.customSplits || []).forEach(function(s){
+      s.mus.forEach(function(m){ t[m] = s.name; });
+    });
+    return t;
+  }
+
+  function renderCustomSplits(){
+    var ul = $('customSplitList'), pick = $('csMus'), cover = $('csCover');
+    if (!ul || !pick || !cover) return;
+    var taken = csTaken();
+
+    ul.innerHTML = '';
+    (S.customSplits || []).forEach(function(s){
+      var li = document.createElement('li');
+      var d = document.createElement('div'); d.className = 'grow';
+      var l1 = document.createElement('div'); l1.className = 'l1'; l1.textContent = s.name;
+      var l2 = document.createElement('div'); l2.className = 'l2';
+      l2.textContent = s.mus.map(function(m){ return MUSCLES[m] || m; }).join(', ');
+      d.appendChild(l1); d.appendChild(l2);
+      li.appendChild(d);
+      var b = document.createElement('button');
+      b.className = 'btn small'; b.type = 'button';
+      b.setAttribute('data-csdel', s.id);
+      b.textContent = 'Remove';
+      b.disabled = !loaded;
+      li.appendChild(b);
+      ul.appendChild(li);
+    });
+
+    pick.innerHTML = '';
+    Object.keys(MUSCLES).forEach(function(m){
+      var b = document.createElement('button');
+      b.type = 'button';
+      var isTaken = !!taken[m];
+      b.className = 'musChip' + (csPick[m] ? ' on' : '') + (isTaken ? ' taken' : '');
+      b.setAttribute('data-csmus', m);
+      b.setAttribute('aria-pressed', csPick[m] ? 'true' : 'false');
+      b.textContent = MUSCLES[m];
+      // A muscle can only live on one day, so one already spoken for cannot be
+      // ticked again. The title says which day has it rather than leaving a
+      // dimmed chip that just refuses to respond.
+      b.disabled = !loaded || isTaken;
+      if (isTaken) b.title = 'Already on ' + taken[m];
+      pick.appendChild(b);
+    });
+
+    var all = Object.keys(MUSCLES);
+    var missing = all.filter(function(m){ return !taken[m]; });
+    if (!(S.customSplits || []).length){
+      cover.textContent = 'No days yet. Every body part is still unassigned.';
+    } else if (missing.length){
+      cover.textContent = missing.length + ' body ' + (missing.length === 1 ? 'part is' : 'parts are') +
+        ' not on any day yet: ' + missing.map(function(m){ return MUSCLES[m]; }).join(', ') +
+        '. Exercises for those will not show up on any of your days until they land somewhere.';
+    } else {
+      cover.textContent = 'Every body part is on exactly one day. This split is complete.';
+    }
   }
 
   // The log form's weight label follows whichever exercise is selected, so
@@ -3327,6 +3612,9 @@
         wk.days + ' logged so far this week. The week in progress never breaks the run.'
       : 'Nothing logged yet, so there is no streak to report.';
 
+    renderSchemes();
+    renderCustomSplits();
+
     var tl = $('titleList'); tl.innerHTML = '';
     TITLES.forEach(function(t){
       var got = L >= t.lvl;
@@ -3720,6 +4008,77 @@
     persist();
   }
 
+  /**
+   * Add a day to his own split.
+   *
+   * The rule it enforces is the same one every built-in scheme obeys: a body
+   * part belongs to exactly one day. Ticking is already blocked for anything
+   * spoken for, so this is the second gate rather than the only one - it
+   * catches a muscle claimed by a day added in another tab or on another
+   * device between renders.
+   *
+   * It does NOT require full coverage to save. Half a split is a real state to
+   * be in halfway through building one, and refusing to save until every body
+   * part is placed would mean never being able to build it a day at a time.
+   * What is missing is printed under the builder instead.
+   */
+  function addCustomSplit(){
+    var name = ($('csName').value || '').trim();
+    var mus = Object.keys(csPick).filter(function(m){ return MUSCLES[m]; });
+    if (!name){ msg('Name the day first. "Legs" or "Tuesday" - whatever you actually call it.'); return; }
+    if (!mus.length){ msg('Tick at least one body part, or the day would have no exercises on it.'); return; }
+
+    var taken = csTaken();
+    var clash = mus.filter(function(m){ return taken[m]; });
+    if (clash.length){
+      msg(clash.map(function(m){ return MUSCLES[m]; }).join(', ') + ' already ' +
+          (clash.length === 1 ? 'belongs' : 'belong') + ' to another day. Remove that day first, or leave ' +
+          (clash.length === 1 ? 'it' : 'them') + ' off this one.');
+      return;
+    }
+    var dupe = (S.customSplits || []).filter(function(s){ return s.name.toLowerCase() === name.toLowerCase(); });
+    if (dupe.length){ msg('You already have a day called ' + dupe[0].name + '. Rename this one, or remove that one first.'); return; }
+
+    S.customSplits = S.customSplits || [];
+    S.customSplits.push({ id:'custom:c' + Date.now() + Math.floor(Math.random()*1000), name:name, mus:mus });
+    csPick = {};
+    $('csName').value = '';
+    // Building a day is a clear enough statement of intent to switch to it.
+    // Only on the FIRST one: after that he is editing a split he is already
+    // running, and moving him off whatever he picked would be presumptuous.
+    if (S.customSplits.length === 1 && S.scheme !== CUSTOM_SCHEME){
+      S.scheme = CUSTOM_SCHEME;
+      msg(name + ' added, and your board is now running your own split.', true);
+    } else {
+      msg(name + ' added.', true);
+    }
+    persist();
+  }
+
+  /**
+   * Remove one of his days.
+   *
+   * Days already LOGGED against it are left exactly as they are. splitById
+   * would no longer resolve the id, so renderSplit says plainly that the split
+   * is gone rather than pretending the session never had one. Deleting the
+   * record of what a session was, to tidy up a settings screen, would be
+   * destroying the more valuable of the two things.
+   */
+  function removeCustomSplit(id){
+    var s = (S.customSplits || []).filter(function(x){ return x.id === id; })[0];
+    if (!s) return;
+    S.customSplits = S.customSplits.filter(function(x){ return x.id !== id; });
+    // Last day gone: there is no custom split left to run, so fall back rather
+    // than leave the day bar empty with no way to pick anything.
+    if (S.scheme === CUSTOM_SCHEME && !S.customSplits.length){
+      S.scheme = 'yours';
+      msg(s.name + ' removed. That was your last day, so the board is back on ' + SCHEMES[0].name + '.', true);
+    } else {
+      msg(s.name + ' removed. Sessions logged under it keep their record.', true);
+    }
+    persist();
+  }
+
   /* ============================ render ============================ */
   function render(){
     fresh();
@@ -3735,7 +4094,8 @@
 
   function enable(on){
     var ids = ['fEx','fKg','fReps','fRpe','bLog','bRest','fNote','fRoutine','bAddRoutine',
-               'fSearch','cName','cMus','cPat','cUni','bAddCustom','fBw','bBw','fTarget','fRest','ladPick'];
+               'fSearch','cName','cMus','cPat','cUni','bAddCustom','fBw','bBw','fTarget','fRest','ladPick',
+               'csName','bAddSplit'];
     ids.forEach(function(id){ var el = $(id); if (el) el.disabled = !on; });
   }
 
@@ -3799,6 +4159,29 @@
         return;
       }
       if (t === $('bLog')) { logSet(); return; }
+      // Switching how the week is divided. This writes ONE key. Not one day
+      // already logged is rewritten, because every split id ever used stays
+      // resolvable - which is the whole reason the ids are namespaced.
+      if ((a = t.getAttribute('data-scheme'))) {
+        if (a === S.scheme) return;
+        S.scheme = a;
+        var sc = activeScheme();
+        msg('Now running ' + sc.name + ': ' + sc.splits.map(function(s){ return s.name; }).join(', ') +
+            '. Sessions you already logged keep the day they were logged as.', true);
+        persist();
+        // The exercise picker is filtered by today's split, which may well have
+        // come from the scheme just left. Refill it so the list on screen and
+        // the day actually selected cannot disagree.
+        fillSelect($('fEx'), true, splitFor());
+        return;
+      }
+      if ((a = t.getAttribute('data-csmus'))) {
+        if (csPick[a]) delete csPick[a]; else csPick[a] = true;
+        renderCustomSplits();
+        return;
+      }
+      if (t === $('bAddSplit')) { addCustomSplit(); return; }
+      if ((a = t.getAttribute('data-csdel'))) { removeCustomSplit(a); return; }
       if ((a = t.getAttribute('data-deload'))) {
         var wk = weekKey(today());
         if (a === '1') S.deloads[wk] = true;
@@ -4069,6 +4452,19 @@
         // Added 2026-08-01. No key on an older blob simply means no week was
         // ever marked as a deload, which needs no migration.
         S.deloads = d.deloads || {};
+        // Added 2026-08-04. A blob saved before schemes existed was running
+        // 'yours' whether it said so or not - its days are stored under the
+        // bare ids that scheme still uses - so defaulting to it leaves every
+        // recorded day meaning exactly what it meant. Custom days are only
+        // trusted if they still look like days; a half-written one would take
+        // the day bar down with it.
+        S.scheme = typeof d.scheme === 'string' ? d.scheme : 'yours';
+        S.customSplits = (d.customSplits || []).filter(function(x){
+          return x && x.id && x.name && x.mus && x.mus.length;
+        });
+        // Selected the custom scheme but nothing survived the check above:
+        // fall back rather than render a day bar with no days in it.
+        if (S.scheme === CUSTOM_SCHEME && !S.customSplits.length) S.scheme = 'yours';
       } else if (d.days){
         // A v1 blob. Ruben asked for a clean start on 2026-07-30, so only the
         // display unit carries over and the log begins empty.

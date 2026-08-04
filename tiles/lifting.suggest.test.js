@@ -24,6 +24,11 @@ function grab(name) {
 }
 function grabVar(name, open) {
   const at = src.search(new RegExp(`\\n  var ${name} =`))
+  // Without this, a renamed variable makes indexOf start from -1 and quietly
+  // return the first bracket in the FILE - which is inside a doc comment, and
+  // fails later with a syntax error that names neither the variable nor this
+  // function. Cost an eyebrow raise once; never again.
+  if (at === -1) throw new Error('could not find var ' + name)
   const close = open === '[' ? ']' : '}'
   let i = src.indexOf(open, at), depth = 0, end = i
   for (; i < src.length; i++) {
@@ -37,8 +42,12 @@ const TODAY = '2026-07-31'
 const sandbox = { console }
 vm.createContext(sandbox)
 vm.runInContext(`
-  var SPLITS = ${grabVar('SPLITS', '[')};
-  var S = { days:{}, routines:[], routineToday:{}, splits:{}, custom:[] };
+  // The default scheme's days. suggestNext() reaches them through splitById,
+  // which in the real file searches every scheme; here one scheme is enough to
+  // exercise the rule under test.
+  var SCHEMES = ${grabVar('SCHEMES', '[')};
+  var SPLITS = SCHEMES[0].splits;
+  var S = { days:{}, routines:[], routineToday:{}, splits:{}, custom:[], customSplits:[], scheme:'yours' };
   function today(){ return '${TODAY}'; }
   function splitById(id){ for (var i=0;i<SPLITS.length;i++) if (SPLITS[i].id===id) return SPLITS[i]; return null; }
   function splitFor(k){ return S.splits[k || today()] || ''; }

@@ -750,7 +750,34 @@ tools/push.test.js asserts that exact string appears in no committed file. The
 public key is in lib/push.js on purpose: the browser hands it to the push
 service at subscribe time, exactly like SUPABASE_ANON_KEY.
 
-WHAT IS NOT DONE HERE: the three steps that need a browser signed into
-Supabase - running push.sql, setting the VAPID secret, deploying the function.
-Claude Code has no browser control in this setup, and driving a live console
-against a production database is not something to automate casually anyway.
+IT IS LIVE, 2026-08-04. All four steps are in, driven through the Supabase
+console: push_subscriptions and rest_timers exist with RLS on and both policies
+attached, the three VAPID secrets are set, send-timer-push is deployed, and
+pg_cron calls it every 15 seconds with prune-rest-timers at 04:00 daily.
+
+RUBEN PASTED THE SERVICE_ROLE KEY, NOT CLAUDE, and that is the standing rule.
+A key goes into a field by his hand or it does not go in. Claude staged the SQL
+with a placeholder and stopped there. Everything else around it was automated.
+
+TWO TRAPS, both caught only because output was verified rather than trusted.
+
+First, the SQL editor's Monaco autocomplete silently rewrote `returns void`
+into `returns storage.vector_indexes` when text was typed in. Typing into that
+editor is gambling. Paste, then hash the editor's content against the file and
+compare, every time. That is how the real push.sql and index.ts were confirmed
+byte-identical (3084 chars / e03cad1, and 4660 chars / bbfaec5a) before running.
+
+Second, and worse because it looked like success: pasting over the placeholder
+ate the `Bearer ` prefix, leaving `'Authorization', '<jwt>'`. cron.schedule
+accepted it and returned a job id, because pg_cron stores the command as text
+and never validates it. Both jobs showed active. Nine ticks fired and every one
+came back 401, and none of that is visible from cron.job_run_details, which
+said `succeeded` for all of them - pg_net is async, so `succeeded` only means
+the POST was queued, never that it was answered.
+
+THE ONLY HONEST CHECK IS net._http_response. status_code 401 nine times, then
+200 from the moment the header was repaired. Read that table, not the cron log,
+when asking whether a scheduled function is actually working.
+
+The repair itself never touched the key: cron.alter_job with the new command
+derived from the old one by regexp_replace, entirely server-side.

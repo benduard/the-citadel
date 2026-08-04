@@ -2,6 +2,44 @@
 
 What you decided and why, so a future session never re-litigates it.
 
+## The notch reaches inside a sealed tile, and it ate half the small cards
+
+Found 2026-08-04, from Ruben on his phone: the check-in score sat low in its
+box with most of the number cut off. Every desktop check was green, and the
+number-fit check that had just been written was green too.
+
+THE CAUSE. `env(safe-area-inset-top)` RESOLVES INSIDE A TILE'S IFRAME. Verified
+directly: with the inset overridden, a sealed tile's own document reports 59px
+just as the shell does. Every tile applied the four safe-area paddings to
+`body` unconditionally, in both modes. In the grid an s-sized card is about
+122px tall, so on an iPhone home screen 59px of it became padding at the top
+and 34px at the bottom - and the number was pushed 29px past its own fold.
+Five of the seven tiles were affected; Lists and Lifting only escaped because
+they are two rows tall.
+
+THE FIX. Safe-area insets belong to PAGE MODE ONLY. Full screen, the tile IS
+the viewport and genuinely needs them. In the grid it is a small card in the
+middle of the board, nowhere near the screen edge, and the shell already keeps
+its own distance from the notch - so the inset there is wrong by definition,
+not merely inconvenient.
+
+TWO LESSONS ABOUT THE CHECK ITSELF, both worth more than the bug:
+
+- The first version COMPUTED the vertical overflow and never asserted on it.
+  A signal you collect and do not check is not a check.
+- The first attempt to simulate the notch injected
+  `body{ padding-top:59px !important }`. That is worse than useless: it forces
+  the padding on regardless of what the tile's CSS says, so it reports the same
+  failure whether or not the bug is fixed. A simulation that cannot tell those
+  two apart proves nothing. It now uses the DevTools protocol's
+  `Emulation.setSafeAreaInsetsOverride` so the BROWSER resolves env() itself,
+  and it was mutation-tested by putting the bug back on one tile - which fails
+  that tile alone, in the notch pass alone.
+
+Anything on a poster that reacts to the viewport now has to be measured in the
+notch pass too, because a desktop browser structurally cannot see this class of
+bug.
+
 ## A sealed tile cannot open a modal, and must never be allowed to
 
 Found 2026-08-04 building the Lists changes. Lists grew a "New list" button

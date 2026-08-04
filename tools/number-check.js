@@ -12,10 +12,24 @@
  * What counts as a failure, and why each one:
  *   OVERFLOW  the text is wider than its container. On a poster this is a
  *             number with its end cut off, which is worse than no number.
- *   CLIPPED   scrollHeight exceeds clientHeight on a fixed-height poster: the
- *             number is there but pushed out of sight below the fold.
+ *   BELOW     the number's bottom edge is past the card's own fold. It is
+ *             rendered, it is just not on screen.
+ *   CLIPPED   the document is taller than the iframe's viewport at all.
  *   TINY      under 11px. Not a layout break, but a number nobody can read on
  *             a phone is not being "shown" either.
+ *
+ * THE NOTCH PASS, and why the first version of this tool missed a real bug.
+ * env(safe-area-inset-*) resolves to 0 in a desktop browser, so a poster can
+ * look perfect here and be visibly broken on an iPhone home screen where the
+ * inset is around 59px. That is exactly what happened: the tiles applied the
+ * insets to `body` in BOTH modes, an s-sized card is about 122px tall, and
+ * half of it became padding - Ruben reported the check-in score sitting low
+ * and cut off, and every desktop check was green. So every width is measured
+ * twice, once flat and once with a phone's insets stood in for directly.
+ *
+ * The first version also COMPUTED the vertical overflow and then never
+ * asserted on it, which is its own lesson: a signal you collect and do not
+ * check is not a check.
  *
  * SETUP (once):  cd tools && npm install && npm run install-browser
  * RUN (board serving on :3000): node tools/number-check.js
@@ -91,8 +105,24 @@ const SEED = {
     ] }
 }
 
+/**
+ * The iPhone's safe-area inset, applied through the DevTools protocol so the
+ * BROWSER resolves env() itself.
+ *
+ * The first attempt at this faked it by injecting
+ * `body{ padding-top:59px !important }`, which is worse than useless: that
+ * forces the padding on regardless of what the tile's own CSS says, so it
+ * reports a failure whether or not the bug is fixed. A simulation that cannot
+ * tell those two apart is not a test.
+ *
+ * With the override in place, env(safe-area-inset-top) reads 59px INSIDE the
+ * sealed iframe - verified directly, and the reason this bug reached his phone
+ * at all. 59/34 is a Dynamic Island iPhone in portrait.
+ */
+const NOTCH = { top: 59, bottom: 34, left: 0, right: 0 }
+
 async function measure(frame, sel) {
-  return frame.evaluate((s) => {
+  return frame.evaluate(({ s }) => {
     const out = []
     document.querySelectorAll(s).forEach((el) => {
       const r = el.getBoundingClientRect()
@@ -106,13 +136,17 @@ async function measure(frame, sel) {
         // scrollWidth vs clientWidth is the honest overflow test: it is the
         // laid-out text against the box, not a guess from character counts.
         overflowX: el.scrollWidth - el.clientWidth,
+        // The one the first version computed and then forgot to assert on.
         overflowY: document.documentElement.scrollHeight - window.innerHeight,
+        // How far the number's bottom edge sits past the card's fold. This is
+        // the number being off screen, which is what Ruben actually saw.
+        below: Math.round(r.bottom - window.innerHeight),
         wider: Math.round(r.width - br.width),
         cls: el.className || el.tagName.toLowerCase()
       })
     })
     return out
-  }, sel)
+  }, { s: sel })
 }
 
 ;(async () => {
@@ -120,8 +154,20 @@ async function measure(frame, sel) {
   const problems = []
   let checked = 0
 
+  // Flat first, then again with a phone's insets. The second pass is the one
+  // that catches what a desktop browser structurally cannot see.
+  const PASSES = [
+    { notch: false, where: 'flat     ' },
+    { notch: true,  where: 'with notch' }
+  ]
+
   for (const width of WIDTHS) {
+  for (const { notch, where } of PASSES) {
     const page = await browser.newPage({ viewport: { width, height: 860 } })
+    if (notch) {
+      const cdp = await page.context().newCDPSession(page)
+      await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: NOTCH })
+    }
     // Seed before the board's own scripts run, or the tiles boot empty and
     // this check passes by having no number to measure.
     await page.addInitScript((seed) => {
@@ -136,44 +182,35 @@ async function measure(frame, sel) {
     await page.reload({ waitUntil: 'networkidle', timeout: 20000 })
     await page.waitForTimeout(2500)
 
-    for (const t of TARGETS) {
-      const frame = page.frames().find((f) => f.url().includes('/' + t.tile))
-      if (!frame) { problems.push(`${width}px  ${t.tile}  frame never appeared`); continue }
-      const rows = await measure(frame, t.sel).catch(() => [])
-      /**
-       * The check's own blind spot, closed. A tile whose seed does not match
-       * its real store shape renders its empty state, which contains no
-       * number - and this tool would then report "every number fits" having
-       * measured none of them. Two seeds were wrong exactly this way when it
-       * was written. If a tile stops producing a number, that is a broken
-       * seed or a broken tile, and either way it is a failure, not a pass.
-       */
-      if (!rows.length) {
-        problems.push(`${width}px  ${t.tile}  NO NUMBER RENDERED - seed shape wrong, or the poster broke`)
-        continue
+      for (const t of TARGETS) {
+        const frame = page.frames().find((f) => f.url().includes('/' + t.tile))
+        if (!frame) { problems.push(`${width}px ${where}  ${t.tile}  frame never appeared`); continue }
+        const rows = await measure(frame, t.sel).catch(() => [])
+        /**
+         * The check's own blind spot, closed. A tile whose seed does not match
+         * its real store shape renders its empty state, which contains no
+         * number - and this tool would then report "every number fits" having
+         * measured none of them. Two seeds were wrong exactly this way when it
+         * was written. If a tile stops producing a number, that is a broken
+         * seed or a broken tile, and either way it is a failure, not a pass.
+         */
+        if (!rows.length) {
+          problems.push(`${width}px ${where}  ${t.tile}  NO NUMBER RENDERED - seed shape wrong, or the poster broke`)
+          continue
+        }
+        rows.forEach((r) => {
+          checked++
+          const at = `${width}px ${where}  ${t.tile}`
+          if (r.overflowX > 1) problems.push(`${at}  OVERFLOW by ${r.overflowX}px  "${r.text}" (${r.px}px, .${r.cls})`)
+          else if (r.wider > 1) problems.push(`${at}  WIDER THAN ITS BOX by ${r.wider}px  "${r.text}" (${r.px}px, .${r.cls})`)
+          if (r.below > 1) problems.push(`${at}  ${r.below}px BELOW THE FOLD  "${r.text}" (.${r.cls})`)
+          if (r.overflowY > 1) problems.push(`${at}  CLIPPED, document ${r.overflowY}px taller than the card`)
+          if (r.px < MIN_READABLE) problems.push(`${at}  TINY at ${r.px}px  "${r.text}" (.${r.cls})`)
+        })
       }
-      rows.forEach((r) => {
-        checked++
-        if (r.overflowX > 1) problems.push(`${width}px  ${t.tile}  OVERFLOW by ${r.overflowX}px  "${r.text}" (${r.px}px, .${r.cls})`)
-        else if (r.wider > 1) problems.push(`${width}px  ${t.tile}  WIDER THAN ITS BOX by ${r.wider}px  "${r.text}" (${r.px}px, .${r.cls})`)
-        if (r.px < MIN_READABLE) problems.push(`${width}px  ${t.tile}  TINY at ${r.px}px  "${r.text}" (.${r.cls})`)
-      })
-    }
 
-    // The poster itself: a number pushed below a fixed-height card is just as
-    // hidden as one clipped off the side.
-    for (const t of TARGETS) {
-      const frame = page.frames().find((f) => f.url().includes('/' + t.tile))
-      if (!frame) continue
-      const cut = await frame.evaluate(() => {
-        const p = document.querySelector('#posterView, .posterView')
-        if (!p) return 0
-        return Math.max(0, p.scrollHeight - p.clientHeight)
-      }).catch(() => 0)
-      if (cut > 2) problems.push(`${width}px  ${t.tile}  POSTER CLIPPED, ${cut}px below the fold`)
+      await page.close()
     }
-
-    await page.close()
   }
 
   await browser.close()

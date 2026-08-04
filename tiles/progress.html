@@ -55,13 +55,27 @@
     font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
     -webkit-font-smoothing:antialiased;
     accent-color:var(--mint);
+    overflow-x:hidden;
+  }
+  /* SAFE AREA INSETS BELONG TO PAGE MODE ONLY.
+     They used to sit on `body` unconditionally, which is wrong for the
+     poster: in the grid this tile is a small card in the middle of the
+     board, nowhere near the screen edge, and the shell already keeps its
+     own distance from the notch. On an iPhone home screen that inset is
+     about 59px and an s-sized card is about 122px tall - so half the card
+     became padding and the number was pushed 29px below its own fold.
+     That is the "score sits low and is cut off" Ruben reported on his
+     phone, and it is invisible on a desktop browser where env() is 0.
+     Measured, not guessed: tools/number-check.js now runs a pass with the
+     inset applied. Full screen the tile IS the viewport, so there it
+     genuinely needs them. */
+  html[data-mode="page"] body{
+    background:var(--bg);
     padding-top:env(safe-area-inset-top);
     padding-right:env(safe-area-inset-right);
     padding-bottom:env(safe-area-inset-bottom);
     padding-left:env(safe-area-inset-left);
-    overflow-x:hidden;
   }
-  html[data-mode="page"] body{ background:var(--bg); }
 
   ::selection{ background:rgba(110,231,183,.28); }
 

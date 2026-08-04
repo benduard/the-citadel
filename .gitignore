@@ -17,3 +17,8 @@ npm-debug.log*
 # Python bytecode cache (skills ship .py scripts; cache regenerates on run)
 __pycache__/
 *.pyc
+
+# Supabase CLI scratch state. Machine-local: which project this checkout is
+# linked to, rewritten by the CLI on every link/deploy. Nothing secret in it,
+# but it is not part of the board.
+supabase/.temp/

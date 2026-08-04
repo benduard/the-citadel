@@ -268,8 +268,15 @@ check('startRest asks for the backup push', /Vitality\.restTimer\(secs, ex \|\| 
 check('guarded, so an older host or the hosted board is unaffected',
   /window\.Vitality && Vitality\.restTimer/.test(lifting))
 check('the host handles restTimer', /msg\.type === 'restTimer'/.test(host))
-check('and only schedules when this device is actually subscribed',
-  /VitalityPush\.isEnabled\(\)\.then\(function \(on\) \{\s*\n\s*if \(!on\) return/.test(host))
+// The row does TWO jobs - fire a push, and remember when the timer ends so
+// the clock can be redrawn on reopening - and only the first needs a
+// subscription. Gating the write on notifications being enabled cost the
+// second entirely for anyone who had not turned them on.
+check('the timer row is written whenever signed in, not only when notifications are on',
+  !/VitalityPush\.isEnabled\(\)\.then\(function \(on\) \{\s*\n\s*if \(!on\) return/.test(host) &&
+  /window\.VitalityRemote\.scheduleRestPush\(secs, msg\.label \|\| null\)/.test(host))
+check('and signing out still writes nothing - scheduleRestPush refuses on its own',
+  /if \(!session \|\| !session\.user\) return \{ ok: false, reason: 'Not signed in\.' \}/.test(remote))
 check('a failure there never breaks the on-screen countdown',
   /never let a backup alert break the timer/.test(host))
 

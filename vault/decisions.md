@@ -933,3 +933,31 @@ THE LESSON WORTH KEEPING: net._http_response.content is the first place to
 look, and a bare "Internal Server Error" there means the failure is outside
 your own error handling. Wrapping the handler so every failure answers with its
 own message turns the next six-hour mystery into one query.
+
+## The rest clock resumes whether or not notifications are on
+
+Fixed 2026-08-04, after Ruben reported the timer "not going down" with the
+phone locked.
+
+FIRST, THE PART THAT IS NOT A BUG AND CANNOT BE FIXED: the on-screen countdown
+stops when the phone locks. iOS suspends the page's JavaScript outright. No web
+app keeps a live clock through a lock, and every design here has to start from
+that. The notification is the answer to it.
+
+THE ACTUAL BUG was in the second half. The rest_timers row does two separate
+jobs: it is what the Edge Function pushes from, and it is the only record of
+WHEN the timer ends, which is what lets the clock redraw correctly on reopening.
+Only the first needs a push subscription. The host was gating the write on
+VitalityPush.isEnabled(), so anyone who had not turned notifications on lost the
+resume as well - and the only way to get the clock back was to accept
+notifications they might not want. Two separate wants, coupled by accident.
+
+The write is now attempted whenever there is a session. scheduleRestPush already
+refuses when signed out, so a signed-out board writes nothing and behaves as it
+always did. Rows written for a device with no subscription are harmless: the
+function finds no subscriptions, sends nothing, marks the row fired, and prune
+clears it.
+
+The cost of the old behaviour was invisible in every test, because every test
+asserted the gate was THERE. A test can only protect the behaviour someone
+thought to want.

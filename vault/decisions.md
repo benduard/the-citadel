@@ -857,3 +857,44 @@ SETUP.md had drifted: a "Not done yet" heading over three items already
 checked off, and a description of run-tests.sh naming three suites when it
 now runs fifteen plus three browser checks. Both corrected to say what is
 actually there.
+
+## The VAPID keys were rotated, and rotation is now one command
+
+Rotated 2026-08-04, because the old private key was committed (see the audit
+entry above). A leaked credential is not fixed by deleting the line that
+leaked it - the old value is in history on a pushed remote, and the only
+thing that actually ends its usefulness is making it worthless.
+
+WHY ROTATE RATHER THAN REWRITE HISTORY. Rewriting would mean force-pushing a
+rewritten master and hoping no clone, fork or cached view kept the old
+objects. Rotation makes the exposed value inert whether or not anyone still
+holds it, which is a guarantee rather than a hope. The old key stays in
+history and no longer matters.
+
+tools/new-vapid-keys.js does the whole rotation in one command, and does both
+halves in one run ON PURPOSE. The pair only works as a pair: update the
+private half in Supabase and forget the public half in lib/push.js and every
+subscription is signed against a key the function cannot prove it owns, with
+every push rejected and nothing on the client saying why. One command removes
+the window where they can disagree. It also refuses to write anything if the
+generated pair is malformed, and fails loudly if it cannot find the line in
+lib/push.js to update, rather than leaving the two halves out of step.
+
+THE PRIVATE KEY IS NEVER PRINTED, only written to .env.local. A key echoed to
+a terminal lands in scrollback and in whatever is recording the session, which
+is more copies than need to exist - the mistake that caused this rotation was
+exactly one more copy than necessary.
+
+The test changed too. It used to assert the public key by hardcoded literal,
+which went stale the instant the keys rotated. It now checks SHAPE (87 chars,
+uncompressed P-256 point) and AGREEMENT (lib/push.js matches .env.local),
+which is the invariant that actually matters and survives every future
+rotation.
+
+WHAT ROTATION COSTS, and it is not nothing: every subscription created against
+the old public key is dead. The rows in push_subscriptions can never receive
+anything again and should be deleted, and every device has to turn rest timer
+alerts off and on again. Deliberately NOT automated by adding 403 to the
+function's GONE set - a genuinely misconfigured secret returns 403 too, and
+treating that as "delete every subscription" would turn one bad deploy into
+silently unsubscribing every device.

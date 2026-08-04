@@ -131,8 +131,22 @@ check('the function reads it from the environment only',
   /Deno\.env\.get\('VAPID_PRIVATE_KEY'\)/.test(fn))
 check('.env.local is gitignored',
   /^\.env\.\*$/m.test(fs.readFileSync(path.join(ROOT, '.gitignore'), 'utf8')))
-check('the PUBLIC key is in the page, which is correct and required - the browser hands it to the push service',
-  /BPewYpzXlUPqGsUqmqrMH87twEsxzPYPnt2Vlt79TKrdYEEucFCrzGtpktDstkFDmDEG4PcEyyqFVBsDmm1Xnq0/.test(push))
+// The PUBLIC key belongs in the page - the browser hands it to the push
+// service at subscribe time. Asserted by SHAPE and by AGREEMENT rather than
+// against a hardcoded value: a literal here goes stale the moment the keys
+// are rotated, which is exactly what happened the first time they were.
+const pagePub = (push.match(/var VAPID_PUBLIC = '([^']+)'/) || [])[1]
+check('the page carries a public key', !!pagePub)
+check('it is a full uncompressed P-256 point (87 chars, starts with B)',
+  !!pagePub && pagePub.length === 87 && pagePub[0] === 'B', pagePub && String(pagePub.length))
+if (privMatch) {
+  // The pair only works as a pair. If these two ever disagree, every
+  // subscription is signed against a key the function cannot prove it owns
+  // and every push is rejected, with nothing on the client saying why.
+  const envPub = (envLocal.match(/^VAPID_PUBLIC_KEY=(\S+)/m) || [])[1]
+  check('the page and .env.local hold the SAME public key', pagePub === envPub,
+    pagePub === envPub ? '' : 'page and .env.local disagree - rotation left them out of step')
+}
 
 // ---------------------------------------------------------------------------
 console.log('\n[8] the service worker cannot fail silently')

@@ -109,16 +109,29 @@ check('15 second cadence, with the reason stated', /15 seconds/.test(sql))
 
 // ---------------------------------------------------------------------------
 console.log('\n[7] THE SECRET NEVER ENTERS THE REPO')
-const PRIVATE = 'wRsGjKi4tBdfEhggGYFB5GZ-0KnqVpj2p8zWzTqTYyw'
-const tracked = [fn, sql, sw, push, host, lifting, remote,
-  fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8')]
-check('the private key is in no committed file',
-  tracked.every(f => f.indexOf(PRIVATE) === -1))
+// THE PRIVATE KEY IS DELIBERATELY NOT A LITERAL IN THIS FILE. A version of
+// this check once hardcoded the real value to search for it, which defeats
+// the entire point: verifying a secret is absent by writing it into a
+// tracked, committed test file puts it in the repo anyway. Read it from
+// .env.local instead - gitignored, present locally, and simply skipped (not
+// failed) on a machine that has never had it, e.g. a fresh clone or CI.
+const envLocalPath = path.join(ROOT, '.env.local')
+const envLocal = fs.existsSync(envLocalPath) ? fs.readFileSync(envLocalPath, 'utf8') : ''
+const privMatch = envLocal.match(/^VAPID_PRIVATE_KEY=(\S+)/m)
+if (privMatch) {
+  const PRIVATE = privMatch[1]
+  const tracked = [fn, sql, sw, push, host, lifting, remote,
+    fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8')]
+  check('the private key is in no committed file',
+    tracked.every(f => f.indexOf(PRIVATE) === -1))
+} else {
+  console.log('  SKIP  no .env.local here, so there is no local private key to check for - not a failure')
+}
 check('the function reads it from the environment only',
   /Deno\.env\.get\('VAPID_PRIVATE_KEY'\)/.test(fn))
 check('.env.local is gitignored',
   /^\.env\.\*$/m.test(fs.readFileSync(path.join(ROOT, '.gitignore'), 'utf8')))
-check('the PUBLIC key is in the page, which is correct and required',
+check('the PUBLIC key is in the page, which is correct and required - the browser hands it to the push service',
   /BPewYpzXlUPqGsUqmqrMH87twEsxzPYPnt2Vlt79TKrdYEEucFCrzGtpktDstkFDmDEG4PcEyyqFVBsDmm1Xnq0/.test(push))
 
 // ---------------------------------------------------------------------------

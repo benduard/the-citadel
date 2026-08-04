@@ -52,7 +52,7 @@ laptop is still on the phone. The data was the point; the layout is a later job.
 
 ---
 
-# Not done yet
+# The equation, and the rank
 
 - [x] The equation. Three goals are live in `lib/tiles/weights.ts`
        strong, feel, showup - each one weighting checkin/lifting/recovery/body/
@@ -67,6 +67,13 @@ laptop is still on the phone. The data was the point; the layout is a later job.
 
 # Checking the board still works
 
-`./run-tests.sh` runs everything: the rank maths, the shell panels, and
-Lifting's last-time lookup. Plain node, no install, no framework. Run it
+`./run-tests.sh` runs everything: the rank maths, the shell panels, backups,
+the icon set, Lifting's own suite (last-time, splits, unilateral, grouping,
+suggestions, the body map, rest timing, routines), Lists and its calendar, and
+the rest-timer push wiring. Plain node, no install, no framework. Run it
 before you push.
+
+If `tools/node_modules` is installed, it also runs three browser checks:
+every tile actually paints (`visual-check.js`), nothing sits under the page's
+close button at any width (`collision-check.js`), and every control is big
+enough to hit with a thumb (`touch-check.js`).

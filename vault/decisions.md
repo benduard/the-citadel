@@ -815,3 +815,45 @@ assignment would have clobbered - caught by the first version of the check
 returning nothing and re-reading why), confirmed a ~90s-remaining timer resumes
 showing 1:29 with a correctly proportioned bar, and confirmed an already-past
 fire_at does not resume at all.
+
+## Full audit, 2026-08-04. One real finding, and it was mine.
+
+Swept the whole board: repo hygiene, XSS, sealed-iframe boundaries, secret
+handling, registry-vs-files, store-shape docs vs code, weights.ts vs rank.js,
+dead code from this session's refactors, and accessibility on the newest UI
+(body map, calendar, routine reordering). Full method and result of each pass
+is in the conversation this was done in; the one finding worth a permanent
+record is here.
+
+THE VAPID PRIVATE KEY WAS COMMITTED. tools/push.test.js's own secret-leak
+check hardcoded the real key as the literal it searched for, in a file that
+was itself committed and pushed twice (4a75ff9, a8d784f). The check's entire
+purpose - proving the key never enters the repo - was undone by the way it was
+written. The repo is private, which narrows this, but private is not the same
+as safe: history on a pushed remote is not something deleting a line undoes.
+
+Fixed here: the check now reads the key from .env.local at run time instead
+of holding a copy of it, and skips (not fails) when .env.local is not present
+- a fresh clone or CI has no local secret to check for, and that is a fact
+about the machine, not a broken check.
+
+NOT fixed here, and Ruben's call: the key already in git history. The honest
+answer for a leaked credential, private repo or not, is to rotate it - a new
+VAPID pair, a new Supabase secret, a new public key in lib/push.js - not to
+rewrite history and hope. Rotating breaks every device already subscribed
+until it re-enables alerts. Left for him to decide when.
+
+Everything else came back clean: no stray files, no TODO/debugger/console.log
+left in shipped code, no unescaped user input reaching innerHTML anywhere,
+sandbox="allow-scripts" with no allow-same-origin on every tile, registry.js
+lists exactly the six tile files that exist, lifting.html and lists.html's
+declared store versions match their own migration code, weights.ts's three
+goals average to exactly the WEIGHTS in rank.js (32/28/25/10/5), and a
+heuristic dead-code sweep flagged sixteen "unused" functions that were all
+false positives - passed as bare references to addEventListener, once(), or
+.then(), never called with parens in the same file a naive grep would check.
+
+SETUP.md had drifted: a "Not done yet" heading over three items already
+checked off, and a description of run-tests.sh naming three suites when it
+now runs fifteen plus three browser checks. Both corrected to say what is
+actually there.

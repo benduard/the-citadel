@@ -991,3 +991,46 @@ to a rank.
 The whole library was printed and read, not spot-checked: 33 multi-joint at
 5:00, 34 isolation at 3:00, nothing below the floor. Verified in a browser too,
 because the tier only becomes real once the Rest button says it.
+
+## Supersets and dropsets are a tag, not a second kind of set
+
+Built 2026-08-04, the last item of the batch.
+
+`grp: { id, kind }` marks which sets were done back to back. That is the whole
+data change. A grouped set is still a set: setVolume, effLoad, e1rm, every
+rank, every PR and the ledger read it exactly as before, because there is
+nothing new for them to read. The alternative - a distinct shape for "a set,
+but in a group" - would have meant teaching each of those about it, and each
+one is a place to get it wrong. tiles/lifting.supersets.test.js computes the
+same numbers grouped and ungrouped and asserts they are identical, so a future
+special case fails there rather than quietly changing what a PR means.
+
+NO SPECIAL CASE FOR A DROPSET'S LIGHTER DROPS. A PR is the heaviest single set
+actually performed, so a drop loses to the top set on its own. The rule was
+already right; it just needed leaving alone.
+
+MID-GROUP THERE IS NO REST TIMER, and that is the feature rather than an
+omission. A superset goes straight into the other exercise and a dropset
+straight into the next drop; the rest is what comes after the whole thing. So
+logging into an armed group skips startRest(), and ending the group starts it -
+which is also the moment it was actually earned.
+
+Arming tags the set ALREADY LOGGED as well, because a superset of one is not a
+thing: the group is that set plus whatever comes next. Arming while the last
+set is already grouped extends that group instead of stranding it in a group of
+one and opening a second.
+
+pendingGroup is session state and is never saved. What gets saved is the tag on
+each set, which is a fact about the workout; "I am mid-superset right now" is a
+fact about this minute. Reloading leaves the sets correctly tagged and simply
+stops arming the next one.
+
+RUNS FOLLOW ORDER, NOT JUST ID. Two sets sharing a grp.id with an unrelated set
+between them are two runs, because that is what happened - drawing one block
+round them would say they were done together. The log is append-only within a
+session so the two normally agree; the display follows the order rather than
+assuming it.
+
+BY BODY PART DELIBERATELY DOES NOT DRAW GROUPS. A superset's two exercises land
+in different muscle buckets, which is the honest answer to "what did my chest
+do today" - drawing the group there would mean drawing half of it twice.

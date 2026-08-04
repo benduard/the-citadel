@@ -20,7 +20,10 @@
       restAuto: <boolean>,            // true: rest length follows the exercise
                                       //   (REST_TIERS). Missing on an older
                                       //   blob and treated as true.
-      days:     { "YYYY-MM-DD": [ { id, ex, kg, reps, rpe, note } ] },
+      days:     { "YYYY-MM-DD": [ { id, ex, kg, reps, rpe, note, grp? } ] },
+                // grp is OPTIONAL: { id, kind: 'superset'|'dropset' }. Sets
+                // sharing a grp.id were done back to back with no rest. A
+                // grouped set is STILL JUST A SET - see the note below.
       notes:    { "YYYY-MM-DD": "session note" },
       routines: [ { id, name, items: [ { ex, sets, reps, kg } ] } ],
       custom:   [ { id, name, pri, sec: [], cat, pat, bwf, w, lad: [9], cues: [], uni } ],
@@ -31,6 +34,20 @@
       routineToday: { "YYYY-MM-DD": "<routine id>" },
       deloads:  { "<weekKey, the Monday>": true }   // weeks gone light on purpose
     }
+
+  SUPERSETS AND DROPSETS ARE A TAG, NOT A SHAPE. `grp` marks which sets were
+  done back to back; it changes nothing about what a set IS. setVolume, e1rm,
+  every rank, every PR and the ledger all read a grouped set exactly as they
+  read any other, because it is any other. That is the whole reason it was
+  built as a tag: a second shape for "a set, but in a group" would mean every
+  one of those had to learn about it, and each one is a place to get it wrong.
+  tiles/lifting.supersets.test.js asserts the maths is byte-identical grouped
+  and ungrouped. Added 2026-08-04; an older blob simply has no grp anywhere,
+  which needs no migration.
+
+  A DROPSET'S LATER DROPS ARE NOT PROTECTED FROM THE PR RULE, and do not need
+  to be: a PR is the heaviest single set actually performed, so a lighter drop
+  loses to the top set on its own. No special case.
 
   splits is which of SPLITS was chosen for a given day. Per day, not one sticky
   setting, so the log remembers what each session was and a new morning never
@@ -239,6 +256,26 @@
   }
   .list li.muscleHead:first-child{ padding-top:0; }
   .muscleHead .n{ margin-left:auto; font-size:9.5px; letter-spacing:.06em; text-transform:none; color:var(--faint); }
+
+  /* A group reads as one thing: a label, then its sets held together by a rail
+     down the left. Volt, the same colour the split picker uses, because this
+     is the board describing HOW the work was arranged - not a judgement on it.
+     Mint and amber stay for how a person is doing. */
+  .list li.grpHead{
+    border-top:0; display:flex; align-items:baseline; gap:8px; padding:12px 0 4px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--volt);
+  }
+  .list li.grpHead:first-child{ padding-top:0; }
+  .grpHead .n{ margin-left:auto; font-size:9.5px; letter-spacing:.06em; text-transform:none; color:var(--faint); }
+  .list li.inGrp{
+    border-left:2px solid var(--volt-line);
+    padding-left:10px; margin-left:1px;
+    background:linear-gradient(90deg, var(--volt-soft), transparent 60%);
+  }
+  /* The rail should read as one continuous line, so only the last row in a
+     group gets the rounded foot and only the first the rounded head. */
+  .list li.inGrp:first-of-type{ border-top-left-radius:6px; }
 
   .checkRow{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--muted); cursor:pointer; }
   .checkRow input{ width:17px; height:17px; flex:none; }
@@ -578,6 +615,13 @@
           <button class="btn small" id="bEditCancel" type="button" hidden>Cancel</button>
           <button class="btn small" id="bRest" disabled>Rest</button>
         </div>
+        <!-- Back-to-back work. Hidden until there is a set to attach to, so it
+             never offers to group a session that has not started. -->
+        <div class="row" id="grpRow" hidden style="margin-top:8px">
+          <button class="btn small ghost grow" id="bSuperset" type="button">+ Superset</button>
+          <button class="btn small ghost grow" id="bDropset" type="button">+ Dropset</button>
+        </div>
+        <p class="note" id="grpNote" hidden style="margin-top:6px"></p>
         <div class="rest" id="restBox" hidden style="margin-top:14px">
           <span class="t" id="restT">2:00</span>
           <div class="grow"><div class="bar mint"><i id="restBar"></i></div></div>
@@ -1296,6 +1340,20 @@
    * and log it again.
    */
   var editingSet = null;
+
+  /**
+   * The group being built right now, or null. { id, kind }.
+   *
+   * Session state on purpose - it is never saved. What gets saved is the `grp`
+   * tag on each set, which is the fact; "I am currently mid-superset" is not a
+   * fact about the log, it is about this minute. Reloading mid-group leaves the
+   * sets correctly tagged and simply stops arming the next one.
+   *
+   * WHILE ARMED, LOGGING A SET DOES NOT START THE REST TIMER. That is the
+   * point of a superset: you go straight into the other exercise. Rest starts
+   * when the group is ended, which is also the moment it is actually earned.
+   */
+  var pendingGroup = null;
   var wtab = 'routines';
   var bgMode = 'rank';
   var bmWin = 7;          // body map window, in days
@@ -2095,6 +2153,34 @@
   // rendering path that could drift from the real one (repeat/remove keep
   // working identically either way, since these are the same DOM nodes the
   // order view already built).
+  /**
+   * Collapse a day's sets into runs: consecutive sets sharing a grp.id become
+   * one run, everything else is a run of one.
+   *
+   * CONSECUTIVE, not merely equal. Two sets with the same grp.id separated by
+   * an unrelated set are two runs, because that is what happened - and the
+   * alternative would be drawing a connected block around sets that were not
+   * done together. In practice the log is append-only within a session so the
+   * two agree, but the display should follow the order rather than assume it.
+   */
+  function groupRuns(a){
+    var out = [];
+    a.forEach(function(s){
+      var last = out[out.length - 1];
+      if (s.grp && s.grp.id && last && last.grp && last.grp.id === s.grp.id){
+        last.sets.push(s);
+        return;
+      }
+      out.push({ grp: (s.grp && s.grp.id) ? s.grp : null, sets: [s] });
+    });
+    return out;
+  }
+
+  function grpLabel(kind, n){
+    var word = kind === 'dropset' ? 'Dropset' : 'Superset';
+    return word + '  ·  ' + n + (n === 1 ? ' set' : ' sets');
+  }
+
   function buildTodayRow(s){
     var li = document.createElement('li');
     var e = findEx(s.ex);
@@ -2182,6 +2268,29 @@
     msg('', true);
   }
 
+  // Draw one run: a lone set as itself, a group as a labelled connected block.
+  // Newest first inside the block too, matching the list around it.
+  function appendRun(ul, run){
+    if (!run.grp){
+      ul.appendChild(buildTodayRow(run.sets[0]));
+      return;
+    }
+    var head = document.createElement('li');
+    head.className = 'grpHead ' + (run.grp.kind === 'dropset' ? 'drop' : 'super');
+    var name = document.createElement('span');
+    name.textContent = grpLabel(run.grp.kind, run.sets.length);
+    var n = document.createElement('span');
+    n.className = 'n';
+    n.textContent = num(fromKg(run.sets.reduce(function(sum, s){ return sum + setVolume(s); }, 0))) + ' ' + unitLabel();
+    head.appendChild(name); head.appendChild(n);
+    ul.appendChild(head);
+    run.sets.slice().reverse().forEach(function(s){
+      var li = buildTodayRow(s);
+      li.classList.add('inGrp');
+      ul.appendChild(li);
+    });
+  }
+
   function renderTodayList(a){
     var ul = $('todayList');
     ul.innerHTML = '';
@@ -2198,12 +2307,15 @@
           '  ·  ' + num(fromKg(g.sets.reduce(function(sum, s){ return sum + setVolume(s); }, 0))) + ' ' + unitLabel();
         head.appendChild(name); head.appendChild(n);
         ul.appendChild(head);
+        // By body part, a superset's two exercises land in DIFFERENT buckets -
+        // that is the honest answer to "what did my chest do today", and
+        // drawing the group here would mean drawing half of it twice.
         g.sets.slice().reverse().forEach(function(s){ ul.appendChild(buildTodayRow(s)); });
       });
       return;
     }
 
-    a.slice().reverse().forEach(function(s){ ul.appendChild(buildTodayRow(s)); });
+    groupRuns(a).reverse().forEach(function(run){ appendRun(ul, run); });
   }
 
   // Deliberately NOT called niceDate: that name is already taken above and
@@ -2225,6 +2337,7 @@
     renderSuggest();
     renderLast();
     renderEditMode();
+    renderGroupRow();
 
     $('todayNote').textContent = a.length
       ? a.length + (a.length === 1 ? ' set, ' : ' sets, ') + num(fromKg(dayVolume(k))) + ' ' + unitLabel() + ' moved'
@@ -3359,18 +3472,103 @@
       return;             // no rest timer: an edit is bookkeeping, not a set you just did
     }
 
-    S.days[k].push({
+    var row = {
       id: 's' + Date.now() + Math.floor(Math.random() * 1000),
       ex: ex, kg: storedKg, reps: reps,
       rpe: isFinite(rpe) ? rpe : null, note: ''
-    });
+    };
+    // The tag, and nothing else. No branch below this cares whether a set is
+    // grouped, because nothing about a grouped set is different.
+    if (pendingGroup) row.grp = { id: pendingGroup.id, kind: pendingGroup.kind };
+    S.days[k].push(row);
+
     $('fReps').value = '';
     $('fRpe').value = '';
     msg('', true);
     buzz(12);
     persist();
     checkMilestones();
+
+    if (pendingGroup){
+      // Mid-group: no rest. A superset goes straight into the next exercise,
+      // and a dropset straight into the next drop - the rest is what comes
+      // after the whole thing, and it starts when the group is ended.
+      if (pendingGroup.kind === 'dropset'){
+        // Same lift, lighter. Keeping the exercise saves re-picking it and
+        // makes the weight box the only thing to change, which is the only
+        // thing that does change.
+        $('fEx').value = ex;
+        renderLast();
+      }
+      $('fKg').focus();
+      return;
+    }
     startRest();
+  }
+
+  /**
+   * Arm a group, or end the one running.
+   *
+   * Arming tags the set just logged as well, because a superset of one is not
+   * a thing: the group is this set and whatever comes next. If nothing has
+   * been logged yet there is nothing to pair with, and the row stays hidden.
+   */
+  function toggleGroup(kind){
+    var k = today();
+    var a = S.days[k] || [];
+    if (pendingGroup){
+      var wasKind = pendingGroup.kind;
+      pendingGroup = null;
+      renderHome();
+      // The rest that the whole group earned, started at the end of it.
+      startRest();
+      msg(wasKind === 'dropset' ? 'Dropset closed. Resting now.' : 'Superset closed. Resting now.', true);
+      return;
+    }
+    if (!a.length){ msg('Log the first set, then group the next one onto it.'); return; }
+    var last = a[a.length - 1];
+    var id = 'g' + Date.now() + Math.floor(Math.random() * 1000);
+    // If the last set is already in a group, extend that one rather than
+    // stranding it in a group of one and starting a second.
+    if (last.grp && last.grp.id){
+      pendingGroup = { id: last.grp.id, kind: last.grp.kind };
+    } else {
+      last.grp = { id: id, kind: kind };
+      pendingGroup = { id: id, kind: kind };
+    }
+    if (kind === 'dropset'){
+      $('fEx').value = last.ex;
+      renderLast();
+    }
+    persist();          // the tag on `last` is real now and must survive a reload
+    $('fKg').focus();
+  }
+
+  // The two buttons and the line under them. Reads as what it will DO next,
+  // not as a state - "+ Superset" before, "End superset" during.
+  function renderGroupRow(){
+    var row = $('grpRow'), note = $('grpNote');
+    if (!row || !note) return;
+    var a = S.days[today()] || [];
+    row.hidden = !a.length || !!editingSet;
+    var sup = $('bSuperset'), drp = $('bDropset');
+    if (!sup || !drp) return;
+    if (pendingGroup){
+      var isDrop = pendingGroup.kind === 'dropset';
+      sup.textContent = isDrop ? 'End dropset' : 'End superset';
+      sup.hidden = false;
+      drp.hidden = true;
+      note.hidden = false;
+      note.textContent = isDrop
+        ? 'Dropset running. Log the next drop - same lift, less weight. No rest until you end it.'
+        : 'Superset running. Log the other exercise. No rest until you end it.';
+    } else {
+      sup.textContent = '+ Superset';
+      drp.textContent = '+ Dropset';
+      sup.hidden = false;
+      drp.hidden = false;
+      note.hidden = true;
+    }
   }
 
   function loadPlan(id){
@@ -3488,6 +3686,8 @@
         render();
         return;
       }
+      if (t === $('bSuperset')) { toggleGroup('superset'); return; }
+      if (t === $('bDropset')) { toggleGroup('dropset'); return; }
       if (t === $('bRest')) { startRest(); return; }
       if (t === $('bRestStop')) { stopRest(); return; }
 

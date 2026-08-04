@@ -129,6 +129,39 @@ if (privMatch) {
   deferred.push(pending)
 }
 
+console.log('\n[3d] the Edge Function is at least syntactically valid')
+// Nothing in this repo compiles the function - there is no build step - so a
+// stray bracket only surfaces at `supabase functions deploy`, as a bundler
+// error, minutes later. That happened: splitting the handler into
+// Deno.serve(...) + handle() left the original `})` closing a function that
+// no longer took a callback, and it shipped as far as the deploy.
+//
+// Balanced delimiters, counted outside strings, comments and template
+// literals. Not a type check - just the class of error that actually got out.
+// Parsed by a REAL parser, not a hand-rolled bracket counter. The first
+// version of this check was that counter, and it reported an imbalance in a
+// file that parses perfectly - a check that cries wolf on correct code is
+// worse than no check, because the next person learns to ignore it.
+//
+// The type annotations are stripped first, approximately. That is the honest
+// limitation: this proves the SHAPE is valid JavaScript, not that the types
+// are right. Its failure mode is a false alarm on some future annotation the
+// stripper does not know, which is loud and gets fixed - not silence.
+{
+  const stripped = fn
+    .replace(/^import .*$/gm, '')
+    .replace(/: Promise<Response>/g, '')
+    .replace(/: (Uint8Array|string|number|boolean)\b/g, '')
+    .replace(/\bas \{[^}]*\}/g, '')
+    .replace(/\(e as [^)]*\)/g, '(e)')
+    .replace(/Deno\.env\.get\(([^)]*)\)!/g, 'Deno.env.get($1)')
+  let parseErr = null
+  try { new Function(stripped) } catch (e) { parseErr = e.message }
+  check('it parses as valid JavaScript', parseErr === null, parseErr)
+}
+check('the handler is a named function, and Deno.serve only wraps it',
+  /Deno\.serve\(async \(\) => \{/.test(fn) && /^async function handle\(\)/m.test(fn))
+
 console.log('\n[3c] a timer can never be retried for ever')
 check('the query has a lower bound, not just "anything due"', /\.gte\('fire_at'/.test(fn))
 check('the staleness cutoff is named, not a magic number', /STALE_AFTER_MS/.test(fn))

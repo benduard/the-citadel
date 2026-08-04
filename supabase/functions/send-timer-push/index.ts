@@ -183,4 +183,4 @@ async function handle(): Promise<Response> {
   return new Response(JSON.stringify({ ok: true, timers: timers.length, sent, dropped }), {
     headers: { 'Content-Type': 'application/json' }
   })
-})
+}

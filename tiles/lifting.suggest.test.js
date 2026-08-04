@@ -57,6 +57,7 @@ vm.runInContext(`
   ];
   function allEx(){ return LIB; }
   function findEx(n){ for (var i=0;i<LIB.length;i++) if (LIB[i].name===n) return LIB[i]; return null; }
+  ${grab('pickable')}
   ${grab('sessionsInLast14')}
   ${grab('suggestNext')}
 `, sandbox)

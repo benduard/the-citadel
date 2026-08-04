@@ -123,7 +123,22 @@ check('1 day ago reads "yesterday"', sandbox.lastTimeWhen('2026-07-30') === 'yes
 check('7 days ago says how long', /7 days ago/.test(sandbox.lastTimeWhen('2026-07-24')), sandbox.lastTimeWhen('2026-07-24'))
 check('far back is just the date', !/ago/.test(sandbox.lastTimeWhen('2026-01-02')), sandbox.lastTimeWhen('2026-01-02'))
 
-console.log('\n[11] a hand-typed exercise name cannot inject markup')
+console.log('\n[11] RPE survives the lookup, so the panel can show it')
+// The panel reminds him what that exact set WAS, and how hard it felt is part
+// of that: 100kg at RPE 6 and 100kg at RPE 9 print the same numbers and are
+// different sessions. This guards the carry-through - reshaping prevSessionFor
+// to hand back only { kg, reps } would empty the RPE column with no error.
+sandbox.S.days = {
+  '2026-07-24': [
+    { id:'r1', ex:'Bench Press', kg: lb(100), reps: 10, rpe: 8 },
+    { id:'r2', ex:'Bench Press', kg: lb(100), reps: 8 }          // logged before he rated them
+  ]
+}
+p = sandbox.prevSessionFor('Bench Press')
+check('a rated set keeps its RPE', p.sets[0].rpe === 8, String(p.sets[0].rpe))
+check('an unrated set stays unrated, not zero', !isFinite(p.sets[1].rpe), String(p.sets[1].rpe))
+
+console.log('\n[12] a hand-typed exercise name cannot inject markup')
 const bad = sandbox.esc('<img src=x onerror="alert(1)">')
 check('escaped', !bad.includes('<') && bad.includes('&lt;'), bad)
 

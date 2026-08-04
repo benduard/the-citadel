@@ -32,6 +32,7 @@ vm.runInContext(`
   var MUSCLES = ${block(/var MUSCLES\s*=/)};
   var SPLITS = ${block(/var SPLITS\s*=/)};
   var RAW = ${block(/var RAW\s*=/)};
+  var RETIRED = ${block(/var RETIRED_EXERCISES\s*=/)};
   function mkEx(r){
     return { name:r[0], pri:r[1], sec:r[2]?r[2].split(','):[], cat:r[3],
              pat:r[4], bwf:r[5], w:r[6], lad:r[7], custom:false };
@@ -40,7 +41,7 @@ vm.runInContext(`
   function splitById(id){ for (var i=0;i<SPLITS.length;i++) if (SPLITS[i].id===id) return SPLITS[i]; return null; }
 `, sandbox)
 
-const { MUSCLES, SPLITS, LIB } = sandbox
+const { MUSCLES, SPLITS, LIB, RETIRED } = sandbox
 let fails = 0
 const check = (label, cond, extra) => {
   console.log(`  ${cond ? 'PASS' : 'FAIL'}  ${label}${cond || !extra ? '' : '  -> ' + extra}`)
@@ -114,7 +115,7 @@ check('Back Squat leads the quads group', quads[0].name === 'Back Squat', quads[
 console.log('\n[8] the real machines Ruben listed land on the right day')
 const names = LIB.map(e => e.name)
 ;['Pendulum Squat','Hack Squat','Seated Calf Raise','Seated Hamstring Curl',
-  'Lying Hamstring Curl','Adductor/Abductor Machine'].forEach(n =>
+  'Lying Hamstring Curl','Hip Adduction Machine','Hip Abduction Machine'].forEach(n =>
   check(`${n} is on leg day`, legs.includes(n)))
 ;['Dumbbell Flat Press','Incline Plate-Loaded Machine Press','Decline Plate-Loaded Machine Press',
   'Plate-Loaded Machine Shoulder Press','Standing Machine Lateral Raise','Seated Machine Lateral Raise',
@@ -131,6 +132,33 @@ check('no accidental duplicate of an exercise that already existed',
   names.filter(n => n === 'Leg Extension').length === 1 &&
   names.filter(n => n === 'Standing Calf Raise').length === 1 &&
   names.filter(n => n === 'Skull Crusher').length === 1)
+
+console.log('\n[9] adduction and abduction are two exercises, and the old one is retired not deleted')
+// The point of the split: one entry meant one history for two machines at two
+// different stacks, so "last time" and the PR were both whichever one he
+// happened to do last.
+const byName = n => LIB.filter(e => e.name === n)[0]
+const add = byName('Hip Adduction Machine'), abd = byName('Hip Abduction Machine')
+check('Hip Adduction Machine exists', !!add)
+check('Hip Abduction Machine exists', !!abd)
+check('they are genuinely two entries, not one renamed', add && abd && add.name !== abd.name)
+// Abduction IS glute work. Adduction is the inner thigh, which is why the
+// muscle had to exist before the exercise could be filed honestly.
+check('abduction trains glutes', abd && abd.pri === 'glutes', abd && abd.pri)
+check('adduction trains adductors, not glutes', add && add.pri === 'adductors', add && add.pri)
+check('adductors is a real muscle in MUSCLES', !!MUSCLES.adductors)
+
+const old = byName('Adductor/Abductor Machine')
+check('the combined entry is still in the library', !!old)
+check('it is marked retired', !!(old && RETIRED['Adductor/Abductor Machine']))
+// This is the whole reason it was kept. A set stores its exercise as a string,
+// so deleting the entry would leave every set already logged under this name
+// with no bodyweight fraction, no ladder, no rank and no unit handling - and
+// nothing on screen would say so.
+check('so findEx can still resolve sets already logged under it',
+  !!(old && old.lad && old.lad.length === 9))
+check('neither replacement is retired',
+  !RETIRED['Hip Adduction Machine'] && !RETIRED['Hip Abduction Machine'])
 
 console.log(`\n${fails} failure(s)`)
 process.exit(fails ? 1 : 0)

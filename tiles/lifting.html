@@ -73,6 +73,13 @@
   one column with no way to tell them apart. One canonical unit in, converted
   at the edges, is the only version of this that survives a preference change.
 
+  A SET NEEDS REPS, NOT WEIGHT. kg 0 is allowed on ANY exercise (2026-08-04) -
+  a set done with just the body is a set. It is never turned into load that was
+  not there: volume is effLoad x reps, so where the movement carries no
+  bodyweight fraction the set is worth 0 to lifting_volume and to every rank,
+  and zeroWeightNote() says so on screen at the moment it is logged. Guessing a
+  fraction for a machine would put an invented number in the ledger.
+
   DUMBBELL AND CABLE WEIGHT IS THE TOTAL ON THE BODY. Two 20kg dumbbells is
   logged as 40. One number per set, one meaning, so volume and ratios stay
   comparable across every exercise. UNILATERAL EXERCISES (UNI_EXERCISES,
@@ -382,6 +389,13 @@
              color:var(--faint); width:34px; flex:none; letter-spacing:.06em; }
   .ltRow .w{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px;
              color:var(--text); }
+  /* RPE rides with the weight because it is part of what that set WAS: 100kg
+     at RPE 6 and 100kg at RPE 9 are the same row of numbers and completely
+     different sessions. Muted, because it is context for the load, not a
+     verdict on it. */
+  .ltRow .rpe{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10px;
+               color:var(--faint); letter-spacing:.04em; white-space:nowrap; }
+  .ltRow.now .rpe{ color:var(--volt); opacity:.8; }
   .ltRow .r{ margin-left:auto; font-size:10.5px; white-space:nowrap;
              font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   .ltRow .r.up{ color:var(--mint); }
@@ -1096,11 +1110,17 @@
   /* ======================= the exercise library ======================= */
   // name | primary | secondary | category | pattern | bodyweight factor |
   // weight in the overall rank | ladder of 9 entry ratios | cues
+  // Adductors earn their own entry rather than being folded into glutes or
+  // quads, added 2026-08-04 when the adduction and abduction machines became
+  // two exercises. Abduction IS glute work - gluteus medius - but adduction is
+  // the inner thigh, a group neither of those names covers. Filing it under
+  // glutes would shade the wrong part of the body map every time he trained
+  // it, which is a small lie the figure would then keep telling.
   var MUSCLES = {
     chest:'Chest', lats:'Lats', traps:'Traps', delts:'Shoulders', reardelt:'Rear delts',
     biceps:'Biceps', triceps:'Triceps', forearms:'Forearms', abs:'Abs', obliques:'Obliques',
     lowerback:'Lower back', glutes:'Glutes', quads:'Quads', hams:'Hamstrings', calves:'Calves',
-    neck:'Neck'
+    adductors:'Adductors', neck:'Neck'
   };
   var BIG_MUSCLES = { chest:1, lats:1, quads:1, hams:1, glutes:1, lowerback:1, traps:1 };
   var PATTERNS = { pressH:'Horizontal press', pressV:'Overhead press', squat:'Squat',
@@ -1131,7 +1151,7 @@
    * tab instead of quietly living inside another day's list.
    */
   var SPLITS = [
-    { id:'legs', name:'Legs', mus:['quads','hams','glutes','calves'] },
+    { id:'legs', name:'Legs', mus:['quads','hams','glutes','adductors','calves'] },
     { id:'push', name:'Chest & Shoulders + Abs', mus:['chest','delts','abs','obliques'] },
     { id:'pull', name:'Back & Arms', mus:['lats','traps','reardelt','biceps','triceps','forearms','lowerback'] },
     { id:'neck', name:'Neck', mus:['neck'] }
@@ -1208,7 +1228,22 @@
     ['Seated Calf Raise','calves','','legs','curl',0,1,[0.35,0.55,0.78,1.02,1.30,1.60,1.92,2.28,2.65],'Knees bent changes the target to the soleus, under the calf.|Pause stretched at the bottom, do not bounce.|Slow up, slower down.'],
     ['Seated Hamstring Curl','hams','','legs','hinge',0,1,[0.25,0.38,0.52,0.68,0.85,1.04,1.24,1.45,1.68],'Back flat against the pad, hips do not rock.|Point the toes to feel it higher, flex them to feel it lower.|Squeeze at the bottom of the curl, control the return.'],
     ['Lying Hamstring Curl','hams','','legs','hinge',0,1,[0.28,0.42,0.57,0.74,0.93,1.13,1.34,1.57,1.82],'Hips stay pinned to the pad - a rising hip is the lower back taking over.|Full squeeze at the top, do not let it snap back down.|Point the toes for outer hamstring, flex them for inner.'],
-    ['Adductor/Abductor Machine','glutes','','legs','curl',0,1,[0.30,0.48,0.68,0.90,1.14,1.40,1.68,1.98,2.30],'Log adductor and abductor work separately if the stack differs between them.|Controlled through the whole range, no slamming the plates.|A small range done fully beats a big range done half way.'],
+    // Two machines, two exercises, as of 2026-08-04. They were one entry, and
+    // one entry meant one history: two different movements at two different
+    // stacks averaged into a single line, so "last time" showed whichever he
+    // happened to do last and the PR was just the heavier of the two. Both
+    // carry the ladder the combined entry already had - that calibration was
+    // written for this machine, and inventing two new curves to tell them
+    // apart would be putting made-up numbers where there is no measurement.
+    ['Hip Adduction Machine','adductors','','legs','curl',0,1,[0.30,0.48,0.68,0.90,1.14,1.40,1.68,1.98,2.30],'Knees squeeze together, hold the middle for a beat.|Sit upright. Leaning back turns it into a different exercise.|Only open as far as you can control the way back in.'],
+    ['Hip Abduction Machine','glutes','','legs','curl',0,1,[0.30,0.48,0.68,0.90,1.14,1.40,1.68,1.98,2.30],'Push the knees apart slowly. No bouncing the stack.|A slight forward lean puts it in the upper glute.|Control the way back in, that is half the set.'],
+    // RETIRED, not deleted. Every set already logged under this name keeps its
+    // definition, its label, its volume and its rank because findEx still
+    // resolves it. It is simply never offered for new work again. Renaming
+    // those sets to one of the two above would be guessing which machine he
+    // was actually on, and deleting the entry would strand the history under a
+    // name nothing in the file could explain.
+    ['Adductor/Abductor Machine','glutes','','legs','curl',0,1,[0.30,0.48,0.68,0.90,1.14,1.40,1.68,1.98,2.30],'Retired: this was one entry for two machines. Use Hip Adduction or Hip Abduction instead.|Sets already logged here are kept exactly as they were.|Nothing new can be logged against it.'],
 
     ['Dumbbell Flat Press','chest','delts,triceps','push','pressH',0,2,[0.30,0.46,0.64,0.85,1.08,1.30,1.52,1.78,2.08],'Log both dumbbells added together.|Wrists stacked over elbows the whole way.|Stop when the upper arm reaches the torso line.'],
     ['Incline Plate-Loaded Machine Press','chest','delts,triceps','push','pressH',0,2,[0.35,0.53,0.73,0.95,1.20,1.46,1.72,2.01,2.34],'Handles roughly in line with the collarbone before you press.|Press up and slightly back into the seat, not straight out.|Do not let the shoulders round forward at the bottom.'],
@@ -1251,11 +1286,24 @@
    */
   var UNI_EXERCISES = { 'Dumbbell Row': true };
 
+  /**
+   * RETIRED EXERCISES. Still in the library, never offered for new work.
+   *
+   * An exercise name IS the key its history hangs on - every set stores `ex`
+   * as a string. So an entry can never simply be deleted once it might have
+   * sets under it: findEx would return null, and that set loses its bodyweight
+   * fraction, its ladder, its rank and its unit handling all at once, silently.
+   * Retiring keeps the definition resolvable for everything already logged and
+   * takes it out of the pickers, which is the only part that needed to change.
+   */
+  var RETIRED_EXERCISES = { 'Adductor/Abductor Machine': true };
+
   function mkEx(r){
     return {
       name: r[0], pri: r[1], sec: r[2] ? r[2].split(',') : [], cat: r[3],
       pat: r[4], bwf: r[5], w: r[6], lad: r[7], cues: r[8].split('|'), custom: false,
-      uni: !!UNI_EXERCISES[r[0]]
+      uni: !!UNI_EXERCISES[r[0]],
+      retired: !!RETIRED_EXERCISES[r[0]]
     };
   }
   var LIB = RAW.map(mkEx);
@@ -1270,7 +1318,7 @@
     // the same way it is its own section in the picker.
     { id:'ruben3', name:'Your split, 3 days', why:'Legs, then chest and shoulders with abs, then back and arms. Built from the machines you actually use.',
       routines:[
-        { name:'Legs', items:[['Back Squat',4,5,0],['Hack Squat',3,8,0],['Romanian Deadlift',3,8,0],['Lying Hamstring Curl',3,10,0],['Leg Extension',3,12,0],['Adductor/Abductor Machine',3,15,0],['Standing Calf Raise',4,12,0],['Seated Calf Raise',3,15,0]] },
+        { name:'Legs', items:[['Back Squat',4,5,0],['Hack Squat',3,8,0],['Romanian Deadlift',3,8,0],['Lying Hamstring Curl',3,10,0],['Leg Extension',3,12,0],['Hip Adduction Machine',3,15,0],['Hip Abduction Machine',3,15,0],['Standing Calf Raise',4,12,0],['Seated Calf Raise',3,15,0]] },
         { name:'Chest & Shoulders + Abs', items:[['Barbell Bench Press',4,5,0],['Incline Plate-Loaded Machine Press',3,8,0],['Plate-Loaded Machine Shoulder Press',3,8,0],['Chest Fly Machine',3,12,0],['Seated Machine Lateral Raise',4,15,0],['Hanging Leg Raise',3,12,0],['Weighted Crunch',3,15,0]] },
         { name:'Back & Arms', items:[['Deadlift',3,4,0],['Lat Pulldown',4,10,0],['Chest Supported T-Bar Row',3,10,0],['Seated Cable Row',3,10,0],['Rear Delt Fly Machine',3,15,0],['Machine Preacher Curl',3,10,0],['Incline Dumbbell Curl',3,12,0],['Dip',3,8,0],['Rope Triceps Pushdown',3,12,0]] },
         { name:'Neck', items:[['Weighted Neck Curl',3,15,0],['Weighted Neck Extension',3,15,0],['Weighted Side Neck Curl',3,15,0]] }
@@ -1367,6 +1415,21 @@
 
   function allEx(){ return LIB.concat(S.custom.map(function(c){ var o = mkEx([c.name,c.pri,(c.sec||[]).join(','),c.cat||'custom',c.pat||'curl',c.bwf||0,c.w||1,c.lad||null,(c.cues||[]).join('|')||'Yours.']); o.custom = true; if (!c.lad) o.lad = null; o.uni = !!c.uni; return o; })); }
   function findEx(n){ var a = allEx(); for (var i=0;i<a.length;i++) if (a[i].name === n) return a[i]; return null; }
+  // Has this exercise ever actually been done? A retired entry with sets under
+  // it still belongs on the ranks page and in the library - that is his record
+  // and it should stay readable. One with no history is just clutter.
+  function hasHistory(name){
+    for (var d in S.days){
+      if (!Object.prototype.hasOwnProperty.call(S.days, d)) continue;
+      for (var i = 0; i < (S.days[d] || []).length; i++) if (S.days[d][i].ex === name) return true;
+    }
+    return false;
+  }
+  // Offered for NEW work. Retired means retired even with history: the two
+  // machines that replaced it are the ones to log from here.
+  function pickable(e){ return !e.retired; }
+  // Worth showing at all - as a thing to do, or as a thing already done.
+  function listable(e){ return !e.retired || hasHistory(e.name); }
 
   /* ============================ maths ============================ */
   function toKg(v){ return S.unit === 'lb' ? v / LB_PER_KG : v; }
@@ -1393,10 +1456,36 @@
     var carried = e && e.bwf && S.bw;
     if (carried && !s.kg) return 'bodyweight x ' + s.reps;
     if (carried) return 'bodyweight + ' + showW(s.kg) + ' ' + unitLabel() + ' x ' + s.reps;
+    // Nothing on it. "0 kg x 12" is the number in the box; "bodyweight x 12"
+    // is the set he did, and it is the same row either way. What it counted
+    // toward is a separate question, answered by zeroWeightNote().
+    if (!s.kg) return 'bodyweight x ' + s.reps;
     // Stored kg is the total across both hands (see UNI_EXERCISES) - halve it
     // back to what was actually typed for one hand.
     if (e && e.uni) return showW(s.kg / 2) + ' ' + unitLabel() + ' per hand x ' + s.reps;
     return showW(s.kg) + ' ' + unitLabel() + ' x ' + s.reps;
+  }
+
+  /**
+   * What a no-weight set actually counted for, said out loud, or '' when there
+   * is nothing surprising to say.
+   *
+   * A set logged with an empty weight box is honest work and it is now allowed
+   * on anything. But volume is effLoad x reps, so on a movement that carries
+   * none of the body it is worth zero, and a zero that arrives silently looks
+   * exactly like a bug. Two cases are worth a line:
+   *   - the movement carries bodyweight but no bodyweight is on record, so the
+   *     app has nothing to multiply by and will not guess one
+   *   - the movement carries none, so the honest answer is zero
+   */
+  function zeroWeightNote(set){
+    if (set.kg) return '';
+    var e = findEx(set.ex);
+    if (e && e.bwf){
+      if (S.bw) return '';                    // counted properly, nothing to explain
+      return 'Logged. Add your bodyweight in Settings and this one starts counting toward volume.';
+    }
+    return 'Logged with no weight. This movement carries none of your bodyweight, so it adds nothing to today’s volume.';
   }
 
   // The load actually moved by one rep: what was on the bar plus whatever
@@ -1810,7 +1899,7 @@
   function fillSelect(sel, keepValue, splitId){
     var cur = keepValue ? sel.value : '';
     sel.innerHTML = '';
-    var list = allEx();
+    var list = allEx().filter(pickable);
     var sp = splitId ? splitById(splitId) : null;
 
     if (sp){
@@ -2010,7 +2099,7 @@
     if (!sp) return null;
     var split = splitById(sp);
     var candidates = allEx().filter(function(e){
-      return split.mus.indexOf(e.pri) !== -1 && !loggedToday[e.name];
+      return pickable(e) && split.mus.indexOf(e.pri) !== -1 && !loggedToday[e.name];
     });
     if (!candidates.length) return null;
 
@@ -2085,6 +2174,11 @@
     if (!w) return;
     var e = findEx($('fEx').value);
     w.textContent = (e && e.uni) ? 'Weight per hand' : 'Weight';
+    // Leaving it empty is a real answer, so the box says so rather than making
+    // him find out by trying. "Added" on the movements that carry the body,
+    // because on a pull up the box was never the whole load anyway.
+    var box = $('fKg');
+    if (box) box.placeholder = (e && e.bwf) ? 'added, or none' : 'none = bodyweight';
   }
 
   function renderLast(){
@@ -2119,10 +2213,15 @@
       } else if (isNow){
         right = '<button class="btn small ghost" type="button" data-use="' + i + '">Use</button>';
       }
+      // An RPE only shows when one was actually recorded. A blank is a blank -
+      // printing "RPE -" for every set logged before he started rating them
+      // would fill the panel with a column of nothing.
+      var rpeTag = isFinite(s.rpe) && s.rpe !== null
+        ? '<span class="rpe">RPE ' + esc(String(s.rpe)) + '</span>' : '';
       html += '<div class="ltRow' + (isNow ? ' now' : '') + '">' +
         '<span class="n">SET ' + (i + 1) + '</span>' +
         '<span class="w">' + esc(setLabel(s, e)) + '</span>' +
-        right + '</div>';
+        rpeTag + right + '</div>';
     });
 
     // Sets beyond what was done last time have nothing to beat, and saying so
@@ -2460,8 +2559,13 @@
                   'M 208 103 Q 211 119 210 135 L 202 135 Q 200 119 200 103 Z'],
       abs:       ['M 54 79 h 16 v 39 q -8 6 -16 0 z'],
       obliques:  ['M 46 81 h 7 v 34 q -6 -6 -7 -17 z', 'M 78 81 h -7 v 34 q 6 -6 7 -17 z'],
-      quads:     ['M 46 133 q -4 24 -2 53 h 14 q 2 -29 2 -53 z',
-                  'M 78 133 q 4 24 2 53 h -14 q -2 -29 -2 -53 z'],
+      // Narrowed from h14/h-14 when the adductors got their own strip below.
+      // Same reason as the bodygraph: overlapping translucent fills invent a
+      // muscle at the seam.
+      quads:     ['M 46 133 q -4 24 -2 53 h 9 q 2 -29 2 -53 z',
+                  'M 78 133 q 4 24 2 53 h -9 q -2 -29 -2 -53 z'],
+      adductors: ['M 55 133 L 60 133 L 58.5 172 L 54 172 z',
+                  'M 69 133 L 64 133 L 65.5 172 L 70 172 z'],
       reardelt:  ['M 160 53 Q 149 56 147 68 Q 146 76 151 80 Q 157 75 159 64 Z',
                   'M 196 53 Q 207 56 209 68 Q 210 76 205 80 Q 199 75 197 64 Z'],
       lats:      ['M 161 68 Q 153 84 157 106 L 175 112 L 177 92 L 169 70 Z',
@@ -2741,7 +2845,7 @@
     // library
     var ll = $('libList'); ll.innerHTML = '';
     var q = searchTerm.toLowerCase().trim();
-    var list = allEx().filter(function(e){
+    var list = allEx().filter(listable).filter(function(e){
       if (!q) return true;
       if (e.name.toLowerCase().indexOf(q) >= 0) return true;
       var ms = [e.pri].concat(e.sec).map(function(m){ return (MUSCLES[m] || m).toLowerCase(); }).join(' ');
@@ -2944,9 +3048,13 @@
 
   function renderLadder(){
     var sel = $('ladPick');
-    if (sel.options.length !== allEx().filter(function(e){ return e.lad; }).length){
+    // listable, not pickable: a retired exercise he actually trained keeps its
+    // ladder here, because that is where its rank is read from and the history
+    // is real. One with no sets under it never appears at all.
+    function laddered(){ return allEx().filter(listable).filter(function(e){ return e.lad; }); }
+    if (sel.options.length !== laddered().length){
       sel.innerHTML = '';
-      allEx().filter(function(e){ return e.lad; }).forEach(function(e){
+      laddered().forEach(function(e){
         var o = document.createElement('option'); o.value = e.name; o.textContent = e.name;
         sel.appendChild(o);
       });
@@ -2997,8 +3105,15 @@
     ['abs', 'rect', 50, 77, 20, 43, 'abs'],
     ['obliques', 'rect', 41, 79, 8, 37, 'obliques'],
     ['obliques', 'rect', 71, 79, 8, 37, 'obliques'],
-    ['quads', 'rect', 42, 126, 16, 57, 'quads'],
-    ['quads', 'rect', 62, 126, 16, 57, 'quads'],
+    // The quads gave up their inner third to the adductors rather than the
+    // adductors being drawn on top: two translucent shapes over one another
+    // read as a third, darker muscle that is not there.
+    ['quads', 'rect', 42, 126, 12, 57, 'quads'],
+    ['quads', 'rect', 66, 126, 12, 57, 'quads'],
+    // Upper inner thigh, and shorter than the quads on purpose - the adductors
+    // do not run to the knee.
+    ['adductors', 'rect', 54.5, 126, 3.5, 36, 'adductors'],
+    ['adductors', 'rect', 62, 126, 3.5, 36, 'adductors'],
     ['calves', 'rect', 44, 189, 13, 43, 'calves'],
     ['calves', 'rect', 63, 189, 13, 43, 'calves']
   ];
@@ -3433,7 +3548,19 @@
     if (!isFinite(reps) || reps < 1) { msg('Reps first. An incomplete set logs nothing rather than half a row.'); return; }
     if (!isFinite(kgRaw) || kgRaw < 0) kgRaw = 0;
     var e = findEx(ex);
-    if (!kgRaw && (!e || !e.bwf)) { msg('Weight first. An incomplete set logs nothing rather than half a row.'); return; }
+    /**
+     * NO WEIGHT IS A REAL SET. Until 2026-08-04 an empty weight box was
+     * refused unless the movement carried bodyweight (bwf > 0), so a set done
+     * with just the body on anything else could not be logged at all. Reps are
+     * the thing that makes it a set; the weight is allowed to be nothing.
+     *
+     * What it CANNOT do is invent load. Volume is effLoad x reps, and for a
+     * movement with no bodyweight fraction effLoad is 0, so a set like this
+     * adds nothing to lifting_volume and nothing to a rank. That is arithmetic,
+     * not an opinion, and the alternative - guessing what fraction of him a
+     * machine happens to carry - would put a made-up number straight into the
+     * ledger. So it logs, and zeroWeightNote() says plainly what it counted.
+     */
 
     var k = today();
     S.days[k] = S.days[k] || [];
@@ -3484,7 +3611,7 @@
 
     $('fReps').value = '';
     $('fRpe').value = '';
-    msg('', true);
+    msg(zeroWeightNote(row), true);
     buzz(12);
     persist();
     checkMilestones();
@@ -3714,6 +3841,12 @@
         var kgU = srcU.kg && eU && eU.uni ? srcU.kg / 2 : srcU.kg;
         $('fKg').value = kgU ? Math.round(fromKg(kgU) * 10) / 10 : '';
         $('fReps').value = srcU.reps;
+        // RPE comes across with the rest of the set, because it is part of what
+        // that set was. It is still only a starting point: the whole panel is a
+        // reminder of last time, and how hard it felt today is the one field
+        // nothing can prefill honestly. An old set with no RPE clears the box
+        // rather than leaving the previous set's rating sitting in it.
+        $('fRpe').value = isFinite(srcU.rpe) && srcU.rpe !== null ? srcU.rpe : '';
         $('fReps').focus();
         msg('Last time’s set ' + (parseInt(a, 10) + 1) + ' is in the form. Change it to what you actually do.', true);
         return;

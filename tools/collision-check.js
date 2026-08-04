@@ -23,7 +23,7 @@ const URL = process.env.BOARD || 'http://localhost:3000/'
 const WIDTHS = [320, 375, 390, 414, 430, 500, 600, 640, 700, 708, 760, 820, 900, 1024, 1280, 1440]
 
 // Every tile the host opens full screen, by the aria-label it gives the opener.
-const TILES = ['Lists', 'Check in', 'Body', 'Recovery', 'Lifting', 'Progress']
+const TILES = ['Lists', 'Check in', 'Body', 'Recovery', 'Lifting', 'Progress', 'Notes']
 
 // Anything in a tile header worth protecting: it either says a number or it
 // is tappable. A label that gets covered is a lie; a control that gets covered

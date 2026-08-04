@@ -21,6 +21,7 @@ node tiles/lifting.bodyweight.test.js
 node tiles/lists.test.js
 node tiles/lists.calendar.test.js
 node tiles/lists.day.test.js
+node tiles/notes.test.js
 node tiles/sealed.test.js
 echo "All suites passed."
 

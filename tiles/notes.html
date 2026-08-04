@@ -1,0 +1,676 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Notes</title>
+<!--
+  Vitality tile: notes
+  Plain notes, the way the phone does them: a list, newest edit first, tap one
+  to write in it. Nothing clever, and nothing that reads them.
+
+  store shape via Vitality.save/load:
+    {
+      v: 1,
+      notes: [ { id, body, createdAt, updatedAt } ]   // newest updatedAt first
+    }
+
+  THE TITLE IS NOT STORED. It is the first non-empty line of `body`, computed
+  every time it is shown. Storing a title beside the text means two things that
+  can disagree - rename the note and the first line still says the old thing,
+  or edit the first line and the list still shows the old title - and there is
+  no version of that which is not a bug waiting. Editing the first line renames
+  the note, which is exactly how the Notes app on his phone behaves.
+
+  createdAt and updatedAt are full ISO timestamps, not date keys. Two notes
+  written the same morning need to sort against each other, and a date alone
+  cannot do it.
+
+  THIS TILE REPORTS NOTHING, and that is a decision rather than an omission.
+  A tile reports ONE honest number or none at all. There is no honest number
+  here: a count of notes is not progress toward getting stronger, feeling good
+  or showing up, and reporting one would put a line in the ledger that means
+  nothing and then invite a weight in weights.ts to make it mean something.
+  Notes is a place to write, and its value is that the writing is kept and
+  follows him. See lib/tiles/weights.ts, where it is deliberately absent from
+  every goal for the same reason `progress` is.
+
+  WHERE IT SYNCS. Nowhere by itself - the tile is sealed, it cannot fetch and
+  holds no key. It calls Vitality.save/load, the host routes that to the vault,
+  and signed in that vault is Supabase. So notes follow him across devices for
+  exactly the same reason and by exactly the same path as every other tile's
+  data. Signed out it is this device's storage, same as the rest of the board.
+
+  NO prompt(), confirm() OR alert() ANYWHERE. The frame is sandbox=allow-scripts
+  with no allow-modals, so all three are silently dead here - prompt returns
+  null and confirm returns false with nothing in the console. Deleting a note
+  arms the button instead. See vault/decisions.md and tiles/sealed.test.js.
+
+  SAVING IS AUTOMATIC AND DEBOUNCED. Every keystroke writing to the vault would
+  be a write per character; a Save button would mean a note can be lost by
+  walking away from it. So it saves 600ms after typing stops, and again on
+  blur, and the header says which of the two states it is in - "Saving" or
+  "Saved", never a claim it has not earned.
+-->
+<style>
+  :root{
+    --bg:#050505;
+    --card:rgba(9,13,12,0.72);
+    --border:rgba(148,163,158,0.16);
+    --text:#E7ECEA;
+    --muted:#94A39E;
+    --faint:#5C6B66;
+    --mint:#6EE7B7;
+    --amber:#FCD34D;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    min-height:100vh;
+    background:transparent;
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    accent-color:var(--mint);
+    padding-top:env(safe-area-inset-top);
+    padding-right:env(safe-area-inset-right);
+    padding-bottom:env(safe-area-inset-bottom);
+    padding-left:env(safe-area-inset-left);
+    overflow-x:hidden;
+  }
+  html[data-mode="page"] body{ background:var(--bg); }
+  ::selection{ background:rgba(110,231,183,.28); }
+
+  .eyebrow{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--muted); margin:0;
+  }
+  .hero{ font-family:Georgia,"Times New Roman",serif; font-weight:400; line-height:1; }
+
+  /* poster */
+  /* NOT opacity:0 + an entrance animation - see checkin.html and
+     vault/decisions.md. Six sealed tiles mount at once and Chromium sometimes
+     never starts a fresh iframe's CSS animation, leaving the poster stuck
+     invisible for ever. */
+  .posterView{
+    display:flex; flex-direction:column; justify-content:center;
+    gap:10px; height:100%; min-height:100vh; padding:20px;
+  }
+  .posterHero{ display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; }
+  /* clamp, not a fixed size: an `s` tile is half a phone's width and a fixed
+     46px number overflows it. See tools/number-check.js. */
+  .posterHero .num{ font-size:clamp(30px,11vw,46px); }
+  .posterHero .unit{ font-size:13px; color:var(--muted); }
+  .posterLast{
+    font-size:12.5px; color:var(--muted); line-height:1.4;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+    overflow:hidden;
+  }
+  .posterEmpty{ font-size:13px; color:var(--faint); line-height:1.5; }
+
+  /* page */
+  .pageView{ display:none; }
+  html[data-mode="page"] .pageView{
+    display:block; min-height:100vh;
+    padding:28px 20px calc(40px + env(safe-area-inset-bottom));
+    max-width:560px; margin:0 auto;
+  }
+  html[data-mode="page"] .posterView{ display:none; }
+
+  .pageHead{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  /* The host's close button is fixed 16px from the VIEWPORT's top right and
+     36px wide, so it owns 16-52px in from that corner whatever this column's
+     width is. Below ~640px the column reaches the edge and anything
+     right-aligned here lands under it. Same reservation every other tile
+     makes - see body.html and vault/decisions.md. */
+  @media (max-width: 640px){ .pageHead{ padding-right:44px; } }
+  .pageHero{ display:flex; align-items:baseline; gap:12px; margin:10px 0 18px; flex-wrap:wrap; }
+  .pageHero .num{ font-size:clamp(34px,12vw,56px); }
+  .pageHero .unit{ font-size:14px; color:var(--muted); }
+
+  .trouble{
+    margin:0 0 16px; padding:10px 14px;
+    border:1px solid rgba(252,211,77,.32); border-radius:12px;
+    background:rgba(252,211,77,.06); color:var(--amber); font-size:13px; line-height:1.45;
+  }
+
+  .bar{ display:flex; gap:8px; margin-bottom:12px; }
+  .search{
+    flex:1; min-width:0; min-height:44px;
+    background:var(--card); border:1px solid var(--border); border-radius:12px;
+    padding:10px 13px; color:var(--text); font-family:inherit; font-size:15px;
+  }
+  .search::placeholder{ color:var(--faint); }
+  .search:focus{ outline:none; border-color:rgba(110,231,183,.5); }
+  .newBtn{
+    flex:none; min-height:44px; padding:0 16px; cursor:pointer;
+    border:0; border-radius:12px; background:var(--mint); color:#04120c;
+    font-size:14px; font-weight:700; font-family:inherit;
+  }
+  .newBtn:disabled{ opacity:.4; cursor:not-allowed; }
+
+  .noteRow{
+    display:flex; align-items:flex-start; gap:10px;
+    width:100%; text-align:left; cursor:pointer;
+    background:var(--card); border:1px solid var(--border); border-radius:14px;
+    padding:13px 14px; margin-bottom:8px; color:inherit; font-family:inherit;
+    transition:border-color .16s ease;
+  }
+  .noteRow:hover{ border-color:rgba(110,231,183,.32); }
+  .noteRow:disabled{ opacity:.5; cursor:not-allowed; }
+  .noteMain{ flex:1; min-width:0; }
+  .noteTitle{
+    font-size:15px; font-weight:600; letter-spacing:-.01em; color:var(--text);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .noteTitle.blank{ color:var(--faint); font-weight:400; font-style:italic; }
+  .noteSub{
+    margin-top:3px; font-size:12px; color:var(--muted); line-height:1.4;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .noteWhen{
+    flex:none; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px; letter-spacing:.04em; color:var(--faint); white-space:nowrap;
+    padding-top:3px;
+  }
+
+  /* the open note */
+  .editHead{ display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  .backBtn, .delBtn{
+    min-height:44px; padding:0 14px; cursor:pointer; font-family:inherit;
+    border-radius:11px; background:transparent; font-size:13px; font-weight:600;
+  }
+  .backBtn{ border:1px solid var(--border); color:var(--muted); }
+  .backBtn:hover{ color:var(--text); border-color:var(--muted); }
+  /* Amber, never red: this board does not use red, and deleting a note you
+     wrote is a caution, not an alarm. */
+  .delBtn{ border:1px solid rgba(252,211,77,.3); color:var(--amber); margin-left:auto; }
+  .delBtn:hover{ border-color:rgba(252,211,77,.55); }
+  .delBtn.armed{ background:rgba(252,211,77,.12); border-color:var(--amber); }
+
+  .editor{
+    width:100%; min-height:46vh; resize:vertical;
+    background:var(--card); border:1px solid var(--border); border-radius:14px;
+    padding:14px; color:var(--text); font-family:inherit; font-size:16px;
+    line-height:1.6;
+  }
+  .editor:focus{ outline:none; border-color:rgba(110,231,183,.4); }
+  .editor::placeholder{ color:var(--faint); }
+  .editor:disabled{ opacity:.5; }
+
+  .saveState{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint);
+  }
+  .saveState.on{ color:var(--mint); }
+
+  .hint{ margin:10px 0 0; font-size:11.5px; color:var(--faint); line-height:1.5; }
+  .empty{ padding:22px 2px; color:var(--faint); font-size:13px; line-height:1.55; }
+
+  @media (prefers-reduced-motion: reduce){
+    .posterView{ animation:none; opacity:1; }
+    .noteRow{ transition:none; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="posterView" id="posterView">
+    <p class="eyebrow">Notes</p>
+    <div class="posterHero" id="posterHero"></div>
+    <p class="posterLast" id="posterLast" hidden></p>
+  </div>
+
+  <div class="pageView" id="pageView">
+    <div class="pageHead">
+      <p class="eyebrow">Notes</p>
+    </div>
+    <div class="pageHero" id="pageHero"></div>
+
+    <p class="trouble" id="trouble" hidden></p>
+
+    <!-- the list -->
+    <div id="listView">
+      <div class="bar">
+        <input class="search" id="search" type="search" placeholder="Search your notes" autocomplete="off" disabled>
+        <button class="newBtn" id="newBtn" type="button" disabled>New</button>
+      </div>
+      <div id="noteList"></div>
+    </div>
+
+    <!-- one note, open -->
+    <div id="editView" hidden>
+      <div class="editHead">
+        <button class="backBtn" id="backBtn" type="button">All notes</button>
+        <span class="saveState" id="saveState"></span>
+        <button class="delBtn" id="delBtn" type="button">Delete</button>
+      </div>
+      <textarea class="editor" id="editor" placeholder="Start writing. The first line becomes the title."></textarea>
+      <p class="hint" id="editHint"></p>
+    </div>
+  </div>
+
+<script>
+// The Vitality bridge. postMessage only: a sealed tile has no storage of its
+// own, so save/load/report all travel to the host and back.
+(function(){
+  'use strict';
+
+  var seq = 0;
+  var pending = {};
+  var writeErrorHandlers = [];
+
+  window.addEventListener('message', function (e) {
+    var msg = e.data;
+    if (!msg || msg.source !== 'vitality-host') return;
+    if (msg.type === 'load:result') {
+      var p = pending[msg.id];
+      if (p) { delete pending[msg.id]; p.resolve({ ok: true, data: msg.data }); }
+      return;
+    }
+    if (msg.type === 'save:error' || msg.type === 'report:error') {
+      writeErrorHandlers.forEach(function (fn) { fn(msg.type, msg.reason); });
+    }
+  });
+
+  function post(type, payload) {
+    var msg = { source: 'vitality-tile', type: type };
+    for (var k in payload) { if (Object.prototype.hasOwnProperty.call(payload, k)) msg[k] = payload[k]; }
+    parent.postMessage(msg, '*');
+    return msg;
+  }
+
+  window.Vitality = {
+    save: function (data) { post('save', { data: data }); },
+
+    /**
+     * Resolves { ok, data }. ok:false means the host never answered, NOT that
+     * the slot is empty. Treating an unanswered load as "you have nothing"
+     * lets the next save write that emptiness over real data.
+     */
+    load: function () {
+      var id = 'l' + (++seq);
+      return new Promise(function (resolve) {
+        pending[id] = { resolve: resolve };
+        post('load', { id: id });
+        var tries = 0;
+        var retry = setInterval(function () {
+          if (!pending[id]) { clearInterval(retry); return; }
+          if (++tries > 12) {
+            clearInterval(retry);
+            delete pending[id];
+            resolve({ ok: false, data: null });
+            return;
+          }
+          post('load', { id: id });
+        }, 800);
+      });
+    },
+
+    report: function (stream) { post('report', { stream: stream }); },
+    onWriteError: function (fn) { writeErrorHandlers.push(fn); }
+  };
+})();
+</script>
+
+<script>
+(function(){
+  'use strict';
+
+  var mode = location.hash === '#page' ? 'page' : 'grid';
+  document.documentElement.setAttribute('data-mode', mode);
+
+  var state = { v:1, notes: [] };
+  // Until the vault has actually answered, this tile does not know what it
+  // holds, so it must not write. Saving an assumed-empty list would delete
+  // whatever is really there.
+  var loaded = false;
+  var trouble = '';
+  var openId = '';        // the note being written in, '' for the list
+  var term = '';
+  var armed = false;      // Delete is one tap from firing
+  var saveTimer = null;
+  var dirty = false;
+
+  function $(id){ return document.getElementById(id); }
+  function esc(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+  }
+
+  /* ---------------- notes ---------------- */
+  function uid(){ return 'n' + Date.now().toString(36) + Math.floor(Math.random()*1e6).toString(36); }
+  function byId(id){
+    for (var i=0;i<state.notes.length;i++) if (state.notes[i].id === id) return state.notes[i];
+    return null;
+  }
+
+  /**
+   * The title IS the first non-empty line. Never stored, always computed, so
+   * there is no second copy to fall out of step with the text.
+   */
+  function titleOf(n){
+    var lines = String(n.body || '').split('\n');
+    for (var i=0;i<lines.length;i++){
+      var t = lines[i].trim();
+      if (t) return t.length > 60 ? t.slice(0, 60) + '...' : t;
+    }
+    return '';
+  }
+  // Everything after the title line, flattened, for the one-line preview.
+  function previewOf(n){
+    var lines = String(n.body || '').split('\n');
+    var seenTitle = false, rest = [];
+    for (var i=0;i<lines.length;i++){
+      var t = lines[i].trim();
+      if (!seenTitle){ if (t) seenTitle = true; continue; }
+      if (t) rest.push(t);
+    }
+    var s = rest.join(' ');
+    return s.length > 90 ? s.slice(0, 90) + '...' : s;
+  }
+
+  function sorted(){
+    return state.notes.slice().sort(function(a, b){
+      return String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''));
+    });
+  }
+  function matching(){
+    var q = term.toLowerCase().trim();
+    if (!q) return sorted();
+    return sorted().filter(function(n){
+      return String(n.body || '').toLowerCase().indexOf(q) >= 0;
+    });
+  }
+
+  /* ---------------- when ---------------- */
+  function two(n){ return n < 10 ? '0' + n : '' + n; }
+  function dayKey(d){ return d.getFullYear() + '-' + two(d.getMonth()+1) + '-' + two(d.getDate()); }
+  /**
+   * How long ago, in the words a person uses. Deliberately coarse: a note
+   * edited eleven minutes ago and one edited nine minutes ago are the same
+   * note as far as anyone reading the list is concerned, and printing seconds
+   * would be precision nobody asked for.
+   */
+  function whenOf(iso){
+    if (!iso) return '';
+    var then = new Date(iso);
+    if (isNaN(then.getTime())) return '';
+    var now = new Date();
+    var mins = Math.floor((now - then) / 60000);
+    if (mins < 1) return 'now';
+    if (mins < 60) return mins + 'm';
+    if (dayKey(then) === dayKey(now)) return Math.floor(mins / 60) + 'h';
+    var y = new Date(now.getTime()); y.setDate(y.getDate() - 1);
+    if (dayKey(then) === dayKey(y)) return 'yesterday';
+    var days = Math.floor((new Date(dayKey(now)) - new Date(dayKey(then))) / 86400000);
+    if (days < 7) return days + 'd';
+    return dayKey(then);
+  }
+
+  /* ---------------- saving ---------------- */
+  function persist(){
+    if (!loaded || !window.Vitality) return;
+    Vitality.save(state);
+    dirty = false;
+    renderSaveState();
+  }
+  /**
+   * Debounced, because a write per keystroke is a write per character, and a
+   * Save button means a note can be lost by walking away from it. 600ms after
+   * typing stops, and again on blur.
+   */
+  function queueSave(){
+    if (!loaded) return;
+    dirty = true;
+    renderSaveState();
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(function(){ saveTimer = null; persist(); }, 600);
+  }
+  function flushSave(){
+    if (saveTimer){ clearTimeout(saveTimer); saveTimer = null; }
+    if (dirty) persist();
+  }
+
+  /* ---------------- actions ---------------- */
+  function newNote(){
+    if (!loaded) return;
+    var now = new Date().toISOString();
+    var n = { id: uid(), body: '', createdAt: now, updatedAt: now };
+    state.notes.push(n);
+    openId = n.id;
+    armed = false;
+    term = '';
+    persist();
+    render();
+    var ed = $('editor');
+    if (ed) ed.focus();
+  }
+
+  function onType(){
+    var n = byId(openId);
+    if (!n) return;
+    n.body = $('editor').value;
+    n.updatedAt = new Date().toISOString();
+    queueSave();
+  }
+
+  /**
+   * Leaving a note. An empty one is dropped rather than kept: a note with
+   * nothing in it is not work to protect, it is a New tapped by accident, and
+   * a list slowly filling with blank rows is its own small mess. Anything with
+   * a single character in it stays.
+   */
+  function closeNote(){
+    flushSave();
+    var n = byId(openId);
+    if (n && !String(n.body || '').trim()){
+      state.notes = state.notes.filter(function(x){ return x.id !== n.id; });
+      persist();
+    }
+    openId = '';
+    armed = false;
+    render();
+  }
+
+  /**
+   * Delete, armed rather than confirmed. confirm() is a modal and modals are
+   * silently dead in a sealed frame - see the header and tiles/sealed.test.js.
+   * First tap says what is about to happen, second tap does it.
+   */
+  function deleteNote(){
+    var n = byId(openId);
+    if (!n) return;
+    if (!armed){ armed = true; render(); return; }
+    state.notes = state.notes.filter(function(x){ return x.id !== n.id; });
+    openId = '';
+    armed = false;
+    if (saveTimer){ clearTimeout(saveTimer); saveTimer = null; }
+    dirty = false;
+    persist();
+    render();
+  }
+
+  /* ---------------- render ---------------- */
+  function renderSaveState(){
+    var el = $('saveState');
+    if (!el) return;
+    if (!loaded){ el.textContent = ''; el.className = 'saveState'; return; }
+    el.textContent = dirty ? 'Saving' : 'Saved';
+    el.className = 'saveState' + (dirty ? '' : ' on');
+  }
+
+  function renderPoster(){
+    var hero = $('posterHero'), last = $('posterLast');
+    if (!hero) return;
+    hero.innerHTML = '';
+    if (!loaded){
+      hero.innerHTML = '<span class="posterEmpty">Opening your notes...</span>';
+      last.hidden = true;
+      return;
+    }
+    if (!state.notes.length){
+      hero.innerHTML = '<span class="posterEmpty">No notes yet. Tap to write the first one.</span>';
+      last.hidden = true;
+      return;
+    }
+    var n = state.notes.length;
+    hero.innerHTML = '<span class="hero num">' + n + '</span>' +
+      '<span class="unit">' + (n === 1 ? 'note' : 'notes') + '</span>';
+    var top = sorted()[0];
+    var t = titleOf(top);
+    last.hidden = false;
+    last.textContent = t || 'Untitled note';
+  }
+
+  function renderList(){
+    var wrap = $('noteList');
+    wrap.innerHTML = '';
+    var rows = matching();
+    if (!rows.length){
+      var e = document.createElement('div');
+      e.className = 'empty';
+      e.textContent = term
+        ? 'Nothing matches that.'
+        : 'No notes yet. Tap New and start writing - the first line becomes the title.';
+      wrap.appendChild(e);
+      return;
+    }
+    rows.forEach(function(n){
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'noteRow';
+      b.disabled = !loaded;
+
+      var main = document.createElement('div');
+      main.className = 'noteMain';
+      var t = document.createElement('div');
+      var title = titleOf(n);
+      t.className = 'noteTitle' + (title ? '' : ' blank');
+      t.textContent = title || 'Untitled note';
+      main.appendChild(t);
+      var p = previewOf(n);
+      if (p){
+        var sub = document.createElement('div');
+        sub.className = 'noteSub';
+        sub.textContent = p;
+        main.appendChild(sub);
+      }
+      b.appendChild(main);
+
+      var w = document.createElement('span');
+      w.className = 'noteWhen';
+      w.textContent = whenOf(n.updatedAt);
+      b.appendChild(w);
+
+      b.addEventListener('click', function(){
+        openId = n.id;
+        armed = false;
+        render();
+        var ed = $('editor');
+        if (ed) ed.focus();
+      });
+      wrap.appendChild(b);
+    });
+  }
+
+  function renderEdit(){
+    var n = byId(openId);
+    if (!n) return;
+    var ed = $('editor');
+    // Only write into the box when it is not the thing being typed in, or the
+    // caret jumps to the end on every keystroke.
+    if (ed !== document.activeElement && ed.value !== n.body) ed.value = n.body;
+    ed.disabled = !loaded;
+    $('delBtn').textContent = armed ? 'Tap again to delete' : 'Delete';
+    $('delBtn').className = 'delBtn' + (armed ? ' armed' : '');
+    $('editHint').textContent = n.createdAt
+      ? 'Written ' + String(n.createdAt).slice(0, 10) + '. Saves on its own as you type.'
+      : 'Saves on its own as you type.';
+    renderSaveState();
+  }
+
+  function render(){
+    renderPoster();
+    if (mode !== 'page') return;
+
+    var t = $('trouble');
+    t.hidden = !trouble;
+    t.textContent = trouble;
+
+    var n = state.notes.length;
+    $('pageHero').innerHTML = loaded
+      ? '<span class="hero num">' + n + '</span><span class="unit">' + (n === 1 ? 'note' : 'notes') + '</span>'
+      : '<span class="unit">Opening your notes...</span>';
+
+    var editing = !!byId(openId);
+    $('listView').hidden = editing;
+    $('editView').hidden = !editing;
+    if (editing) renderEdit(); else renderList();
+  }
+
+  function enable(on){
+    ['search','newBtn'].forEach(function(id){
+      var el = $(id);
+      if (el) el.disabled = !on;
+    });
+  }
+
+  /* ---------------- wiring ---------------- */
+  if (mode === 'page'){
+    $('newBtn').addEventListener('click', newNote);
+    $('backBtn').addEventListener('click', closeNote);
+    $('delBtn').addEventListener('click', deleteNote);
+    $('editor').addEventListener('input', onType);
+    $('editor').addEventListener('blur', flushSave);
+    $('search').addEventListener('input', function(){
+      term = this.value || '';
+      renderList();
+    });
+    // Closing the tab mid-sentence must not cost the sentence.
+    window.addEventListener('pagehide', flushSave);
+    document.addEventListener('visibilitychange', function(){
+      if (document.visibilityState === 'hidden') flushSave();
+    });
+  }
+
+  if (window.Vitality){
+    Vitality.onWriteError(function(){
+      trouble = 'That did not save. What you wrote is still on screen, but the vault refused the write.';
+      render();
+    });
+  }
+
+  render();
+
+  Vitality.load().then(function(res){
+    if (!res.ok){
+      trouble = 'Could not reach your vault. Nothing is saving until it answers, so nothing gets written over.';
+      render();
+      return;
+    }
+    var d = res.data;
+    if (d && typeof d === 'object' && Array.isArray(d.notes)){
+      // Only rows that are actually notes. A half-written blob should cost the
+      // broken row, never the list.
+      state.notes = d.notes.filter(function(x){
+        return x && typeof x.id === 'string' && typeof x.body === 'string';
+      }).map(function(x){
+        return {
+          id: x.id, body: x.body,
+          createdAt: x.createdAt || x.updatedAt || '',
+          updatedAt: x.updatedAt || x.createdAt || ''
+        };
+      });
+    }
+    loaded = true;
+    enable(true);
+    render();
+  });
+})();
+</script>
+</body>
+</html>

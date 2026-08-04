@@ -31,6 +31,13 @@ export const OVERALL_GOAL =
  * `progress` is deliberately absent from every list. XP, levels and streaks
  * are computed FROM the tiles below, so giving it weight would count the same
  * workout twice. It exists for the feeling, not the arithmetic.
+ *
+ * `notes` is absent for a different reason: it reports nothing at all. A tile
+ * reports one honest number or none, and there is no honest number in a note.
+ * A count of them is not progress toward getting stronger, feeling good or
+ * showing up - it would be a row in the ledger that means nothing, and a
+ * weight here would be the thing that pretended it did. Notes is a place to
+ * write, and its worth is that the writing is kept.
  */
 export const DEFAULT_GOALS: Goal[] = [
   {

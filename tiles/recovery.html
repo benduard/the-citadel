@@ -103,7 +103,15 @@
      Chromium sometimes never starts a fresh iframe's CSS animation, leaving
      the poster stuck invisible forever. Confirmed flaky with Playwright. */
   .posterHero{ display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; }
-  .posterHero .num{ font-size:46px; }
+  /* A SEALED TILE'S vw IS THE TILE, NOT THE SCREEN. An iframe has its own
+     viewport, so 100vw in here is the width of this poster's own box. That is
+     what makes a vw term work at all: it tracks the card, whatever the board's
+     grid does with it at a given breakpoint.
+     Fixed 46px was measured overflowing its box by 18px on a 320px phone,
+     where an s-sized tile is about 132px wide and a weight like 102.4 simply
+     does not fit. Caught by tools/number-check.js, which measures the laid-out
+     text rather than guessing from the CSS. */
+  .posterHero .num{ font-size:clamp(26px,24vw,46px); }
   .posterHero .unit{ font-size:13px; color:var(--muted); }
   .posterEmpty{ font-size:13px; color:var(--faint); }
 
@@ -117,7 +125,9 @@
   html[data-mode="page"] .posterView{ display:none; }
 
   .pageHero{ display:flex; align-items:baseline; gap:12px; margin:10px 0 22px; flex-wrap:wrap; }
-  .pageHero .num{ font-size:56px; }
+  /* Clamped for the same reason as the poster, though the page is far roomier
+     - this one only bites on a long number at 320px. */
+  .pageHero .num{ font-size:clamp(34px,14vw,56px); }
   .pageHero .unit{ font-size:14px; color:var(--muted); }
 
   .trouble{

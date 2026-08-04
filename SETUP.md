@@ -69,11 +69,13 @@ laptop is still on the phone. The data was the point; the layout is a later job.
 
 `./run-tests.sh` runs everything: the rank maths, the shell panels, backups,
 the icon set, Lifting's own suite (last-time, splits, unilateral, grouping,
-suggestions, the body map, rest timing, routines), Lists and its calendar, and
-the rest-timer push wiring. Plain node, no install, no framework. Run it
-before you push.
+suggestions, the body map, rest timing, routines, supersets, bodyweight sets),
+Lists with its calendar and day view, Notes, the sealed-frame rules, and the
+rest-timer push wiring. Plain node, no install, no framework. Run it before
+you push.
 
-If `tools/node_modules` is installed, it also runs three browser checks:
+If `tools/node_modules` is installed, it also runs four browser checks:
 every tile actually paints (`visual-check.js`), nothing sits under the page's
-close button at any width (`collision-check.js`), and every control is big
-enough to hit with a thumb (`touch-check.js`).
+close button at any width (`collision-check.js`), every control is big
+enough to hit with a thumb (`touch-check.js`), and every big number fits its
+box and stays readable on a phone (`number-check.js`).

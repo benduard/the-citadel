@@ -34,19 +34,88 @@ const VAPID_SUBJECT = Deno.env.get('VAPID_SUBJECT') ?? 'mailto:admin@example.com
 // forever against a 410 is how a subscriptions table fills with corpses.
 const GONE = new Set([404, 410])
 
+// A timer this far past due is not worth waking someone for, and must not be
+// retried for ever. See the catch at the bottom for what "for ever" cost us.
+const STALE_AFTER_MS = 60 * 60 * 1000
+
+/**
+ * VAPID KEYS ARE STORED AS BASE64URL AND IMPORTED AS JWK. Not the same thing,
+ * and getting it wrong is silent: importVapidKeys() hands its arguments
+ * straight to crypto.importKey('jwk', ...), which needs a JsonWebKey OBJECT.
+ * Passing the base64url STRINGS out of the environment throws a TypeError
+ * inside the request handler, which Deno turns into a bare 500 "Internal
+ * Server Error" with no clue in it. That shipped, and cost 1439 consecutive
+ * failed pushes over six hours before net._http_response gave it away.
+ *
+ * The public key is the uncompressed P-256 point - 0x04, then X, then Y, 65
+ * bytes - so x and y are just slices of it. The private JWK needs x and y too,
+ * not only d: a JWK describes the whole key pair position on the curve, and
+ * importKey rejects a private EC JWK that omits them.
+ */
+function b64urlToBytes(s: string): Uint8Array {
+  const pad = '='.repeat((4 - (s.length % 4)) % 4)
+  const b64 = (s + pad).replace(/-/g, '+').replace(/_/g, '/')
+  const bin = atob(b64)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
+}
+function bytesToB64url(b: Uint8Array): string {
+  let s = ''
+  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i])
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+function vapidJwks(pub: string, priv: string) {
+  const raw = b64urlToBytes(pub)
+  if (raw.length !== 65 || raw[0] !== 4) {
+    throw new Error(`VAPID_PUBLIC_KEY is not an uncompressed P-256 point (got ${raw.length} bytes, first byte ${raw[0]})`)
+  }
+  const x = bytesToB64url(raw.subarray(1, 33))
+  const y = bytesToB64url(raw.subarray(33, 65))
+  // No key_ops: importVapidKeys asks for ['verify'] and ['sign'] separately,
+  // and a key_ops in the JWK that does not cover what is asked for is rejected.
+  return {
+    publicKey: { kty: 'EC', crv: 'P-256', x, y, ext: true },
+    privateKey: { kty: 'EC', crv: 'P-256', x, y, d: priv, ext: true }
+  }
+}
+
 Deno.serve(async () => {
+  // EVERYTHING IS INSIDE THIS TRY. An uncaught throw here does not reach
+  // net._http_response as anything readable - Deno answers a bare 500 with
+  // the string "Internal Server Error", and the actual cause is invisible
+  // from SQL. That is precisely how a key-import TypeError hid for six hours.
+  // Catching it and answering with the message means the next failure is one
+  // query away from being understood.
+  try {
+    return await handle()
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    console.error('send-timer-push failed:', message)
+    return new Response(JSON.stringify({ ok: false, error: message }), {
+      status: 500, headers: { 'Content-Type': 'application/json' }
+    })
+  }
+})
+
+async function handle(): Promise<Response> {
   const db = createClient(SUPABASE_URL, SERVICE_ROLE, {
     auth: { persistSession: false }
   })
 
-  // Due and not yet sent. `lte(now)` rather than a window: if the function was
-  // down for a minute, the timers it missed are still due and should still
-  // fire rather than being skipped for being slightly stale.
+  // Due and not yet sent, within a WINDOW. The lower bound is not fussiness:
+  // without it, a timer the function can never send - because of a bad key, a
+  // bad deploy, anything - stays due for ever and is retried every 15 seconds
+  // until someone notices. It is bounded now, so a broken hour costs an hour
+  // of retries and then stops. A rest timer an hour late is not worth sending
+  // anyway; the set is long over.
+  const now = Date.now()
   const { data: timers, error } = await db
     .from('rest_timers')
     .select('id, user_id, fire_at, label')
     .eq('fired', false)
-    .lte('fire_at', new Date().toISOString())
+    .lte('fire_at', new Date(now).toISOString())
+    .gte('fire_at', new Date(now - STALE_AFTER_MS).toISOString())
     .order('fire_at', { ascending: true })
     .limit(200)
 
@@ -65,7 +134,7 @@ Deno.serve(async () => {
   const appServer = await webpush.ApplicationServer.new({
     contactInformation: VAPID_SUBJECT,
     vapidKeys: await webpush.importVapidKeys(
-      { publicKey: VAPID_PUBLIC, privateKey: VAPID_PRIVATE },
+      vapidJwks(VAPID_PUBLIC, VAPID_PRIVATE),
       { extractable: false }
     )
   })

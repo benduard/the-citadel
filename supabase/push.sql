@@ -62,9 +62,13 @@ create index if not exists rest_timers_due
 
 -- 3. HOUSEKEEPING. A fired timer has no further use, and without this the
 --    table grows forever. Keeps a day so a missed send can still be seen.
+-- Deletes fired rows AND rows that were never sent and never will be. The
+-- second half matters: the function ignores anything more than an hour past
+-- due (see STALE_AFTER_MS), so without this, a spell where sending was broken
+-- leaves unsendable rows sitting in the table for ever.
 create or replace function prune_rest_timers() returns void
 language sql security definer set search_path = public as $$
-  delete from rest_timers where fired = true and fire_at < now() - interval '1 day';
+  delete from rest_timers where fire_at < now() - interval '1 day';
 $$;
 
 

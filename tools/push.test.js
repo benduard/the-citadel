@@ -33,6 +33,21 @@ const check = (label, cond, extra) => {
   if (!cond) fails++
 }
 
+// Checks that need real async crypto push their promise here; the exit code is
+// held until they all settle, or the process would report success before they
+// had run.
+const deferred = []
+
+// The key material, read once. .env.local is gitignored and simply absent on a
+// fresh clone, which is a fact about the machine and not a failure - the checks
+// that need it are skipped rather than failed. THE PRIVATE KEY IS NEVER A
+// LITERAL IN THIS FILE: an earlier version hardcoded it to prove it was absent
+// from committed files, which put it in one.
+const envLocalPath = path.join(ROOT, '.env.local')
+const envLocal = fs.existsSync(envLocalPath) ? fs.readFileSync(envLocalPath, 'utf8') : ''
+const privMatch = envLocal.match(/^VAPID_PRIVATE_KEY=(\S+)/m)
+const pagePub = (push.match(/var VAPID_PUBLIC = '([^']+)'/) || [])[1]
+
 // The rule the function implements: fired = false AND fire_at <= now.
 const due = (rows, now) => rows.filter(r => r.fired === false && new Date(r.fire_at) <= now)
 
@@ -56,7 +71,7 @@ check('nothing else came along', picked.join() === '1,2,5', picked.join())
 
 console.log('\n[2] the function actually queries by those rules')
 check('filters on fired = false', /\.eq\('fired', false\)/.test(fn))
-check('filters on fire_at <= now', /\.lte\('fire_at', new Date\(\)\.toISOString\(\)\)/.test(fn))
+check('filters on fire_at <= now', /\.lte\('fire_at', new Date\(now\)\.toISOString\(\)\)/.test(fn))
 check('takes the oldest first, so a backlog drains in order',
   /\.order\('fire_at', \{ ascending: true \}\)/.test(fn))
 check('bounded, so one bad batch cannot run forever', /\.limit\(\d+\)/.test(fn))
@@ -74,6 +89,54 @@ check('marking happens per timer, outside the per-device try/catch',
   updateIdx > 0 && updateIdx < loopEnd)
 check('and the code says why, so nobody "fixes" it into a retry loop',
   /whether or not a device took it/i.test(fn))
+
+// ---------------------------------------------------------------------------
+// Both of these shipped broken and cost 1439 consecutive failed pushes over
+// six hours. Neither announced itself: Deno answers an uncaught throw with a
+// bare 500 "Internal Server Error", so net._http_response showed nothing but
+// the status code.
+console.log('\n[3b] VAPID keys are converted to JWK, not passed as base64url strings')
+check('there is a converter at all', /function vapidJwks\(/.test(fn))
+check('importVapidKeys is given the CONVERTED keys, never the raw env strings',
+  /importVapidKeys\(\s*vapidJwks\(VAPID_PUBLIC, VAPID_PRIVATE\)/.test(fn))
+check('the raw strings are never handed straight to importVapidKeys',
+  !/importVapidKeys\(\s*\{ publicKey: VAPID_PUBLIC/.test(fn))
+check('x and y are sliced out of the 65-byte uncompressed point',
+  /raw\.subarray\(1, 33\)/.test(fn) && /raw\.subarray\(33, 65\)/.test(fn))
+check('the PRIVATE jwk carries x and y too, not only d - importKey rejects it otherwise',
+  /privateKey: \{ kty: 'EC', crv: 'P-256', x, y, d: priv/.test(fn))
+check('a malformed public key fails loudly, with the actual length in the message',
+  /is not an uncompressed P-256 point \(got \$\{raw\.length\} bytes/.test(fn))
+
+// Prove the conversion against real WebCrypto rather than trusting the shape.
+// This is the check that would have caught the original bug.
+const { webcrypto } = require('crypto')
+if (privMatch) {
+  const ALGO = { name: 'ECDSA', namedCurve: 'P-256' }
+  const toBytes = s => Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
+  const toB64u = b => Buffer.from(b).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  const rawPt = toBytes(pagePub)
+  const jwkX = toB64u(rawPt.subarray(1, 33))
+  const jwkY = toB64u(rawPt.subarray(33, 65))
+  const pending = webcrypto.subtle
+    .importKey('jwk', { kty: 'EC', crv: 'P-256', x: jwkX, y: jwkY, ext: true }, ALGO, true, ['verify'])
+    .then(pk => webcrypto.subtle
+      .importKey('jwk', { kty: 'EC', crv: 'P-256', x: jwkX, y: jwkY, d: privMatch[1], ext: true }, ALGO, false, ['sign'])
+      .then(sk => webcrypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, sk, new TextEncoder().encode('citadel'))
+        .then(sig => webcrypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pk, sig, new TextEncoder().encode('citadel')))))
+    .then(ok => { check('the real key pair imports as JWK and signs/verifies together', ok === true) })
+    .catch(e => { check('the real key pair imports as JWK and signs/verifies together', false, e.message) })
+  deferred.push(pending)
+}
+
+console.log('\n[3c] a timer can never be retried for ever')
+check('the query has a lower bound, not just "anything due"', /\.gte\('fire_at'/.test(fn))
+check('the staleness cutoff is named, not a magic number', /STALE_AFTER_MS/.test(fn))
+check('the whole handler is wrapped, so a throw returns a readable body not a bare 500',
+  /try \{\s*\n\s*return await handle\(\)/.test(fn) &&
+  /ok: false, error: message/.test(fn))
+check('prune clears rows that can never be sent, not only fired ones',
+  /delete from rest_timers where fire_at < now\(\) - interval '1 day'/.test(sql))
 
 console.log('\n[4] a dead subscription is deleted, not retried for ever')
 check('404 and 410 are treated as gone', /GONE = new Set\(\[404, 410\]\)/.test(fn))
@@ -115,9 +178,7 @@ console.log('\n[7] THE SECRET NEVER ENTERS THE REPO')
 // tracked, committed test file puts it in the repo anyway. Read it from
 // .env.local instead - gitignored, present locally, and simply skipped (not
 // failed) on a machine that has never had it, e.g. a fresh clone or CI.
-const envLocalPath = path.join(ROOT, '.env.local')
-const envLocal = fs.existsSync(envLocalPath) ? fs.readFileSync(envLocalPath, 'utf8') : ''
-const privMatch = envLocal.match(/^VAPID_PRIVATE_KEY=(\S+)/m)
+// (envLocal / privMatch / pagePub are read once at the top of this file.)
 if (privMatch) {
   const PRIVATE = privMatch[1]
   const tracked = [fn, sql, sw, push, host, lifting, remote,
@@ -135,7 +196,6 @@ check('.env.local is gitignored',
 // service at subscribe time. Asserted by SHAPE and by AGREEMENT rather than
 // against a hardcoded value: a literal here goes stale the moment the keys
 // are rotated, which is exactly what happened the first time they were.
-const pagePub = (push.match(/var VAPID_PUBLIC = '([^']+)'/) || [])[1]
 check('the page carries a public key', !!pagePub)
 check('it is a full uncompressed P-256 point (87 chars, starts with B)',
   !!pagePub && pagePub.length === 87 && pagePub[0] === 'B', pagePub && String(pagePub.length))
@@ -235,5 +295,9 @@ check('an already-expired fire_at is not resumed either', /left <= 0/.test(lifti
 check('only checked on the full page, not the grid poster, and only after the vault answered',
   /loaded = true;\s*\n\s*enable\(true\);\s*\n[\s\S]{0,320}?if \(mode === 'page'\) resumeRestFromServer\(\);/.test(lifting))
 
-console.log(`\n${fails} failure(s)`)
-process.exit(fails ? 1 : 0)
+// Settle the async crypto checks before reporting. Exiting first would print a
+// pass count that had not finished counting.
+Promise.all(deferred).then(() => {
+  console.log(`\n${fails} failure(s)`)
+  process.exit(fails ? 1 : 0)
+})

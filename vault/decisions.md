@@ -898,3 +898,38 @@ alerts off and on again. Deliberately NOT automated by adding 403 to the
 function's GONE set - a genuinely misconfigured secret returns 403 too, and
 treating that as "delete every subscription" would turn one bad deploy into
 silently unsubscribing every device.
+
+## The push function was 500ing on every tick, twice over
+
+Found 2026-08-04, from net._http_response: 1439 responses, all 500, spanning
+six hours - essentially every cron tick since deploy. cron.job_run_details said
+succeeded throughout, for the reason already written above: pg_net is async and
+"succeeded" only means the POST was queued.
+
+The content column said nothing but "Internal Server Error". That bare string
+is itself the clue - the function's own 500 path returns JSON, so a plain
+string means the throw happened OUTSIDE any handler of ours and Deno answered
+generically.
+
+BUG ONE: VAPID KEYS ARE STORED AS BASE64URL AND IMPORTED AS JWK. Not the same
+thing. importVapidKeys() hands its arguments straight to
+crypto.importKey('jwk', ...), which needs a JsonWebKey object; it was being
+given the base64url strings out of the environment. Verified rather than
+guessed, against real WebCrypto: passing the strings throws
+"2nd argument cannot be converted to a dictionary", and building proper JWKs
+imports cleanly and round-trips a signature. The public key is the
+uncompressed P-256 point (0x04, X, Y), so x and y are slices of it - and the
+PRIVATE jwk needs x and y as well as d, which is easy to miss.
+
+BUG TWO, and the reason it was 1439 and not a handful: the throw happened
+BEFORE the loop that marks timers fired, so no due timer was ever marked and
+every tick retried the same rows for ever. Fixed three ways - the whole handler
+is wrapped so a throw returns a readable JSON body instead of a bare 500, the
+query now has a lower bound (nothing more than an hour past due, since a rest
+timer that late is worthless anyway), and prune_rest_timers deletes any old row
+rather than only fired ones.
+
+THE LESSON WORTH KEEPING: net._http_response.content is the first place to
+look, and a bare "Internal Server Error" there means the failure is outside
+your own error handling. Wrapping the handler so every failure answers with its
+own message turns the next six-hour mystery into one query.

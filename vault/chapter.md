@@ -58,9 +58,43 @@ Order matters here. Each one is a separate build, one at a time.
    bookkeeping action. Ticks do not undo, so XP cannot be farmed.
    Weight zero in every goal: it is a lens on the other tiles, not its own
    input, and weighting it would count the same work twice.
+6. **Notes** - DONE, 2026-08-04. Plain notes, the way the phone does them.
+   The title is NOT stored: it is the first line of the body, computed every
+   time, so editing line one renames the note and there is no second copy of
+   the name to fall out of step. Saves 600ms after typing stops, and on blur,
+   pagehide and visibilitychange.
+   It reports NOTHING, and that is the decision to not undo. A tile reports one
+   honest number or none, and there is no honest number in a note - a count of
+   them is not progress toward any of the three goals. So it is absent from
+   weights.ts for its own reason, separate from `progress`'s.
 
-The roadmap is complete. Six tiles, verified together as well as alone: no
-cross-writes between slots, no duplicate key+date ledger rows.
+Seven tiles, verified together as well as alone: no cross-writes between slots,
+no duplicate key+date ledger rows.
+
+## What Ruben asked for on 2026-08-04, and what it became
+
+Eight things, all shipped:
+
+- RPE now shows in Lifting's "last time" panel and comes across with Use.
+- Adduction and abduction are two exercises. That needed a new muscle -
+  abduction is glute work, adduction is the inner thigh - so MUSCLES gained
+  `adductors` and both body figures draw it. The old combined entry is RETIRED,
+  not deleted: an exercise name is the key its history hangs on.
+- A set no longer needs weight on it. It never invents load: on a movement
+  carrying none of the body it is worth zero volume and the tile says so.
+- The split is now a CHOICE. Five schemes plus days he builds himself. Split
+  ids are namespaced forever, except the first scheme's, because
+  `splits[date]` is the record of what a session was.
+- Lists he makes himself, ids prefixed `u:`, reaching the ledger never.
+- A calendar day expands into its hours. Times are optional and never
+  inferred; untimed items sit in "Any time" rather than a plausible hour.
+- Notes, above.
+- Every big number now fits its box on a phone, measured rather than guessed.
+
+Two traps found on the way, both now guarded by tests: a sealed frame silently
+kills prompt/confirm/alert (`tiles/sealed.test.js`), and a browser check that
+seeds the wrong store shape passes by measuring nothing (`number-check.js`).
+Both are written up in `vault/decisions.md`.
 
 ## Where the board goes next
 

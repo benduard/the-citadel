@@ -856,6 +856,11 @@
       if (p) { delete pending[msg.id]; p.resolve({ ok: true, data: msg.data }); }
       return;
     }
+    if (msg.type === 'checkRestTimer:result') {
+      var pr = pending[msg.id];
+      if (pr) { delete pending[msg.id]; pr.resolve({ ok: !!msg.ok, timer: msg.timer || null }); }
+      return;
+    }
     if (msg.type === 'save:error' || msg.type === 'report:error') {
       writeErrorHandlers.forEach(function (fn) { fn(msg.type, msg.reason); });
     }
@@ -908,6 +913,30 @@
      * That is why this is safe to add to a shared tile file.
      */
     restTimer: function (seconds, label) { post('restTimer', { seconds: seconds, label: label }); },
+
+    /**
+     * "Is a timer I started still running?" - asked once, on boot, to resume
+     * the on-screen countdown after the app was closed and reopened.
+     *
+     * A SINGLE ATTEMPT, not load()'s retry-until-~10s loop. load() retries
+     * because an unanswered load must never be mistaken for an empty vault -
+     * the next save would overwrite real data on that false premise. Nothing
+     * here gets written on the strength of the answer; a host that stays
+     * quiet just means the countdown does not resume, which is the same
+     * honest "nothing to show" as a genuinely absent timer.
+     */
+    checkRestTimer: function () {
+      var id = 'r' + (++seq);
+      return new Promise(function (resolve) {
+        pending[id] = { resolve: resolve };
+        post('checkRestTimer', { id: id });
+        setTimeout(function () {
+          if (!pending[id]) return;
+          delete pending[id];
+          resolve({ ok: false, timer: null });
+        }, 2500);
+      });
+    },
     onWriteError: function (fn) { writeErrorHandlers.push(fn); }
   };
 })();
@@ -3201,6 +3230,18 @@
     b.title = restWhy(ex);
   }
 
+  // The part starting fresh and resuming after a reopen share: showing the
+  // box and running the second-by-second tick. Scheduling the backup push is
+  // NOT in here, on purpose - see the two callers.
+  function beginRestDisplay(secsLeft, total){
+    restTotal = total;
+    restLeft = secsLeft;
+    $('restBox').hidden = false;
+    $('restBox').classList.remove('done');
+    tickRest();
+    restTimer = setInterval(tickRest, 1000);
+  }
+
   function startRest(){
     stopRest();
     var ex = $('fEx') ? $('fEx').value : '';
@@ -3208,12 +3249,41 @@
     // The backup that survives a locked phone. Guarded only on the function
     // existing, so an older host - or the hosted board - is simply unaffected.
     if (window.Vitality && Vitality.restTimer) Vitality.restTimer(secs, ex || null);
-    restTotal = secs;
-    restLeft = secs;
-    $('restBox').hidden = false;
-    $('restBox').classList.remove('done');
-    tickRest();
-    restTimer = setInterval(tickRest, 1000);
+    beginRestDisplay(secs, secs);
+  }
+
+  /**
+   * Reopening the app after it was closed. The on-screen countdown has
+   * always been plain in-memory state with nowhere to survive a reload - that
+   * is not new here - but a signed-in account with alerts on now has the real
+   * end time sitting in rest_timers, so this asks for it once on boot and
+   * redraws the clock from actual elapsed time instead of just... not being
+   * there.
+   *
+   * NEVER re-schedules a push. That row already exists; asking for it again
+   * would write a second one and could, with unlucky timing, ring twice.
+   * This only reads.
+   *
+   * A stray timer from a much earlier session (phone died, app never
+   * reopened until the next day) is not resumed - CAP below - because a
+   * countdown that has been "still running" for eleven hours is not
+   * information, it is confusion wearing a clock face.
+   */
+  var RESUME_CAP_SECS = 20 * 60;
+  function resumeRestFromServer(){
+    if (!window.Vitality || !Vitality.checkRestTimer) return;
+    Vitality.checkRestTimer().then(function (r){
+      if (!r || !r.ok || !r.timer || !r.timer.fireAt) return;
+      if (restTimer) return;                          // already counting down locally, leave it alone
+      var left = Math.round((new Date(r.timer.fireAt).getTime() - Date.now()) / 1000);
+      if (left <= 0 || left > RESUME_CAP_SECS) return;
+      // The bar's TOTAL is re-derived from the exercise's current tier rather
+      // than stored, since fire_at is all rest_timers actually keeps. Off by
+      // a little only if rest mode changed mid-countdown - cosmetic, and the
+      // remaining TIME itself is exact regardless.
+      var total = restFor(r.timer.label || '');
+      beginRestDisplay(left, Math.max(total, left));
+    }).catch(function(){ /* no server timer to resume from is not an error */ });
   }
   function tickRest(){
     var m = Math.floor(restLeft / 60), s = restLeft % 60;
@@ -3669,6 +3739,10 @@
     }
     loaded = true;
     enable(true);
+    // Only the full page has a rest box to resume into - the grid poster has
+    // nowhere to draw a countdown, and checking on every board load for every
+    // tile instance would ask the host for nothing sixfold.
+    if (mode === 'page') resumeRestFromServer();
     // The picker was filled at boot, before the vault answered and before
     // there was any way to know today's split. Now there is, so refill it or
     // a split chosen earlier today would come back to a full, unfiltered list.

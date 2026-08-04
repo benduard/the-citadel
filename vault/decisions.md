@@ -781,3 +781,37 @@ when asking whether a scheduled function is actually working.
 
 The repair itself never touched the key: cron.alter_job with the new command
 derived from the old one by regexp_replace, entirely server-side.
+
+## Reopening the app resumes the rest-timer clock instead of losing it
+
+Decided 2026-08-04.
+
+Reported directly: "when I close the app, the clock doesn't continue." True,
+and not a regression - restTimer/restLeft/restTotal in tiles/lifting.html have
+always been plain in-memory JS vars with nothing reading them back on load, so
+closing the app (or iOS evicting it) has always thrown the countdown away with
+no trace it ever ran. Invisible before, because nowhere else held the real end
+time. Now something does: scheduleRestPush() already stores an ABSOLUTE
+fire_at in rest_timers. Reopening can read that back.
+
+getActiveRestTimer() (lib/vault-remote.js) answers by ACCOUNT, not device - a
+timer started on the phone with alerts on is just as real read from a browser
+tab that has never turned them on. On tile boot, if the page view is open and
+nothing is already counting down locally, it asks the host once, and if a
+timer is still ahead of now it redraws the clock from actual elapsed time.
+
+THREE THINGS KEPT IT FROM INVENTING A CLOCK:
+- It never re-schedules. That row already exists; asking again would write a
+  second one and could ring twice with unlucky timing. This only reads.
+- An already-expired fire_at is not resumed. The push either already fired or
+  is about to; showing "0:00, still counting" would be worse than nothing.
+- A timer from long before (phone died, app not reopened until the next day)
+  is capped at 20 minutes old. A countdown "still running" for eleven hours is
+  not information.
+
+Verified live rather than trusted from the source: mocked getActiveRestTimer
+on the real page (not addInitScript, which vault-remote.js's own top-level
+assignment would have clobbered - caught by the first version of the check
+returning nothing and re-reading why), confirmed a ~90s-remaining timer resumes
+showing 1:29 with a correctly proportioned bar, and confirmed an already-past
+fire_at does not resume at all.

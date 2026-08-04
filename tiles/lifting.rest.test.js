@@ -140,7 +140,7 @@ check('90 reads 1:30, padded', S.fmtRest(90) === '1:30', S.fmtRest(90))
 
 console.log('\n[9] the timer actually uses it, and the button says so')
 check('startRest reads restFor, not S.rest directly',
-  /restTotal = secs/.test(src) && /var secs = restFor\(/.test(src))
+  /var secs = restFor\(ex\);/.test(src) && /beginRestDisplay\(secs, secs\);/.test(src))
 check('the Rest button is labelled with the length',
   /b\.textContent = 'Rest ' \+ fmtRest\(restFor\(ex\)\)/.test(src))
 check('and it relabels when the exercise changes',

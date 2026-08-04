@@ -161,10 +161,52 @@ check('it refuses an incomplete subscription',
   /came back incomplete, so nothing was saved/.test(remote))
 check('scheduleRestPush stores an absolute time, not a duration',
   /new Date\(Date\.now\(\) \+ secs \* 1000\)\.toISOString\(\)/.test(remote))
-check('all three are on the public API',
+check('all four are on the public API',
   /savePushSubscription: savePushSubscription/.test(remote) &&
   /removePushSubscription: removePushSubscription/.test(remote) &&
-  /scheduleRestPush: scheduleRestPush/.test(remote))
+  /scheduleRestPush: scheduleRestPush/.test(remote) &&
+  /getActiveRestTimer: getActiveRestTimer/.test(remote))
+
+// ---------------------------------------------------------------------------
+// The on-screen countdown resuming after the app is closed and reopened.
+// Reported directly: "when I close the app, the clock doesn't continue."
+// That was true even before push existed - restTimer/restLeft/restTotal are
+// plain JS vars with nothing reading them back on load - and is only fixable
+// now because scheduleRestPush() gave the real end time somewhere to live.
+console.log('\n[12] getActiveRestTimer reads the right row, and only that row')
+check('scoped to the signed-in user, not the device',
+  /\.eq\('user_id', session\.user\.id\)/.test(remote))
+check('only a timer that has not fired', /\.eq\('fired', false\)/.test(remote))
+check('only one that has not already come due',
+  /\.gt\('fire_at', new Date\(\)\.toISOString\(\)\)/.test(remote))
+check('the most recently STARTED one, if more than one is pending',
+  /\.order\('created_at', \{ ascending: false \}\)/.test(remote))
+check('bounded to one row', /\.limit\(1\)/.test(remote))
+check('ok:false (a failed read) is distinguishable from ok:true with no timer',
+  /return \{ ok: false \}/.test(remote) && /timer: null/.test(remote))
+
+console.log('\n[13] the host always answers, even to say it does not know')
+check('handles checkRestTimer', /msg\.type === \x27checkRestTimer\x27/.test(host))
+check('answers even when VitalityRemote is missing, rather than leaving the tile hanging',
+  /if \(!window\.VitalityRemote \|\| !window\.VitalityRemote\.getActiveRestTimer\)/.test(host))
+check('a thrown read still gets a reply', /\.catch\(function \(\) \{\s*\n\s*src\.postMessage\(\{ source: 'vitality-host', type: 'checkRestTimer:result'/.test(host))
+
+console.log('\n[14] resuming never re-schedules, never invents a stale clock')
+check('checkRestTimer on the bridge is a SINGLE attempt, not load\x27s retry loop',
+  /checkRestTimer: function \(\) \{[\s\S]{0,300}?setTimeout\(function \(\) \{/.test(lifting) &&
+  !/checkRestTimer[\s\S]{0,400}setInterval/.test(lifting))
+check('beginRestDisplay is the one place that starts the interval, used by both paths',
+  (lifting.match(/restTimer = setInterval\(tickRest, 1000\)/g) || []).length === 1)
+check('startRest still schedules the backup push', /if \(window\.Vitality && Vitality\.restTimer\) Vitality\.restTimer\(secs, ex \|\| null\)/.test(lifting))
+check('resumeRestFromServer does NOT call Vitality.restTimer - the row already exists',
+  !/function resumeRestFromServer[\s\S]{0,600}?Vitality\.restTimer\(/.test(lifting))
+check('a countdown already running locally is left alone, not overwritten',
+  /if \(restTimer\) return;\s*\/\/ already counting down locally/.test(lifting))
+check('a stale timer from long ago is not resumed', /RESUME_CAP_SECS/.test(lifting) &&
+  /left > RESUME_CAP_SECS/.test(lifting))
+check('an already-expired fire_at is not resumed either', /left <= 0/.test(lifting))
+check('only checked on the full page, not the grid poster, and only after the vault answered',
+  /loaded = true;\s*\n\s*enable\(true\);\s*\n[\s\S]{0,320}?if \(mode === 'page'\) resumeRestFromServer\(\);/.test(lifting))
 
 console.log(`\n${fails} failure(s)`)
 process.exit(fails ? 1 : 0)

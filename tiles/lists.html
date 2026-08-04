@@ -18,15 +18,17 @@
     {
       v: 3,
       lists: {
-        daily:    [ { id, title, done, repeat, createdAt, doneAt } ],
-        weekly:   [ { id, title, done, repeat, createdAt, doneAt } ],
-        grocery:  [ { id, title, done, createdAt, doneAt } ],
-        projects: [ { id, title, done, createdAt, doneAt } ],
-        someday:  [ { id, title, done, createdAt, doneAt } ]
+        daily:    [ { id, title, done, repeat, createdAt, doneAt, at? } ],
+        weekly:   [ { id, title, done, repeat, createdAt, doneAt, at? } ],
+        grocery:  [ { id, title, done, createdAt, doneAt, at? } ],
+        projects: [ { id, title, done, createdAt, doneAt, at? } ],
+        someday:  [ { id, title, done, createdAt, doneAt, at? } ],
+        "u:<id>": [ { id, title, done, createdAt, doneAt, at? } ]   // lists you made
       },
+      custom: [ { id: "u:<id>", name } ],     // the lists you made, in tab order
       archive: [ { title, list, doneAt } ],   // last 200 finished, newest first
       done: {                                 // THE CALENDAR'S RECORD, see below
-        "YYYY-MM-DD": [ { id, title, list, repeat, createdAt } ]
+        "YYYY-MM-DD": [ { id, title, list, repeat, createdAt, at } ]
       },
       logFrom: "YYYY-MM-DD",                  // first day the record was kept
       rolledOn: "YYYY-MM-DD",                 // day the daily list last rolled
@@ -74,6 +76,14 @@
   logged before today a lie about what it counted. If a daily-tasks number is
   wanted in the ledger it needs its own key, its own weight in weights.ts and
   its own entry in lib/rank.js - a decision, not a side effect of this file.
+
+  `at` IS OPTIONAL AND NEVER INFERRED. Added 2026-08-04 with the day view. It
+  is "HH:MM", 24 hour, local, and it exists only because someone typed it. An
+  item without one is an item without one: the day view lists those under "Any
+  time" rather than dropping them into a plausible hour, because a schedule
+  nobody wrote is exactly the thing that view must not show. `custom` and `at`
+  both arrive on a v3 blob with neither key, which reads correctly as no lists
+  made and no times set, so the version did not move.
 
   ROLLING. On a new day the daily list rolls: repeating items uncheck, one-off
   items that were finished move to `archive`, and ANYTHING NOT FINISHED STAYS
@@ -180,8 +190,26 @@
   .tab:hover{ color:var(--text); }
   .tab.on{ border-color:rgba(110,231,183,.4); color:var(--mint); background:rgba(110,231,183,.08); }
   .tab .c{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10px; opacity:.75; margin-left:5px; }
+  /* Dashed, so it reads as an empty slot to fill rather than a sixth list that
+     is somehow always there and always empty. */
+  .tab.addTab{ border-style:dashed; color:var(--faint); }
+  .tab.addTab:hover{ color:var(--mint); border-color:rgba(110,231,183,.4); }
 
   .why{ font-size:12px; color:var(--muted); line-height:1.5; margin:0 0 12px; }
+  .whyRow{ display:flex; align-items:flex-start; gap:10px; }
+  .whyRow .why{ flex:1; }
+  /* Amber, not red: this board never uses red, and deleting a list you made is
+     a caution, not an alarm. */
+  .delList{
+    flex:none; min-height:44px; padding:0 12px; cursor:pointer; white-space:nowrap;
+    border:1px solid rgba(252,211,77,.3); border-radius:10px;
+    background:transparent; color:var(--amber);
+    font-size:12px; font-weight:600; font-family:inherit;
+  }
+  .delList:hover{ border-color:rgba(252,211,77,.55); }
+  /* One tap from firing. Still amber, still not red - it is a confirmation,
+     not an alarm. */
+  .delList.armed{ background:rgba(252,211,77,.12); border-color:var(--amber); }
   .repNote{ font-size:11.5px; color:var(--faint); line-height:1.5; margin:0 0 4px; }
 
   .addRow{ display:flex; gap:8px; margin-bottom:8px; }
@@ -331,6 +359,42 @@
     border:1px solid rgba(252,211,77,.3); border-radius:5px; padding:2px 5px;
   }
 
+  /* ---------- the day, laid out in blocks ----------
+     One row per hour, from the first hour with something in it to the last.
+     Empty hours in between are kept: the gaps ARE the information, and a list
+     that closes them up stops being a picture of a day. */
+  .dayView{ margin-top:10px; }
+  .blk{ display:flex; gap:10px; align-items:flex-start; min-height:44px;
+        border-top:1px solid rgba(148,163,158,.1); padding:6px 0; }
+  .blk:first-child{ border-top:0; }
+  .blkH{
+    flex:none; width:52px; padding-top:9px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10.5px;
+    color:var(--faint); letter-spacing:.04em;
+  }
+  /* The hour you are in, on the day you are in. Mint, because it is a fact
+     about now, not a judgement about the day. */
+  .blk.now .blkH{ color:var(--mint); }
+  .blk.now{ background:rgba(110,231,183,.04); }
+  .blkB{ flex:1; min-width:0; }
+  .blkB .item{ padding:5px 0; }
+  .blkEmpty{ padding:11px 0; font-size:11.5px; color:rgba(148,163,158,.28); }
+  /* A native time input, not a button opening a prompt: this frame is sealed
+     and modals never open in it. On a phone this is the OS time picker. */
+  .atIn{
+    flex:none; min-height:44px; padding:0 8px; cursor:pointer;
+    border:1px solid var(--border); border-radius:9px; background:transparent;
+    color:var(--faint); font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:11px; letter-spacing:.02em;
+  }
+  .atIn:hover{ color:var(--mint); border-color:rgba(110,231,183,.35); }
+  .atIn.set{ color:var(--mint); border-color:rgba(110,231,183,.3); }
+  .atIn:focus{ outline:none; border-color:rgba(110,231,183,.5); }
+  /* Chromium paints this white on a dark field, and it is the only part of the
+     control that is not inheriting the colour above. */
+  .atIn::-webkit-calendar-picker-indicator{ filter:invert(.6); cursor:pointer; }
+  .dayHint{ margin:10px 0 0; font-size:11.5px; color:var(--faint); line-height:1.5; }
+
   .empty{ padding:24px 2px; color:var(--faint); font-size:13px; line-height:1.5; }
   .trouble{
     margin:0 0 12px; padding:10px 12px; border-radius:10px;
@@ -377,7 +441,18 @@
 
   <div id="listsWrap">
     <div class="tabs" id="tabs"></div>
-    <p class="why" id="why"></p>
+    <!-- Naming a new list. An input in the page, not a prompt: this frame is
+         sealed and modals never open in it. -->
+    <div class="addRow" id="newListRow" hidden>
+      <input id="newListName" type="text" placeholder="Name the list" maxlength="24">
+      <button class="addBtn" id="newListGo" type="button">Create</button>
+    </div>
+    <div class="whyRow">
+      <p class="why" id="why"></p>
+      <!-- Only ever shown on a list he made. A built-in has no delete, because
+           removing Daily would take a rolling rule and a ledger key with it. -->
+      <button class="delList" id="delList" type="button" hidden>Delete list</button>
+    </div>
 
     <div class="addRow">
       <input id="newTitle" type="text" placeholder="Add" maxlength="120" disabled>
@@ -510,7 +585,7 @@
    *   'week'  the same, each new Monday
    *   null    stays until you clear it yourself
    */
-  var LISTS = [
+  var BUILTIN_LISTS = [
     { id:'daily',    name:'Daily',    roll:'day',  repeatable:true,
       why:'Today only. Finished one-offs move to Recently finished overnight, and anything marked repeating just unchecks itself.' },
     { id:'weekly',   name:'Weekly',   roll:'week', repeatable:true,
@@ -522,9 +597,35 @@
     { id:'someday',  name:'Someday',  roll:null,   repeatable:false,
       why:'Capture. Anything you do not want to forget but are not doing now. Send one to Daily when it becomes today’s problem.' }
   ];
+
+  /**
+   * LISTS YOU MAKE YOURSELF. Added 2026-08-04.
+   *
+   * They behave like Someday: nothing rolls, nothing repeats, nothing counts.
+   * That is not laziness, it is the only shape that cannot lie. Rolling is a
+   * real rule about what happens overnight and it would need its own choice
+   * per list; counting means writing to the LEDGER, and projects_done has
+   * meant one specific thing since v1 - quietly folding a new list into it
+   * would make every row logged before today a lie about what it counted. If a
+   * list of his ever needs to reach the ledger it wants its own key, its own
+   * weight in weights.ts and its own entry in lib/rank.js. A decision, not a
+   * side effect of tapping New list.
+   *
+   * IDS ARE PREFIXED 'u:' so one can never collide with a built-in, now or
+   * after a built-in is added. The id is the key its items are stored under.
+   */
+  var CUSTOM_PREFIX = 'u:';
+  function customLists(){
+    return (state.custom || []).map(function(c){
+      return { id:c.id, name:c.name, roll:null, repeatable:false, custom:true,
+               why:'A list you made. Nothing here rolls over or repeats on its own, and it does not reach your ledger.' };
+    });
+  }
+  function allLists(){ return BUILTIN_LISTS.concat(customLists()); }
   function listById(id){
-    for (var i=0;i<LISTS.length;i++) if (LISTS[i].id === id) return LISTS[i];
-    return LISTS[0];
+    var a = allLists();
+    for (var i=0;i<a.length;i++) if (a[i].id === id) return a[i];
+    return a[0];
   }
 
   var ARCHIVE_CAP = 200;
@@ -535,6 +636,10 @@
   var state = {
     v: 3,
     lists: { daily:[], weekly:[], grocery:[], projects:[], someday:[] },
+    // Lists he made. Added 2026-08-04. An older blob has no key and simply has
+    // none, which needs no migration - the five built-ins are unaffected by
+    // this existing, which is why the version did not move.
+    custom: [],
     archive: [],
     done: {},
     logFrom: '',
@@ -549,6 +654,12 @@
   var rolledNote = '';
   var tab = 'daily';
   var view = 'lists';        // 'lists' | 'calendar'
+  // How the chosen day is laid out. 'sections' is what the calendar always
+  // did; 'blocks' walks the hours. Not persisted on purpose - it is how you
+  // are looking at the day right now, not a fact about the day.
+  var dayView = 'sections';  // 'sections' | 'blocks'
+  var naming = false;        // the New list name row is open
+  var armedDelete = '';      // id of the list whose Delete is one tap from firing
   var calY = 0, calM = 0;    // month on screen, set from today at boot
   var calPick = '';          // the day whose detail is open
 
@@ -618,7 +729,12 @@
     }
     day.push({
       id: x.id || '', title: x.title, list: listId,
-      repeat: !!x.repeat, createdAt: x.createdAt || date
+      repeat: !!x.repeat, createdAt: x.createdAt || date,
+      // The time it was set for, carried into the record so the day view can
+      // still place it after a repeating item has rolled and unchecked itself.
+      // Absent on every entry logged before 2026-08-04, which reads as "no
+      // time was set" - which is exactly what was true.
+      at: x.at || ''
     });
   }
   // Unticking is not a correction to be argued with: if it is not crossed, it
@@ -648,7 +764,7 @@
    * calendar shows nothing there rather than inventing a tick.
    */
   function backfillDone(){
-    LISTS.forEach(function(L){
+    allLists().forEach(function(L){
       items(L.id).forEach(function(x){
         if (x.done && x.doneAt) logDone(x, L.id, x.doneAt);
       });
@@ -686,7 +802,8 @@
       var k = doneKeyOf(e, listId);
       if (seen[k]) return;
       seen[k] = 1;
-      out.push({ id: e.id || '', title: e.title, list: listId, repeat: !!e.repeat, createdAt: born });
+      out.push({ id: e.id || '', title: e.title, list: listId, repeat: !!e.repeat,
+                 createdAt: born, at: e.at || '' });
     }
 
     items(listId).forEach(function(x){
@@ -794,7 +911,8 @@
     var moved = 0, reset = 0;
     var t = todayLocal(), wk = weekKey();
 
-    LISTS.forEach(function(L){
+    // A list he made has no roll rule, so this passes straight over it.
+    allLists().forEach(function(L){
       if (!L.roll) return;
       var due = L.roll === 'day'
         ? (state.rolledOn && state.rolledOn !== t)
@@ -916,6 +1034,11 @@
       row.appendChild(rp);
     }
 
+    // The time this is meant to happen, which is what puts it in an hour in
+    // the calendar's day view. Optional, always - most of a list has no time
+    // on it and should not be made to have one.
+    row.appendChild(atInput(L.id, x));
+
     /* How long this has been following you. Only on the lists that actually
        roll, and never on a repeating item - a daily habit is not "carried",
        it comes back by design. Faint for a day or two, amber once it has been
@@ -955,7 +1078,7 @@
   function renderTabs(){
     var wrap = document.getElementById('tabs');
     wrap.innerHTML = '';
-    LISTS.forEach(function(L){
+    allLists().forEach(function(L){
       var b = document.createElement('button');
       b.type = 'button';
       b.className = 'tab' + (tab === L.id ? ' on' : '');
@@ -966,6 +1089,82 @@
       b.addEventListener('click', function(){ tab = L.id; renderPage(); });
       wrap.appendChild(b);
     });
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'tab addTab' + (naming ? ' on' : '');
+    add.textContent = naming ? 'Cancel' : '+ New list';
+    add.disabled = !loaded;
+    add.addEventListener('click', function(){
+      naming = !naming;
+      renderPage();
+      if (naming){
+        var el = document.getElementById('newListName');
+        if (el) el.focus();
+      }
+    });
+    wrap.appendChild(add);
+  }
+
+  /**
+   * Make a list.
+   *
+   * The name comes from a real input in the page, not prompt() - see setAt for
+   * why nothing in this file may use a modal.
+   *
+   * A duplicate name is refused rather than allowed and disambiguated later.
+   * Two tabs reading "Work" with different contents is a worse problem than
+   * being asked to pick another word.
+   */
+  function newList(){
+    if (!loaded) return;
+    var el = document.getElementById('newListName');
+    var name = ((el && el.value) || '').trim();
+    if (!name){
+      trouble = 'Give the list a name first.';
+      renderPage();
+      return;
+    }
+    if (name.length > 24) name = name.slice(0, 24);
+    var clash = allLists().filter(function(L){ return L.name.toLowerCase() === name.toLowerCase(); });
+    if (clash.length){
+      trouble = 'There is already a list called ' + clash[0].name + '. Pick another name and nothing of yours gets mixed up.';
+      renderPage();
+      return;
+    }
+    var id = CUSTOM_PREFIX + Date.now().toString(36) + Math.floor(Math.random() * 1000).toString(36);
+    state.custom = state.custom || [];
+    state.custom.push({ id:id, name:name });
+    state.lists[id] = [];
+    tab = id;
+    naming = false;
+    trouble = '';
+    persist();
+    renderAll();
+  }
+
+  /**
+   * Delete a list he made, and everything on it.
+   *
+   * This one really does destroy work, so it asks - and it asks with the
+   * button itself, because confirm() is a modal and modals do not exist in a
+   * sealed frame. First tap arms it and says what goes, second tap does it.
+   * Leaving the tab, or any other render, disarms it: an armed delete that
+   * survives you walking away is a delete waiting to happen by accident.
+   */
+  function deleteList(id){
+    var L = listById(id);
+    if (!L || !L.custom) return;
+    if (armedDelete !== id){
+      armedDelete = id;
+      renderPage();
+      return;
+    }
+    armedDelete = '';
+    state.custom = (state.custom || []).filter(function(c){ return c.id !== id; });
+    delete state.lists[id];
+    tab = 'daily';
+    persist();
+    renderAll();
   }
 
   /* ---------------- calendar ---------------- */
@@ -1155,6 +1354,148 @@
     renderCalDay();
   }
 
+  /* ---------- times on an item ----------
+     "HH:MM", 24 hour, local, and only ever present because someone typed it.
+     There is no default and nothing is inferred: an item with no time is an
+     item with no time, and dropping it into 9am to make the day look planned
+     would be inventing the one thing this view is for. */
+  function validAt(s){
+    if (!s) return '';
+    var m = /^(\d{1,2}):(\d{2})$/.exec(s.trim());
+    if (!m) return '';
+    var h = +m[1], mi = +m[2];
+    if (h < 0 || h > 23 || mi < 0 || mi > 59) return '';
+    return (h < 10 ? '0' + h : '' + h) + ':' + m[2];
+  }
+  function hourOf(at){ var v = validAt(at); return v ? +v.slice(0, 2) : -1; }
+  function prettyHour(h){
+    var ap = h < 12 ? 'am' : 'pm';
+    var hh = h % 12; if (!hh) hh = 12;
+    return hh + ap;
+  }
+
+  /**
+   * Give an item a time, or take it away.
+   *
+   * NO prompt(), NO confirm(), NO alert() ANYWHERE IN THIS FILE. The tile runs
+   * in a sealed iframe - sandbox="allow-scripts" with no allow-modals - so all
+   * three are no-ops here: prompt returns null and confirm returns false,
+   * silently, with nothing in the console. A first cut of this used prompt and
+   * appeared to do nothing at all on the real board while working perfectly
+   * when the file was opened on its own. Anything that needs an answer from
+   * him has to be built out of elements in the page. See vault/decisions.md.
+   *
+   * Hence a native <input type="time">: a real date picker on a phone, no
+   * modal, and the browser does the parsing. validAt still guards the value
+   * because the input is only as trustworthy as what it hands back.
+   *
+   * Writes to the item on its list, and to the calendar's record wherever it
+   * has already been crossed off - the two have to agree, or the day view
+   * would place a crossed-off item at a time its list no longer says.
+   */
+  function setAt(listId, id, value){
+    var x = items(listId).filter(function(i){ return i.id === id; })[0];
+    if (!x) return;
+    var next = validAt(value);
+    if (next) x.at = next; else delete x.at;
+    Object.keys(state.done).forEach(function(d){
+      (state.done[d] || []).forEach(function(e){
+        if (e.id === id && e.list === listId) e.at = next;
+      });
+    });
+    trouble = '';
+    persist();
+    renderAll();
+  }
+
+  // The time chip both views hang on a row. Native input, so a phone opens its
+  // own picker and there is no modal to be blocked.
+  function atInput(listId, x){
+    var el = document.createElement('input');
+    el.type = 'time';
+    el.className = 'atIn' + (validAt(x.at) ? ' set' : '');
+    el.value = validAt(x.at);
+    el.disabled = !loaded;
+    el.setAttribute('aria-label', 'Time for ' + x.title);
+    el.addEventListener('change', function(){ setAt(listId, x.id, el.value); });
+    // A row is a click target in places; the chip is not a way to hit it.
+    el.addEventListener('click', function(ev){ ev.stopPropagation(); });
+    return el;
+  }
+
+  /**
+   * THE DAY, IN BLOCKS. One row an hour, first hour with something in it to
+   * the last, and the empty hours in between kept rather than collapsed - a
+   * day with a gap in the middle of it is a different day from a day without
+   * one, and closing the gap up would hide exactly that.
+   *
+   * Items with no time sit in an "Any time" band ABOVE the clock rather than
+   * being scattered into plausible-looking hours. Most of a list has no time
+   * on it and never will, and a day view that quietly assigned them would be
+   * showing a schedule nobody wrote.
+   */
+  function renderDayBlocks(wrap, rows, isToday){
+    var timed = rows.filter(function(r){ return hourOf(r.e.at) >= 0; });
+    var loose = rows.filter(function(r){ return hourOf(r.e.at) < 0; });
+
+    if (loose.length){
+      wrap.appendChild(secLabelEl('Any time'));
+      var lw = document.createElement('div');
+      lw.className = 'list';
+      loose.forEach(function(r){ lw.appendChild(dayRow(r)); });
+      wrap.appendChild(lw);
+    }
+
+    if (!timed.length){
+      var hint = document.createElement('p');
+      hint.className = 'dayHint';
+      hint.textContent = loose.length
+        ? 'Nothing on this day has a time yet. Tap the clock on any item to give it one and it moves into the hours below it.'
+        : 'Nothing on the list that day.';
+      wrap.appendChild(hint);
+      return;
+    }
+
+    var hours = timed.map(function(r){ return hourOf(r.e.at); });
+    var from = Math.min.apply(null, hours), to = Math.max.apply(null, hours);
+    var nowH = new Date().getHours();
+
+    wrap.appendChild(secLabelEl('The day'));
+    var dv = document.createElement('div');
+    dv.className = 'dayView';
+    for (var h = from; h <= to; h++){
+      var blk = document.createElement('div');
+      blk.className = 'blk' + (isToday && h === nowH ? ' now' : '');
+      var lab = document.createElement('div');
+      lab.className = 'blkH';
+      lab.textContent = prettyHour(h);
+      blk.appendChild(lab);
+      var body = document.createElement('div');
+      body.className = 'blkB';
+      var mine = timed.filter(function(r){ return hourOf(r.e.at) === h; })
+        .sort(function(a, b){ return validAt(a.e.at).localeCompare(validAt(b.e.at)); });
+      if (!mine.length){
+        var em = document.createElement('div');
+        em.className = 'blkEmpty';
+        em.textContent = '-';
+        body.appendChild(em);
+      } else {
+        mine.forEach(function(r){ body.appendChild(dayRow(r)); });
+      }
+      blk.appendChild(body);
+      dv.appendChild(blk);
+    }
+    wrap.appendChild(dv);
+  }
+
+  // One row in the day view: the same row the list detail draws, plus the
+  // clock that sets its time.
+  function dayRow(r){
+    var row = calRow(r.e, r.crossed, r.age);
+    row.appendChild(atInput(r.e.list, r.e));
+    return row;
+  }
+
   function renderCalDay(){
     var wrap = document.getElementById('calDay');
     wrap.innerHTML = '';
@@ -1173,14 +1514,20 @@
     sum.textContent = daySentence(st, isToday);
     wrap.appendChild(sum);
 
+    var seg = document.createElement('div');
+    seg.className = 'viewSeg';
+    [['sections', 'By what happened'], ['blocks', 'Through the day']].forEach(function(o){
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'vBtn' + (dayView === o[0] ? ' on' : '');
+      b.setAttribute('aria-pressed', dayView === o[0] ? 'true' : 'false');
+      b.textContent = o[1];
+      b.addEventListener('click', function(){ dayView = o[0]; renderCalDay(); });
+      seg.appendChild(b);
+    });
+    wrap.appendChild(seg);
+
     var crossed = crossedOn(calPick);
-    if (crossed.length){
-      wrap.appendChild(secLabelEl('Crossed off'));
-      var cl = document.createElement('div');
-      cl.className = 'list';
-      crossed.forEach(function(e){ cl.appendChild(calRow(e, true, 0)); });
-      wrap.appendChild(cl);
-    }
 
     // Before the record began there is nothing honest to say about what was
     // left undone, so nothing is said.
@@ -1190,6 +1537,50 @@
     }
     var missed = open.filter(function(e){ return e.repeat; });
     var carried = open.filter(function(e){ return !e.repeat; });
+
+    if (dayView === 'blocks'){
+      var rows = crossed.map(function(e){ return { e:e, crossed:true, age:0 }; })
+        .concat(open.map(function(e){
+          return { e:e, crossed:false, age:daysBetween(e.createdAt, calPick) };
+        }));
+      /**
+       * ONE ADDITION THE SECTION VIEW DOES NOT MAKE, and only on today.
+       *
+       * The lists above are the rolling ones - the only lists a DATE can be
+       * owed work from. Grocery, Projects, Someday and anything he made carry
+       * no notion of being due on a given day, which is why they are absent
+       * from the calendar entirely.
+       *
+       * But a time on one of those is a plain statement: I mean to do this at
+       * 14:00. On TODAY that is real and belongs in today's hours. On any past
+       * date it is not - nothing ever recorded that the item was meant for
+       * that particular day, so placing it there would be inventing the
+       * schedule this view exists to show honestly.
+       */
+      if (isToday){
+        var already = {};
+        rows.forEach(function(r){ already[r.e.list + '|' + r.e.id] = 1; });
+        allLists().forEach(function(L){
+          if (ROLLING.indexOf(L.id) !== -1) return;
+          openOf(L.id).forEach(function(x){
+            if (!validAt(x.at)) return;
+            if (already[L.id + '|' + x.id]) return;
+            rows.push({ e:{ id:x.id, title:x.title, list:L.id, repeat:false,
+                            createdAt:x.createdAt, at:x.at }, crossed:false, age:0 });
+          });
+        });
+      }
+      renderDayBlocks(wrap, rows, isToday);
+      return;
+    }
+
+    if (crossed.length){
+      wrap.appendChild(secLabelEl('Crossed off'));
+      var cl = document.createElement('div');
+      cl.className = 'list';
+      crossed.forEach(function(e){ cl.appendChild(calRow(e, true, 0)); });
+      wrap.appendChild(cl);
+    }
 
     function section(label, rows){
       if (!rows.length) return;
@@ -1243,6 +1634,20 @@
 
     renderTabs();
     document.getElementById('why').textContent = L.why;
+    document.getElementById('newListRow').hidden = !naming;
+    if (!naming) document.getElementById('newListName').value = '';
+
+    var del = document.getElementById('delList');
+    del.hidden = !L.custom;
+    // Armed only for the list on screen. Switching tabs disarms it, because
+    // renderPage runs on every switch and this is recomputed from `tab`.
+    if (armedDelete && armedDelete !== L.id) armedDelete = '';
+    var n = items(L.id).length;
+    del.textContent = armedDelete === L.id
+      ? (n ? 'Tap again to delete ' + n + (n === 1 ? ' item' : ' items') : 'Tap again to delete')
+      : 'Delete list';
+    del.classList.toggle('armed', armedDelete === L.id);
+
     document.getElementById('newTitle').placeholder = 'Add to ' + L.name;
 
     var repWrap = document.getElementById('repWrap');
@@ -1408,6 +1813,12 @@
     });
     var cd = document.getElementById('clearDone');
     if (cd) cd.addEventListener('click', clearDone);
+    var dl = document.getElementById('delList');
+    if (dl) dl.addEventListener('click', function(){ deleteList(tab); });
+    var nlg = document.getElementById('newListGo');
+    if (nlg) nlg.addEventListener('click', newList);
+    var nln = document.getElementById('newListName');
+    if (nln) nln.addEventListener('keydown', function(e){ if (e.key === 'Enter') newList(); });
 
     document.getElementById('viewLists').addEventListener('click', function(){
       view = 'lists'; renderPage();
@@ -1450,7 +1861,12 @@
     var d = res.data;
     if (d && typeof d === 'object'){
       if (d.v === 2 || d.v === 3){
-        LISTS.forEach(function(L){
+        // Restored FIRST: allLists() reads it, so the loop below has to know
+        // about his own lists before it can restore their items.
+        state.custom = (d.custom || []).filter(function(c){
+          return c && typeof c.id === 'string' && c.id.indexOf(CUSTOM_PREFIX) === 0 && c.name;
+        });
+        allLists().forEach(function(L){
           state.lists[L.id] = (d.lists && Array.isArray(d.lists[L.id])) ? d.lists[L.id] : [];
         });
         state.archive = Array.isArray(d.archive) ? d.archive : [];

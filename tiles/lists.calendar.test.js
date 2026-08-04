@@ -47,7 +47,13 @@ sandbox.Date = class extends Date {
 }
 vm.createContext(sandbox)
 vm.runInContext(`
-  var LISTS = ${grabVar('LISTS', '[')};
+  var BUILTIN_LISTS = ${grabVar('BUILTIN_LISTS', '[')};
+  var LISTS = BUILTIN_LISTS;
+  // roll() and backfillDone() reach the lists through allLists() so that a
+  // list he made is rolled over too (it has no roll rule, so it passes
+  // straight through). These suites test the built-ins, which is what this
+  // stands in for.
+  function allLists(){ return LISTS; }
   var ROLLING = ${grabVar('ROLLING', '[')};
   var ARCHIVE_CAP = 200;
   var DONE_DAYS_CAP = ${(src.match(/var DONE_DAYS_CAP = (\d+)/) || [])[1]};

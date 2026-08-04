@@ -41,7 +41,13 @@ sandbox.Date = class extends Date {
 }
 vm.createContext(sandbox)
 vm.runInContext(`
-  var LISTS = ${grabVar('LISTS', '[')};
+  var BUILTIN_LISTS = ${grabVar('BUILTIN_LISTS', '[')};
+  var LISTS = BUILTIN_LISTS;
+  // roll() and backfillDone() reach the lists through allLists() so that a
+  // list he made is rolled over too (it has no roll rule, so it passes
+  // straight through). These suites test the built-ins, which is what this
+  // stands in for.
+  function allLists(){ return LISTS; }
   var ARCHIVE_CAP = 200;
   var state, loaded = true, rolledNote = '';
   function listById(id){ for (var i=0;i<LISTS.length;i++) if (LISTS[i].id===id) return LISTS[i]; return LISTS[0]; }
@@ -212,6 +218,52 @@ check('an empty day with habits left does not claim there is nothing to do',
 check('nothing is dropped - every open item lands in one of the two lists',
   /oneOff\.forEach\(function\(x\)\{ openEl\.appendChild/.test(src) &&
   /repeating\.forEach\(function\(x\)\{ rl2\.appendChild/.test(src))
+
+// ── 12. lists he makes himself ────────────────────────────────────────────
+console.log('\n[12] a list you make is a real list, and reaches nothing it should not')
+const custom = vm.runInContext(`
+  var state = { custom:[{ id:'u:abc', name:'Work' }], lists:{ 'u:abc':[] } };
+  ${grab('customLists')}
+  customLists()
+`, sandbox)
+check('it exists as a list', custom.length === 1 && custom[0].name === 'Work')
+// The three that would each be a lie if they were true by default.
+check('it never rolls', custom[0].roll === null, String(custom[0].roll))
+check('it has no repeating items', custom[0].repeatable === false, String(custom[0].repeatable))
+// THE ONE THAT MATTERS. projects_done has counted the same thing since v1.
+// A new list quietly folded into it would make every row logged before today
+// a lie about what it counted.
+check('it never reaches the ledger', !custom[0].counts, String(custom[0].counts))
+check('it says what it is on screen', !!custom[0].why && custom[0].why.length > 20)
+
+// doneCount is what projects_done reports, and it reads ONE list by name.
+check('the ledger count is hardcoded to projects, not "whatever list counts"',
+  /function doneCount\(\)\{ return doneOf\('projects'\)\.length; \}/.test(src))
+
+console.log('\n[13] a custom id can never collide with a built-in')
+// The id is the key its items are stored under. A list called "Daily" landing
+// on the built-in daily id would merge two lists into one with no error.
+check('custom ids are prefixed', /var CUSTOM_PREFIX = 'u:'/.test(src))
+check('no built-in uses that prefix',
+  sandbox.BUILTIN_LISTS.every(l => l.id.indexOf('u:') !== 0),
+  sandbox.BUILTIN_LISTS.map(l => l.id).join(','))
+check('the loader refuses anything not carrying the prefix',
+  /c\.id\.indexOf\(CUSTOM_PREFIX\) === 0/.test(src))
+check('a duplicate name is refused rather than silently allowed',
+  /There is already a list called/.test(src))
+// It arms rather than confirms - confirm() is a modal and modals never open in
+// a sealed frame, see tiles/sealed.test.js - and the armed state says what
+// goes, so a second tap is never a blind one.
+check('deleting one arms first and says how much goes with it',
+  /armedDelete === L\.id/.test(src) && /'Tap again to delete ' \+ n/.test(src))
+// The archive and the done log are keyed by DATE, not by list, and together
+// they are what the calendar reads. Deleting a list must not rewrite what a
+// day was - the list is gone, the record of what got finished is not.
+const delBody = grab('deleteList')
+check('deleting a list leaves the archive alone', !/state\.archive/.test(delBody), delBody.match(/state\.archive.*/) || '')
+check('and leaves the calendar log alone', !/state\.done/.test(delBody), delBody.match(/state\.done.*/) || '')
+check('it does remove the list and its items',
+  /state\.custom = /.test(delBody) && /delete state\.lists\[id\]/.test(delBody))
 
 console.log(`\n${fails} failure(s)`)
 process.exit(fails ? 1 : 0)

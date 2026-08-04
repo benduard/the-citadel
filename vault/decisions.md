@@ -2,6 +2,35 @@
 
 What you decided and why, so a future session never re-litigates it.
 
+## A sealed tile cannot open a modal, and must never be allowed to
+
+Found 2026-08-04 building the Lists changes. Lists grew a "New list" button
+that asked for the name with `prompt()`, and a "Delete list" that asked with
+`confirm()`. Both worked perfectly with the file opened on its own. Both did
+nothing whatsoever on the real board - silently, with an empty console.
+
+The cause is the seal itself. A tile runs in `sandbox="allow-scripts"` with no
+`allow-modals`, so the browser blocks `prompt`, `confirm` and `alert` outright:
+prompt returns null, confirm returns false, and nothing anywhere says why. Code
+that branches on the answer takes the "cancelled" path for ever. The failure
+looks exactly like a dead button.
+
+THE FIX IS NEVER TO ADD allow-modals. That flag would apply to every tile on
+the board, including one fetched from someone else's repo, and a sealed frame
+that can throw a blocking modal over the whole page is a worse tile than one
+that cannot ask a question. Anything needing an answer gets built out of
+elements in the page:
+
+- naming a list is an input row that opens under the tabs
+- deleting a list ARMS the button - first tap says what goes, second tap does
+  it - and any other render disarms it
+- setting a time is a native `<input type="time">`, which is the OS picker on a
+  phone and is not a modal
+
+`tiles/sealed.test.js` now guards both ends: no tile calls a modal, and the
+host never hands one the permission to. It was mutation-tested by putting the
+prompt back, which fails it.
+
 ## The board has a mark, and the iPhone home screen icon finally works
 
 Decided 2026-07-31. Ruben's home screen tile was blank. The cause was not a

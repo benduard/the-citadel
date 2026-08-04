@@ -20,6 +20,8 @@ node tiles/lifting.supersets.test.js
 node tiles/lifting.bodyweight.test.js
 node tiles/lists.test.js
 node tiles/lists.calendar.test.js
+node tiles/lists.day.test.js
+node tiles/sealed.test.js
 echo "All suites passed."
 
 # The browser checks (paint, close-button collision, touch targets) are

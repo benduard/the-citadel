@@ -75,7 +75,63 @@ sandboxes.forEach((s, i) => {
 // own. Worth pinning in the same place.
 check('no iframe is given allow-same-origin', !/allow-same-origin/.test(host))
 
-console.log('\n[3] and the tiles that ask questions do it with elements')
+/**
+ * THE NOTCH RULE. Added 2026-08-04 after it reached Ruben's phone.
+ *
+ * env(safe-area-inset-*) RESOLVES INSIDE A SEALED TILE'S IFRAME - measured,
+ * not assumed. So a tile that puts those insets on `body` gets them in BOTH
+ * modes, and in the grid that is simply wrong: the poster is a small card in
+ * the middle of the board, nowhere near the screen edge, and the shell already
+ * keeps its own distance from the notch.
+ *
+ * It is not a cosmetic wrong. An s-sized card is about 122px tall, an iPhone's
+ * top inset is about 59px, so half the card became padding and the number was
+ * pushed 29px below its own fold. Every desktop check was green, because
+ * env() is 0 without a notch.
+ *
+ * Full screen the tile IS the viewport and genuinely needs the insets, so the
+ * rule is not "never" - it is "page mode only". This is a static check on
+ * purpose: it runs on every file in tiles/ with no browser and no board, so a
+ * tile added next month is covered without anyone remembering this happened.
+ */
+function safeAreaSelectors(css) {
+  const out = []
+  let i = 0
+  for (;;) {
+    const at = css.indexOf('env(safe-area-inset', i)
+    if (at === -1) break
+    const open = css.lastIndexOf('{', at)
+    // The selector runs back to the previous block boundary. For a rule inside
+    // an @media, this lands on the inner selector, which is the one that
+    // decides whether the declaration applies.
+    const prev = Math.max(css.lastIndexOf('}', open), css.lastIndexOf('{', open - 1))
+    let sel = css.slice(prev + 1, open).trim().replace(/\s+/g, ' ')
+    // The first rule in a file has no previous block boundary, so the slice
+    // runs back through the doctype and the head. Report the tail, which is
+    // the selector someone can actually go and find.
+    if (sel.length > 70) sel = '...' + sel.slice(-70)
+    out.push({ sel, at })
+    i = at + 1
+  }
+  return out
+}
+
+console.log('\n[3] THE NOTCH: safe-area insets are page mode only, in every tile')
+tiles.forEach(f => {
+  const css = code(fs.readFileSync(path.join(dir, f), 'utf8'))
+  const uses = safeAreaSelectors(css)
+  const loose = uses.filter(u => u.sel.indexOf('data-mode="page"') === -1)
+  check(`${f}: no safe-area inset outside page mode`, loose.length === 0,
+    loose.map(u => u.sel).join(' | '))
+})
+// And the rule has to actually be used somewhere, or a tile that simply never
+// handles the notch at all would pass by doing nothing.
+const pageTiles = tiles.filter(f => /data-mode="page"/.test(fs.readFileSync(path.join(dir, f), 'utf8')))
+check('every tile with a full-screen page honours the notch there',
+  pageTiles.every(f => safeAreaSelectors(code(fs.readFileSync(path.join(dir, f), 'utf8'))).length > 0),
+  pageTiles.filter(f => !safeAreaSelectors(code(fs.readFileSync(path.join(dir, f), 'utf8'))).length).join(', '))
+
+console.log('\n[4] and the tiles that ask questions do it with elements')
 // Lists is the one that needed an answer twice. Both are built in the page.
 const lists = fs.readFileSync(path.join(dir, 'lists.html'), 'utf8')
 check('naming a list uses an input', /id="newListName"/.test(lists))

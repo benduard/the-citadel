@@ -119,6 +119,12 @@ There is no command for this. You already know the three moves:
    the tile boots empty and its history is orphaned. Sizes are
    s / m / tall / hero / big / band / l (registry.js documents each).
 3. Add it to `lib/tiles/weights.ts` and ask what it is worth toward their goal.
+   If it reports nothing, it carries no weight, and you say which it is and why.
+4. Run `./run-tests.sh`. `tiles/sealed.test.js` walks every file in `tiles/` and
+   will fail a tile that calls a modal or takes the notch into the grid - see
+   "Two things the seal breaks that look like your bug" below. Add the tile to
+   `tools/number-check.js` and the three other browser checks in `tools/` too,
+   or it is the one tile nothing is looking at.
 
 Then tell them what got wired, in one line: the tile saves to their vault, you
 can fill it, and it now counts toward y.
@@ -171,6 +177,47 @@ before you write anything. Never invent one. If a tile does not declare its shap
 it is not finished, and you say so.
 
 Sealed tiles never fetch and never hold a key.
+
+### Two things the seal breaks that look like your bug
+
+Both of these were shipped to Ruben's phone once. Both look like a dead
+feature rather than a rule, and neither shows up in a desktop browser.
+`tiles/sealed.test.js` enforces both across every file in `tiles/`, so a new
+tile is covered without anyone remembering this - run it before you say a tile
+is done.
+
+**No `prompt()`, `confirm()` or `alert()`, ever.** The frame is
+`sandbox="allow-scripts"` with no `allow-modals`, so all three are silently
+dead: prompt returns null, confirm returns false, nothing in the console. Code
+that branches on the answer takes the "cancelled" path for ever and the button
+just looks broken. NEVER fix this by adding `allow-modals` - that would apply
+to every tile on the board, including one from someone else's repo. Build the
+question out of elements instead: an input row to name something, a button that
+arms and says what is about to happen instead of confirming, a native
+`<input type="time">` or `type="date"` for a value the OS can pick.
+
+**`env(safe-area-inset-*)` reaches INSIDE the iframe, so it is page mode only.**
+A tile gets the phone's real notch values in its own document. Put them on
+`body` and the poster gets them too - and in the grid the poster is a small
+card in the middle of the board, nowhere near the screen edge, where the inset
+is simply wrong. An `s` tile is about 122px tall and an iPhone's top inset is
+about 59px, so half the card becomes padding and the number is pushed below its
+own fold. Scope every one of them:
+
+```css
+html[data-mode="page"] body{ padding-top:env(safe-area-inset-top); /* ... */ }
+```
+
+Full screen the tile IS the viewport and genuinely needs them. Anything
+`position:fixed` in a tile needs the same scoping even if it looks hidden in
+the grid.
+
+**A poster number wants `clamp()`, never a fixed size.** A sealed tile's `vw` is
+the TILE, not the screen, because an iframe carries its own viewport - so
+`clamp(26px,24vw,46px)` tracks the card at every breakpoint. A fixed 46px
+overflowed a 320px phone by 18px. `tools/number-check.js` measures this in a
+real browser at five phone widths, twice each, once with the notch emulated; add
+any new tile to its `TARGETS` and `SEED`.
 
 ---
 

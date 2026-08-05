@@ -544,8 +544,14 @@
   .nav{
     position:fixed; left:0; right:0; bottom:0; z-index:30;
     display:flex; background:rgba(5,5,5,.94); border-top:1px solid var(--border);
-    padding-bottom:env(safe-area-inset-bottom);
   }
+  /* The home indicator's inset, and ONLY in page mode. It was on .nav
+     unscoped, which was harmless purely because the nav happens to sit inside
+     a container the grid hides - an invisible coupling holding up a guarantee.
+     A fixed bar with the phone's bottom inset on it, inside a 262px card, is
+     34px of the poster gone. tiles/sealed.test.js enforces the scoping now, so
+     this cannot come back through a markup change nobody connected to it. */
+  html[data-mode="page"] .nav{ padding-bottom:env(safe-area-inset-bottom); }
   .nav button{
     flex:1 1 0; min-width:0; border:0; background:transparent; cursor:pointer;
     padding:9px 4px 10px; display:flex; flex-direction:column; align-items:center; gap:3px;

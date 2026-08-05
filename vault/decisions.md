@@ -1138,3 +1138,69 @@ assuming it.
 BY BODY PART DELIBERATELY DOES NOT DRAW GROUPS. A superset's two exercises land
 in different muscle buckets, which is the honest answer to "what did my chest
 do today" - drawing the group there would mean drawing half of it twice.
+
+## The wearable pushes in. The tile never pulls
+
+Started 2026-08-05, at Ruben's request: wear a ring or a watch, have Recovery
+fill itself, and have the mentor read the result back as pointers.
+
+THE DEVICE HE ACTUALLY HAS HAS NO API. It is an off brand ring plus a watch,
+both driven by FitCloudPro (Hetang Smart). Their own SDK says the APPID and
+APPKEY "have not been opened", so there are no developer credentials to apply
+for, and the data never leaves the phone except over Bluetooth. There is no
+server holding his nights that a scheduled job could ask. The GitHub Action
+holding an API key, which `vault/chapter.md` named as the path for this, is
+dead for this device. It stays correct for an Oura or a Whoop.
+
+SO THE DIRECTION IS REVERSED. Nothing fetches. The phone, which already has the
+data, pushes it: FitCloudPro to Apple Health, an iPhone Shortcut once a morning,
+straight into Supabase. The board reads the vault it already reads. The tile
+stays sealed, the repo holds no key, and the credential sits on the phone next
+to the health data it is reading anyway.
+
+APPLE HEALTH IS THE INTERFACE, NOT FITCLOUDPRO, and that is the decision that
+makes this worth building at all. Ruben said outright that if the ring does not
+sync he will buy an Apple Watch or another band. Reading Health rather than any
+vendor means that swap costs nothing: the Shortcut, the function and the tile
+all keep working. Nothing here is tied to one brand.
+
+Whether the ring writes anything useful into Health was still unknown when this
+was built. It had synced a night and Health showed nothing. That is a real
+possibility this survives: the pipe is device agnostic on purpose.
+
+A SECOND SLOT, NOT THE TILE'S OWN. `recovery:auto` sits beside `recovery` and
+the automation never touches the first. The tile saves its slot wholesale on
+every edit, so an automation writing the same slot would race a person typing
+and silently destroy a morning they entered by hand, which is the house rule
+this board does not break. Two slots also make "show both, you decide" possible,
+which is the conflict behaviour Ruben chose over the watch winning or his
+typing winning.
+
+A FUNCTION, NOT A TABLE WRITE. `recovery_auto_upsert` merges one morning
+server-side. A Shortcut POSTing the table directly would have to read the whole
+slot, merge and write it back, so any hiccup between those steps loses every
+morning it held. Merging one day at a time means the worst case is one morning
+missing. It is SECURITY INVOKER, so RLS applies exactly as it does to the board
+and there is no service-role key anywhere in this.
+
+A NULL FIELD IS ABSENT, NEVER ZERO. Same law as the tile. A zero HRV would
+poison the fourteen-day baseline the readiness band is built on, which is the
+one number on this board most easily made to lie.
+
+A PASSWORD, ON AN ACCOUNT THAT HAD NONE. Signing in here is a code in an email
+and that has not changed for humans. An automation cannot read an inbox, and a
+password grant is the only sign-in Supabase offers that a Shortcut can finish
+alone. Refresh tokens rotate, so a stored one does not survive. The password
+exists for the Shortcut, lives on the phone, and buys nothing an attacker could
+not already do with that phone unlocked. `VitalityRemote.setPassword` sets it
+from Ruben's own signed-in session, so no admin key is involved.
+
+THE LEDGER IS NOT WRITTEN HERE, on purpose. `sleep_hours` is Recovery's one
+reported number and the tile stays the only thing that reports it. Writing the
+ledger from the inlet would be accepting the watch's figure on Ruben's behalf,
+which is precisely the choice he asked to keep.
+
+BUILT IN THE ORDER THAT FAILS HONESTLY: the vault side first, proven with a
+deliberately fake number that gets deleted, then Health reading, then the tile.
+Building the tile's "show both" face first would have meant shipping a UI for
+data that may never arrive.

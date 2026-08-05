@@ -276,8 +276,23 @@
   .secLabel button:hover{ color:var(--text); border-color:var(--muted); }
 
   .list{ display:flex; flex-direction:column; }
+  /**
+   * A ROW MAY WRAP, AND THE TITLE MAY NOT BE CRUSHED.
+   *
+   * This row carries a checkbox, the title, up to two tags, a time input, a
+   * move select and a remove button. Their fixed widths add up to more than a
+   * phone is wide - measured at 335px of controls on a 284px row - and with
+   * `flex:1; min-width:0` the title was the only thing that could give, so it
+   * gave all of it: 0px wide, one character per line, the title reading as a
+   * vertical column of letters. Reported from his phone 2026-08-04.
+   *
+   * flex-wrap lets the controls drop to a second line instead, and the
+   * min-width below is what forces them to: without it the title still
+   * collapses and nothing ever wraps, because a zero-width item always "fits".
+   * tools/squeeze.js measures this across every tile.
+   */
   .item{
-    display:flex; align-items:center; gap:11px; padding:11px 2px;
+    display:flex; align-items:center; flex-wrap:wrap; gap:8px 10px; padding:11px 2px;
     border-top:1px solid rgba(148,163,158,.1);
   }
   .item:first-child{ border-top:0; }
@@ -289,7 +304,15 @@
   .check svg{ width:14px; height:14px; opacity:0; }
   .item.done .check{ background:var(--mint); border-color:var(--mint); }
   .item.done .check svg{ opacity:1; }
-  .txt{ flex:1; min-width:0; font-size:14.5px; line-height:1.35; word-break:break-word; }
+  /* min-width, NOT min-width:0. This is the whole fix: it is the floor that
+     makes the controls wrap instead of the title collapsing. `min(100%, 11rem)`
+     so a genuinely tiny box still gets the full width rather than overflowing
+     it. break-word stays for one very long unbroken word, which is a real
+     thing a task title can be. */
+  .txt{
+    flex:1 1 auto; min-width:min(100%, 11rem);
+    font-size:14.5px; line-height:1.35; word-break:break-word;
+  }
   .item.done .txt{ color:var(--faint); text-decoration:line-through; }
   .tag{
     flex:none; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
@@ -405,11 +428,14 @@
   .blkEmpty{ padding:11px 0; font-size:11.5px; color:rgba(148,163,158,.28); }
   /* A native time input, not a button opening a prompt: this frame is sealed
      and modals never open in it. On a phone this is the OS time picker. */
+  /* A native time input is WIDE - it measured 101px on a 284px row, which is
+     most of the reason the title had nothing left. Boxed to something a row
+     can actually carry; the OS picker it opens is unaffected. */
   .atIn{
-    flex:none; min-height:44px; padding:0 8px; cursor:pointer;
+    flex:none; width:82px; min-height:44px; padding:0 5px; cursor:pointer;
     border:1px solid var(--border); border-radius:9px; background:transparent;
     color:var(--faint); font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:11px; letter-spacing:.02em;
+    font-size:11px; letter-spacing:0;
   }
   .atIn:hover{ color:var(--mint); border-color:rgba(110,231,183,.35); }
   .atIn.set{ color:var(--mint); border-color:rgba(110,231,183,.3); }
@@ -422,7 +448,7 @@
      sealed frame gets for free that opens a native picker on a phone - and no
      modal is involved, which matters here. */
   .mvSel{
-    flex:none; max-width:104px; min-height:44px; padding:0 6px; cursor:pointer;
+    flex:none; width:74px; min-height:44px; padding:0 4px; cursor:pointer;
     border:1px solid var(--border); border-radius:9px; background:transparent;
     color:var(--faint); font-family:inherit; font-size:11.5px;
   }

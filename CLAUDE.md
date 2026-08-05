@@ -212,6 +212,15 @@ Full screen the tile IS the viewport and genuinely needs them. Anything
 `position:fixed` in a tile needs the same scoping even if it looks hidden in
 the grid.
 
+**A flexible text element needs a `min-width`, never `min-width:0`.** In a row
+of fixed-width controls the text is the only thing that can give, and
+`min-width:0` lets it give ALL of it - Lists' task titles measured literally
+0px wide, one letter per line, reading as a vertical column. Give the text a
+real floor (`min-width:min(100%, 11rem)`) and let the row `flex-wrap`, so the
+controls drop to a second line instead of crushing it. Every node suite was
+green while this was live: the layout was valid and unreadable.
+`tools/squeeze-check.js` measures it.
+
 **A poster number wants `clamp()`, never a fixed size.** A sealed tile's `vw` is
 the TILE, not the screen, because an iframe carries its own viewport - so
 `clamp(26px,24vw,46px)` tracks the card at every breakpoint. A fixed 46px

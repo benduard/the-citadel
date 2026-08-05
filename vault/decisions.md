@@ -2,6 +2,43 @@
 
 What you decided and why, so a future session never re-litigates it.
 
+## The task titles went vertical, and the check written for it was blind
+
+Reported 2026-08-04: the letters on his tasks were running down the screen
+instead of across.
+
+THE CAUSE. Lists' item row is a flex row carrying a checkbox, the title, up to
+two tags, a time input, a move select and a remove button. Measured on his
+phone width, those controls came to 335px on a 284px row. The title was the
+only flexible item, and `flex:1; min-width:0` let it give ALL of its width: it
+rendered at literally 0px, wrapping one character per line. The two controls
+added earlier that day - the time input at 101px and the move select at 84px -
+are what tipped it over.
+
+THE FIX is two halves and it needs both. `flex-wrap` on the row so the controls
+can drop to a second line, and a REAL `min-width` on the title so they are
+forced to: without the floor the title still collapses and nothing ever wraps,
+because a zero-width item always "fits". The time input and move select were
+also boxed to widths a row can carry.
+
+THE PART WORTH REMEMBERING IS THE CHECK. tools/squeeze-check.js was written to
+catch this, it reported "no text is squeezed" with the original bug restored in
+the file, and it looked completely correct. Two faults:
+
+- It skipped any element with `width === 0` as "not rendered". A squeezed title
+  is EXACTLY zero-width. The check was structurally blind to the one thing it
+  existed to find. It now filters on height alone.
+- Its first line-count divided scrollHeight by line-height, which counts
+  PADDING as text - every button on the board came back as three lines. It now
+  measures a Range over the element's contents, which returns one rectangle per
+  real line.
+
+And the first mutation test PASSED, because it only reverted one of the two CSS
+properties and `flex-wrap` alone was enough to hide the bug. A mutation test
+that does not verify its own edit landed, and does not revert the whole fix,
+proves nothing. The script now throws if the text it means to replace is not
+found.
+
 ## The notch reaches inside a sealed tile, and it ate half the small cards
 
 Found 2026-08-04, from Ruben on his phone: the check-in score sat low in its

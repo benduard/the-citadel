@@ -98,12 +98,20 @@ Both are written up in `vault/decisions.md`.
 
 ## Where the board goes next
 
-Nothing is queued. The obvious candidates, none of them started:
+- **The wearable inlet** - STARTED 2026-08-05, the vault half is in. Ruben
+  wants Recovery to fill itself from a ring or a watch, and the mentor to read
+  the result back as pointers.
+  His device runs on FitCloudPro, which has NO API, so the scheduled job that
+  once stood here is dead for it. The direction is reversed instead: the phone
+  pushes, out of Apple Health, through a Shortcut, into `recovery:auto` via
+  `supabase/wearable.sql`. Health is the interface rather than any vendor, so
+  swapping the ring for a watch costs nothing.
+  Done: the function, the second slot, `VitalityRemote.setPassword`.
+  Not done: the Shortcut, and the tile's "show both" face. Both wait on proof
+  that anything reaches Apple Health at all, which was still unknown - a night
+  was worn and Health showed nothing. See `vault/decisions.md`.
 
-- The automation that would let Recovery fill itself. A scheduled job holding
-  the wearable's API key, writing JSON into this repo, which the host fetches
-  and hands to the tile as a feed. This is the only path; the tile can never
-  fetch.
+Otherwise nothing is queued. The obvious candidates, none of them started:
 - Board LAYOUT does not sync yet. Tile data does. Which tiles you have hidden
   through the Library is still per device (`v:board` is localStorage only).
 - Cardio, deferred when Lifting was scoped. Heart rate zones and active
@@ -117,12 +125,16 @@ mood and focus, finances.
 ## The constraint that shapes all of this
 
 A sealed tile never fetches and never holds a key. So HRV, resting heart rate,
-respiratory rate and sleep CANNOT flow in from a wearable by themselves. Two
-honest paths, and no third:
+respiratory rate and sleep CANNOT flow in from a wearable by themselves. Three
+honest paths, and no fourth:
 
 - typed in each morning off the watch app, which works today
+- something that already HAS the data pushes it in. On this board that is an
+  iPhone Shortcut reading Apple Health and calling `recovery_auto_upsert`. This
+  is the one being built, because Ruben's device has no API to pull from.
 - an automation holding the API key, writing JSON into this repo, which the
-  host fetches and hands to the tile as a feed. A real separate build.
+  host fetches and hands to the tile as a feed. Still correct for a device that
+  actually runs a cloud, like an Oura or a Whoop. Not an option for his.
 
 Do not promise a tile that syncs a wearable on its own. It cannot.
 

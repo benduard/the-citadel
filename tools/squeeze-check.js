@@ -32,30 +32,43 @@ const WIDTHS = [320, 390]
 // Seeded so the rows that actually carry text exist. A tile showing its empty
 // state has nothing to squeeze, and would pass by having nothing to measure -
 // the same trap tools/number-check.js already had to close once.
+// Dates are COMPUTED, never written down: Check in, Recovery and Lifting all
+// show TODAY's number, so a hardcoded date seeds them for a day that is not
+// today and they render their empty state instead. number-check.js broke
+// exactly that way the morning after it was written.
+const day = (back = 0) => {
+  const d = new Date()
+  d.setDate(d.getDate() - back)
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${dd}`
+}
+const TODAY = day(0)
+
 const SEED = {
   'v:tile:projects': { v:3, lists:{
       daily:[
-        { id:'a', title:'Call the bank about the mortgage', done:false, repeat:true, createdAt:'2026-07-08', doneAt:null },
-        { id:'b', title:'Stretch', done:false, repeat:false, createdAt:'2026-07-08', doneAt:null }],
-      weekly:[{ id:'c', title:'Meal prep for the week', done:false, repeat:true, createdAt:'2026-07-08', doneAt:null }],
-      grocery:[{ id:'d', title:'Olive oil', done:false, createdAt:'2026-08-01', doneAt:null }],
-      projects:[{ id:'e', title:'Finish the board', done:false, createdAt:'2026-07-01', doneAt:null }],
-      someday:[{ id:'f', title:'Learn to sail properly', done:false, createdAt:'2026-07-01', doneAt:null }] },
-    custom:[], archive:[], done:{}, logFrom:'2026-07-01', rolledOn:'', rolledWeek:'' },
-  'v:tile:checkin': { days:{ '2026-08-04':
+        { id:'a', title:'Call the bank about the mortgage', done:false, repeat:true, createdAt:day(28), doneAt:null },
+        { id:'b', title:'Stretch', done:false, repeat:false, createdAt:day(28), doneAt:null }],
+      weekly:[{ id:'c', title:'Meal prep for the week', done:false, repeat:true, createdAt:day(28), doneAt:null }],
+      grocery:[{ id:'d', title:'Olive oil', done:false, createdAt:day(7), doneAt:null }],
+      projects:[{ id:'e', title:'Finish the board', done:false, createdAt:day(35), doneAt:null }],
+      someday:[{ id:'f', title:'Learn to sail properly', done:false, createdAt:day(35), doneAt:null }] },
+    custom:[], archive:[], done:{}, logFrom:day(35), rolledOn:'', rolledWeek:'' },
+  'v:tile:checkin': { days:{ [TODAY]:
     { mood:8, energy:7, focus:9, stress:3, soreness:3, water:6, supps:true, note:'Felt strong today' } } },
-  'v:tile:body': { unit:'kg', days:{ '2026-08-04': 102.4, '2026-08-03': 102.9 } },
-  'v:tile:recovery': { days:{ '2026-08-04': { sleepH:7.5, hrv:68, rhr:52, resp:14.2 } } },
+  'v:tile:body': { unit:'kg', days:{ [TODAY]: 102.4, [day(1)]: 102.9 } },
+  'v:tile:recovery': { days:{ [TODAY]: { sleepH:7.5, hrv:68, rhr:52, resp:14.2 } } },
   'v:tile:lifting': { v:2, unit:'kg', bw:102.4, weekTarget:3, rest:120, restAuto:true,
-    days:{ '2026-08-04':[
+    days:{ [TODAY]:[
       { id:'s1', ex:'Back Squat', kg:140, reps:5, rpe:8, note:'' },
       { id:'s2', ex:'Romanian Deadlift', kg:100, reps:8, rpe:7, note:'' }] },
     notes:{}, routines:[], custom:[], claimed:{}, lvlSeen:1, rankSeen:{},
-    splits:{ '2026-08-04':'legs' }, routineToday:{}, deloads:{},
+    splits:{ [TODAY]:'legs' }, routineToday:{}, deloads:{},
     scheme:'yours', customSplits:[], attempts:[], uni:{} },
-  'v:tile:progress': { v:1, quests:[{ id:'q1', title:'Train four times this week', done:true, createdAt:'2026-08-01' }], retired:0, xp:1250 },
+  'v:tile:progress': { v:1, quests:[{ id:'q1', title:'Train four times this week', done:true, createdAt:day(7) }], retired:0, xp:1250 },
   'v:tile:notes': { v:1, notes:[
-    { id:'n1', body:'Gym plan\nPush Monday, pull Wednesday', createdAt:'2026-08-04T09:00:00.000Z', updatedAt:'2026-08-04T09:00:00.000Z' }] }
+    { id:'n1', body:'Gym plan\nPush Monday, pull Wednesday', createdAt:TODAY + 'T09:00:00.000Z', updatedAt:TODAY + 'T09:00:00.000Z' }] }
 }
 
 /**

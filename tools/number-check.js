@@ -65,26 +65,42 @@ const MIN_READABLE = 11
  * a weight with a decimal, a two digit sleep figure. The narrow cases were
  * never going to break - the question this tool answers is what happens when
  * the number is as long as it realistically gets.
+ *
+ * THE DATES ARE COMPUTED, NEVER WRITTEN DOWN. Check in, Recovery and Lifting
+ * all show TODAY's number, so a hardcoded date seeds them for a day that is
+ * not today and every one of them renders its empty state instead. This was
+ * written with a literal '2026-08-04' and broke the following morning: three
+ * tiles reporting NO NUMBER RENDERED with nothing actually wrong with them.
+ * A check that starts failing at midnight is a check people learn to ignore.
  */
+const day = (back = 0) => {
+  const d = new Date()
+  d.setDate(d.getDate() - back)
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${dd}`
+}
+const TODAY = day(0)
+
 const SEED = {
   'v:tile:projects': { v:3, lists:{ daily:[
-      { id:'a', title:'Write the thing', done:false, repeat:false, createdAt:'2026-08-01', doneAt:null },
-      { id:'b', title:'Call the bank', done:true, repeat:false, createdAt:'2026-08-01', doneAt:'2026-08-04' },
-      { id:'c', title:'Stretch', done:false, repeat:true, createdAt:'2026-08-01', doneAt:null }
+      { id:'a', title:'Write the thing', done:false, repeat:false, createdAt:day(7), doneAt:null },
+      { id:'b', title:'Call the bank', done:true, repeat:false, createdAt:day(7), doneAt:TODAY },
+      { id:'c', title:'Stretch', done:false, repeat:true, createdAt:day(7), doneAt:null }
     ], weekly:[], grocery:[], projects:[], someday:[] },
-    custom:[], archive:[], done:{}, logFrom:'2026-08-01', rolledOn:'', rolledWeek:'' },
+    custom:[], archive:[], done:{}, logFrom:day(7), rolledOn:'', rolledWeek:'' },
   // Shapes copied from each tile's own header comment, not guessed. A seed
   // that does not match makes the tile render its EMPTY state, which has no
   // number in it - so the check would pass by having nothing to measure. The
   // per-tile assertion below is what stops that being a silent pass.
-  'v:tile:checkin': { days:{ '2026-08-04':
+  'v:tile:checkin': { days:{ [TODAY]:
     { mood:8, energy:7, focus:9, stress:3, soreness:3, water:6, supps:true, note:'' } } },
-  'v:tile:body': { unit:'kg', days:{ '2026-08-04': 102.4, '2026-08-03': 102.9, '2026-08-02': 103.1 } },
-  'v:tile:recovery': { days:{ '2026-08-04': { sleepH:7.5, hrv:68, rhr:52, resp:14.2 } } },
+  'v:tile:body': { unit:'kg', days:{ [TODAY]: 102.4, [day(1)]: 102.9, [day(2)]: 103.1 } },
+  'v:tile:recovery': { days:{ [TODAY]: { sleepH:7.5, hrv:68, rhr:52, resp:14.2 } } },
   'v:tile:lifting': { v:2, unit:'kg', bw:102.4, weekTarget:3, rest:120, restAuto:true,
     // Deliberately a big day: this puts five figures on the Lifting poster,
     // which is the longest number the board ever shows.
-    days:{ '2026-08-04': [
+    days:{ [TODAY]: [
       { id:'s1', ex:'Back Squat', kg:140, reps:5, rpe:8, note:'' },
       { id:'s2', ex:'Back Squat', kg:140, reps:5, rpe:9, note:'' },
       { id:'s3', ex:'Leg Press', kg:280, reps:10, rpe:8, note:'' },
@@ -96,12 +112,12 @@ const SEED = {
     notes:{}, routines:[], custom:[], claimed:{}, lvlSeen:1, rankSeen:{},
     splits:{}, routineToday:{}, deloads:{}, scheme:'yours', customSplits:[] },
   'v:tile:progress': { v:1, quests:[
-      { id:'q1', title:'Train four times', done:true, createdAt:'2026-08-01' },
-      { id:'q2', title:'Sleep seven hours', done:false, createdAt:'2026-08-01' }
+      { id:'q1', title:'Train four times', done:true, createdAt:day(7) },
+      { id:'q2', title:'Sleep seven hours', done:false, createdAt:day(7) }
     ], retired:0, xp:1250 },
   'v:tile:notes': { v:1, notes:[
-      { id:'n1', body:'Gym plan\nPush Monday', createdAt:'2026-08-04T09:00:00.000Z', updatedAt:'2026-08-04T09:00:00.000Z' },
-      { id:'n2', body:'Groceries\nolive oil', createdAt:'2026-08-03T09:00:00.000Z', updatedAt:'2026-08-03T09:00:00.000Z' }
+      { id:'n1', body:'Gym plan\nPush Monday', createdAt:TODAY + 'T09:00:00.000Z', updatedAt:TODAY + 'T09:00:00.000Z' },
+      { id:'n2', body:'Groceries\nolive oil', createdAt:day(1) + 'T09:00:00.000Z', updatedAt:day(1) + 'T09:00:00.000Z' }
     ] }
 }
 

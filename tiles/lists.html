@@ -314,8 +314,13 @@
     font-size:14.5px; line-height:1.35; word-break:break-word;
   }
   .item.done .txt{ color:var(--faint); text-decoration:line-through; }
+  /* Bounded, because one of these carries a list NAME and names are no longer
+     capped. flex:none with nothing to stop it would let a long name widen the
+     row past the screen. The name is still whole in the tab strip and the move
+     menu; this is the one place it is only a label. */
   .tag{
-    flex:none; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    flex:none; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
     font-size:9px; letter-spacing:.06em; color:var(--faint);
     border:1px solid var(--border); border-radius:5px; padding:2px 5px;
   }
@@ -506,7 +511,7 @@
     <!-- Naming a new list. An input in the page, not a prompt: this frame is
          sealed and modals never open in it. -->
     <div class="addRow" id="newListRow" hidden>
-      <input id="newListName" type="text" placeholder="Name the list" maxlength="24">
+      <input id="newListName" type="text" placeholder="Name the list">
       <button class="addBtn" id="newListGo" type="button">Create</button>
     </div>
     <div class="whyRow">
@@ -517,7 +522,10 @@
     </div>
 
     <div class="addRow">
-      <input id="newTitle" type="text" placeholder="Add" maxlength="120" disabled>
+      <!-- NO maxlength. It was 120, which silently stopped accepting keystrokes
+           mid-sentence with nothing on screen to say why. A task is whatever he
+           needs to write down; the row wraps to as many lines as it takes. -->
+      <input id="newTitle" type="text" placeholder="Add" disabled>
       <button class="addBtn" id="addBtn" type="button" disabled>Add</button>
     </div>
     <label class="repToggle" id="repWrap" hidden>
@@ -1232,7 +1240,10 @@
       renderPage();
       return;
     }
-    if (name.length > 24) name = name.slice(0, 24);
+    // No truncation. This used to cut the name at 24 characters without saying
+    // so, which is the house rule about never changing his work silently
+    // broken in one line. The tab strip scrolls and the move menu ellipsises,
+    // so a long name is a display question, not a reason to edit what he typed.
     var clash = allLists().filter(function(L){ return L.name.toLowerCase() === name.toLowerCase(); });
     if (clash.length){
       trouble = 'There is already a list called ' + clash[0].name + '. Pick another name and nothing of yours gets mixed up.';

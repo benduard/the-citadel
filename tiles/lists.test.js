@@ -265,5 +265,97 @@ check('and leaves the calendar log alone', !/state\.done/.test(delBody), delBody
 check('it does remove the list and its items',
   /state\.custom = /.test(delBody) && /delete state\.lists\[id\]/.test(delBody))
 
+// ── 14. moving an item between lists ──────────────────────────────────────
+console.log('\n[14] a task can be sent to another list')
+vm.runInContext(`
+  var trouble = '';
+  function persist(){}
+  function renderAll(){}
+  function renderPage(){}
+  ${grab('moveItem')}
+`, sandbox)
+const mv = (from, id, to) => {
+  vm.runInContext('trouble = ""', sandbox)
+  sandbox.moveItem(from, id, to)
+  return vm.runInContext('trouble', sandbox)
+}
+const seed = () => {
+  sandbox.state = {
+    v: 3,
+    lists: {
+      daily: [{ id:'d1', title:'Stretch', done:false, repeat:true, createdAt:'2026-07-30', doneAt:null }],
+      weekly: [], grocery: [],
+      projects: [
+        { id:'p1', title:'Ship it', done:true,  createdAt:'2026-07-01', doneAt:'2026-07-30' },
+        { id:'p2', title:'Draft it', done:false, createdAt:'2026-07-01', doneAt:null }
+      ],
+      someday: []
+    },
+    custom: [], archive: [], done: {}, logFrom: '2026-07-01', rolledOn: '', rolledWeek: ''
+  }
+  vm.runInContext('tab = "daily"', sandbox)
+}
+vm.runInContext('var tab = "daily"', sandbox)
+
+seed()
+check('the item leaves the list it was on',
+  (mv('daily', 'd1', 'grocery'), sandbox.state.lists.daily.length === 0))
+check('and arrives on the other one',
+  sandbox.state.lists.grocery.length === 1 && sandbox.state.lists.grocery[0].title === 'Stretch')
+// Grocery has no notion of "every day". A flag its list cannot honour is a
+// flag that does nothing until someone moves it back and is surprised.
+check('a repeating item loses its repeat on a list that does not repeat',
+  sandbox.state.lists.grocery[0].repeat === false,
+  String(sandbox.state.lists.grocery[0].repeat))
+check('nothing is duplicated', sandbox.state.lists.daily.length === 0)
+
+seed()
+check('moving to the list it is already on does nothing',
+  (mv('daily', 'd1', 'daily'), sandbox.state.lists.daily.length === 1))
+check('an id that is not there is a no-op, not a crash',
+  (mv('daily', 'nope', 'grocery'), sandbox.state.lists.grocery.length === 0))
+
+console.log('\n[15] THE LEDGER RULE: a finished item cannot cross Projects')
+/**
+ * projects_done counts done items on Projects and has meant exactly that
+ * since v1. Moving a finished thing OFF would walk the ledger backwards for a
+ * bookkeeping action - the same thing clearDone already refuses. Moving one ON
+ * would inflate it with work that was never a project.
+ */
+seed()
+let warn = mv('projects', 'p1', 'daily')
+check('a done project may not leave', sandbox.state.lists.projects.some(x => x.id === 'p1'))
+check('and it says why rather than failing silently', /ledger/.test(warn), warn)
+check('the target list is untouched', sandbox.state.lists.daily.length === 1)
+
+seed()
+sandbox.state.lists.daily[0].done = true
+warn = mv('daily', 'd1', 'projects')
+check('a done item may not arrive either', sandbox.state.lists.projects.length === 2,
+  String(sandbox.state.lists.projects.length))
+check('and it says why', /never a project/.test(warn), warn)
+
+seed()
+warn = mv('projects', 'p2', 'daily')
+check('an OPEN project moves freely - it was never counted',
+  !sandbox.state.lists.projects.some(x => x.id === 'p2') &&
+  sandbox.state.lists.daily.some(x => x.id === 'p2'))
+check('with no warning', warn === '', warn)
+
+console.log('\n[16] moving into a list that does not exist yet')
+check('the row offers it', /NEW_LIST_VALUE/.test(src) && /New list\.\.\./.test(src))
+check('the item is held until the list is made', /pendingMove = \{ from:L\.id, id:x\.id \}/.test(src))
+check('and lands the moment it is', /if \(pm\)\{ moveItem\(pm\.from, pm\.id, id\); return; \}/.test(src))
+// Otherwise the next list he makes for any reason inherits an item he stopped
+// moving minutes ago.
+check('backing out of naming abandons the pending move',
+  /if \(!naming\) pendingMove = null;/.test(src))
+// The calendar's `done` log names the list an item was crossed off on, and
+// that WAS true that day. Rewriting it to agree with a later move would be
+// falsifying the record to tidy a label.
+const moveBody = grab('moveItem')
+check('moving never rewrites the calendar record', !/state\.done/.test(moveBody), moveBody)
+check('nor the archive', !/state\.archive/.test(moveBody), moveBody)
+
 console.log(`\n${fails} failure(s)`)
 process.exit(fails ? 1 : 0)

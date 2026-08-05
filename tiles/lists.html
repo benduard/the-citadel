@@ -85,6 +85,16 @@
   both arrive on a v3 blob with neither key, which reads correctly as no lists
   made and no times set, so the version did not move.
 
+  MOVING AN ITEM BETWEEN LISTS keeps its id, its createdAt and its history.
+  Added 2026-08-04. Two rules it enforces, both about not lying:
+  a FINISHED item may not cross into or out of Projects, because that list is
+  the one that reaches the ledger and projects_done would either walk backwards
+  for a bookkeeping action or inflate with work that was never a project; and a
+  repeating item loses its repeat when it lands somewhere that cannot repeat.
+  The `done` log is NOT rewritten - it names the list an item was crossed off
+  on, which was true on that day, and editing it to agree with a move made
+  later would be falsifying the record to tidy a label.
+
   ROLLING. On a new day the daily list rolls: repeating items uncheck, one-off
   items that were finished move to `archive`, and ANYTHING NOT FINISHED STAYS
   ON THE LIST - it follows you into the next day, and the next, until it is
@@ -407,6 +417,18 @@
   /* Chromium paints this white on a dark field, and it is the only part of the
      control that is not inheriting the colour above. */
   .atIn::-webkit-calendar-picker-indicator{ filter:invert(.6); cursor:pointer; }
+
+  /* Send an item to another list. A select, because it is the one control a
+     sealed frame gets for free that opens a native picker on a phone - and no
+     modal is involved, which matters here. */
+  .mvSel{
+    flex:none; max-width:104px; min-height:44px; padding:0 6px; cursor:pointer;
+    border:1px solid var(--border); border-radius:9px; background:transparent;
+    color:var(--faint); font-family:inherit; font-size:11.5px;
+  }
+  .mvSel:hover{ color:var(--mint); border-color:rgba(110,231,183,.35); }
+  .mvSel:focus{ outline:none; border-color:rgba(110,231,183,.5); }
+  .mvSel option{ background:#0b0f0e; color:var(--text); }
   .dayHint{ margin:10px 0 0; font-size:11.5px; color:var(--faint); line-height:1.5; }
 
   .empty{ padding:24px 2px; color:var(--faint); font-size:13px; line-height:1.5; }
@@ -674,6 +696,11 @@
   var dayView = 'sections';  // 'sections' | 'blocks'
   var naming = false;        // the New list name row is open
   var armedDelete = '';      // id of the list whose Delete is one tap from firing
+  // An item waiting for the list it is being moved to to exist. Set when
+  // "New list..." is chosen on a row, cleared the moment the list is made or
+  // the naming is abandoned - it must never outlive the row that set it.
+  var pendingMove = null;    // { from, id } | null
+  var NEW_LIST_VALUE = '__new__';
   var calY = 0, calM = 0;    // month on screen, set from today at boot
   var calPick = '';          // the day whose detail is open
 
@@ -1053,6 +1080,43 @@
     // on it and should not be made to have one.
     row.appendChild(atInput(L.id, x));
 
+    // Send it somewhere else, including a list that does not exist yet. A
+    // select rather than a menu: it is the one control a sealed frame gets for
+    // free that opens a native picker on a phone, and no modal is involved.
+    var mv = document.createElement('select');
+    mv.className = 'mvSel';
+    mv.setAttribute('aria-label', 'Move ' + x.title + ' to another list');
+    mv.disabled = !loaded;
+    var head = document.createElement('option');
+    head.value = ''; head.textContent = 'Move';
+    mv.appendChild(head);
+    allLists().forEach(function(o){
+      if (o.id === L.id) return;
+      var op = document.createElement('option');
+      op.value = o.id; op.textContent = o.name;
+      mv.appendChild(op);
+    });
+    var mkNew = document.createElement('option');
+    mkNew.value = NEW_LIST_VALUE; mkNew.textContent = 'New list...';
+    mv.appendChild(mkNew);
+    mv.addEventListener('change', function(){
+      var to = mv.value;
+      mv.value = '';                       // back to the label, whatever happens
+      if (!to) return;
+      if (to === NEW_LIST_VALUE){
+        // Hold the item, open the name row, and let newList() land it.
+        pendingMove = { from:L.id, id:x.id };
+        naming = true;
+        renderPage();
+        var el = document.getElementById('newListName');
+        if (el) el.focus();
+        return;
+      }
+      moveItem(L.id, x.id, to);
+    });
+    mv.addEventListener('click', function(ev){ ev.stopPropagation(); });
+    row.appendChild(mv);
+
     /* How long this has been following you. Only on the lists that actually
        roll, and never on a repeating item - a daily habit is not "carried",
        it comes back by design. Faint for a day or two, amber once it has been
@@ -1110,6 +1174,10 @@
     add.disabled = !loaded;
     add.addEventListener('click', function(){
       naming = !naming;
+      // Backing out of naming abandons whatever asked for the list. Leaving it
+      // set would send the NEXT list he makes, for any reason, an item he
+      // stopped moving minutes ago.
+      if (!naming) pendingMove = null;
       renderPage();
       if (naming){
         var el = document.getElementById('newListName');
@@ -1152,6 +1220,16 @@
     tab = id;
     naming = false;
     trouble = '';
+
+    // Made from a row's "New list...": the item that asked for it goes in.
+    // moveItem persists and renders, and it can still refuse - a finished
+    // project cannot leave Projects even for a brand new list - in which case
+    // the list is made and the item stays put, which is the honest outcome
+    // rather than a silent half move.
+    var pm = pendingMove;
+    pendingMove = null;
+    if (pm){ moveItem(pm.from, pm.id, id); return; }
+
     persist();
     renderAll();
   }
@@ -1778,6 +1856,50 @@
       state.lists.daily.push(found);
       tab = 'daily';
     }
+    persist();
+    renderAll();
+  }
+
+  /**
+   * Move an item to another list.
+   *
+   * THE ONE RULE THAT IS NOT COSMETIC: a FINISHED item may not cross into or
+   * out of a counted list. projects_done is a ledger row, it counts done items
+   * on Projects, and it has meant that since v1. Dragging a finished thing in
+   * would inflate it with work that was never a project; dragging one out
+   * would walk it backwards for a bookkeeping action, which is the exact thing
+   * clearDone already refuses to do. Open items move freely - they have not
+   * been counted yet, so nothing in the ledger notices.
+   *
+   * A repeating item loses its repeat when it lands somewhere that does not
+   * repeat. Grocery has no notion of "every day", and an item carrying a flag
+   * its list cannot honour is a flag that does nothing until someone moves it
+   * back and is surprised.
+   *
+   * THE CALENDAR'S RECORD IS NOT REWRITTEN. `done` entries name the list the
+   * item was crossed off on, and that WAS true on that day. Rewriting history
+   * so it agrees with a move made later would be falsifying the log to tidy a
+   * label.
+   */
+  function moveItem(fromId, id, toId){
+    if (fromId === toId) return;
+    var from = listById(fromId), to = listById(toId);
+    var x = items(fromId).filter(function(i){ return i.id === id; })[0];
+    if (!x || !to) return;
+
+    if (x.done && (from.counts || to.counts)){
+      trouble = 'Finished items cannot move ' + (from.counts ? 'off ' : 'onto ') + 'Projects. ' +
+        'That list is the one that reaches your ledger, and moving a done item ' +
+        (from.counts ? 'off it would count it backwards.' : 'onto it would count work that was never a project.');
+      renderPage();
+      return;
+    }
+
+    state.lists[fromId] = items(fromId).filter(function(i){ return i.id !== id; });
+    if (!to.repeatable && x.repeat) x.repeat = false;
+    state.lists[toId] = items(toId).concat([x]);
+    tab = toId;
+    trouble = '';
     persist();
     renderAll();
   }

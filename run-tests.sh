@@ -18,6 +18,7 @@ node tiles/lifting.rest.test.js
 node tiles/lifting.routines.test.js
 node tiles/lifting.supersets.test.js
 node tiles/lifting.bodyweight.test.js
+node tiles/lifting.max.test.js
 node tiles/lists.test.js
 node tiles/lists.calendar.test.js
 node tiles/lists.day.test.js

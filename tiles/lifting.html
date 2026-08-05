@@ -33,6 +33,8 @@
       splits:   { "YYYY-MM-DD": "<split id>" },
       scheme:   "yours" | "ppl" | "ul" | "bro" | "full" | "custom",
       customSplits: [ { id: "custom:...", name, mus: [ "<muscle>" ] } ],
+      attempts: [ { id, date, ex, kg, hit, setId? } ],  // max attempts, see below
+      uni:      { "<exercise name>": true|false },      // per-side override
       routineToday: { "YYYY-MM-DD": "<routine id>" },
       deloads:  { "<weekKey, the Monday>": true }   // weeks gone light on purpose
     }
@@ -87,6 +89,21 @@
   whole history changes meaning, and the ledger ends up holding two units in
   one column with no way to tell them apart. One canonical unit in, converted
   at the edges, is the only version of this that survives a preference change.
+
+  MAX ATTEMPTS ARE A RECORD OF TRYING, NOT A SECOND SOURCE OF TRUTH FOR MAXES.
+  Added 2026-08-04. `attempts` holds every attempt at a single, hit or missed.
+
+  A HIT ALSO WRITES A REAL SET of 1 rep at that weight, and THAT is what moves
+  the max. It has to work this way: a PR is "the heaviest set actually
+  performed", so a hit single already is one, and routing it through the normal
+  set path means volume, PRs, e1RM, ranks, XP and the ledger all pick it up
+  with no special case to get wrong. The attempt row carries `setId` so the two
+  can be seen to be the same event. maxOf() reads bests(), never attempts.
+
+  A MISS WRITES NOTHING ELSE. No set, no volume, no PR, no rank movement -
+  because nothing was lifted. It is kept because "I missed 150 twice before I
+  got it" is the shape of real progress and a log that quietly deletes the
+  misses tells a flattering lie about how the max was reached.
 
   A SET NEEDS REPS, NOT WEIGHT. kg 0 is allowed on ANY exercise (2026-08-04) -
   a set done with just the body is a set. It is never turned into load that was
@@ -283,6 +300,24 @@
   .suggest b{ color:var(--volt); font-weight:600; }
   .suggest button{ margin-left:auto; flex:none; }
 
+  /* Last session's running order. A record of what he did, ticked off against
+     what is logged today - never a checklist he is being held to. */
+  .ordList{
+    list-style:none; counter-reset:ord; margin:-4px 0 10px; padding:0 0 0 2px;
+  }
+  .ordList li{
+    counter-increment:ord; position:relative; padding:4px 0 4px 26px;
+    font-size:12px; color:var(--muted); line-height:1.4;
+  }
+  .ordList li::before{
+    content:counter(ord); position:absolute; left:0; top:4px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9.5px;
+    color:var(--faint); width:18px; text-align:right;
+  }
+  .ordList li.done{ color:var(--faint); text-decoration:line-through; }
+  .ordList li.now{ color:var(--volt); }
+  .ordList li.now::before{ color:var(--volt); }
+
   .list li.editing{ background:var(--volt-soft); border-radius:8px; }
 
   .list li.muscleHead{
@@ -401,6 +436,43 @@
     border-color:var(--volt-line); color:var(--volt); background:var(--volt-soft);
   }
   .splitBtn.all{ flex:0 0 auto; }
+
+  /* ---------- per side switch ---------- */
+  .uniRow{ display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin-bottom:8px; }
+  .uniBtn{
+    display:inline-flex; align-items:center; gap:8px;
+    min-height:44px; padding:8px 13px; cursor:pointer;
+    border:1px solid var(--border); border-radius:10px;
+    background:var(--card2); color:var(--muted);
+    font-size:12.5px; font-weight:600; font-family:inherit; letter-spacing:-.01em;
+    transition:border-color .16s, color .16s, background .16s;
+  }
+  .uniBtn:hover{ color:var(--text); }
+  .uniBtn[aria-pressed="true"]{
+    border-color:var(--volt-line); color:var(--volt); background:var(--volt-soft);
+  }
+  .uniDot{
+    width:9px; height:9px; flex:none; border-radius:50%;
+    border:1px solid currentColor; background:transparent;
+  }
+  .uniBtn[aria-pressed="true"] .uniDot{ background:currentColor; }
+  .uniNote{ font-size:11px; color:var(--faint); line-height:1.4; }
+
+  /* ---------- max attempts ---------- */
+  .maxNow{
+    display:flex; align-items:baseline; gap:9px; flex-wrap:wrap;
+    padding:11px 13px; border:1px solid var(--border); border-radius:11px;
+    background:var(--card2); margin-bottom:4px;
+  }
+  .maxNow .v{ font-family:Georgia,"Times New Roman",serif; font-size:clamp(24px,7vw,34px); color:var(--volt); }
+  .maxNow .u{ font-size:12px; color:var(--muted); }
+  .maxNow .w{ margin-left:auto; font-size:10.5px; color:var(--faint);
+              font-family:ui-monospace,SFMono-Regular,Menlo,monospace; white-space:nowrap; }
+  /* Amber, never red: a weight you have not got yet is a target, not a
+     failure. Nothing in this tile shames a miss. */
+  .maxOpen{ font-size:11.5px; color:var(--amber); line-height:1.5; margin:8px 0 0; }
+  .atHit{ color:var(--volt); }
+  .atMiss{ color:var(--amber); }
 
   /* ---------- picking a scheme, and building one ---------- */
   /* 44px minimum on every chip: these are the touch targets tools/touch-check.js
@@ -670,6 +742,15 @@
         <!-- What you did on this exercise the LAST time you trained it, set by
              set, so set 2 today is aimed at set 2 then. Filled by renderLast(). -->
         <div id="lastTime"></div>
+        <!-- Whether THIS lift is typed per hand. His call, not the file's:
+             logging a dumbbell press as 20 per hand or 40 total is a habit.
+             Flipping it never rewrites history - see isUni(). -->
+        <div class="uniRow" id="uniRow" hidden>
+          <button class="uniBtn" id="bUni" type="button" aria-pressed="false">
+            <span class="uniDot"></span><span id="uniLabel">Log this per hand</span>
+          </button>
+          <span class="uniNote" id="uniNote"></span>
+        </div>
         <div class="row three" style="margin-bottom:8px">
           <label class="fl grow"><span><i id="fWeightWord">Weight</i> (<i id="fUnit">kg</i>)</span>
             <input id="fKg" type="number" inputmode="decimal" step="0.5" min="0" placeholder="0" disabled>
@@ -698,6 +779,27 @@
           <div class="grow"><div class="bar mint"><i id="restBar"></i></div></div>
           <button class="btn small ghost" id="bRestStop">Stop</button>
         </div>
+      </div>
+
+      <!-- Going for a single. A hit is logged as a real set of 1, which is
+           what moves the max; a miss is recorded and moves nothing. -->
+      <div class="card">
+        <h3>Max attempt</h3>
+        <p class="note" id="maxNote"></p>
+        <div id="maxState"></div>
+        <div class="row" style="margin-top:10px">
+          <label class="fl grow"><span>Going for (<i id="mUnit">kg</i>)</span>
+            <input id="mKg" type="number" inputmode="decimal" step="0.5" min="0" placeholder="0" disabled>
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn primary grow" id="bHit" type="button" disabled>Hit it</button>
+          <button class="btn grow" id="bMiss" type="button" disabled>Missed it</button>
+        </div>
+        <p class="note" style="margin-top:8px">A hit is logged as a single, so it counts toward your
+          volume, your PR and your rank like any other set. A miss is kept and counts toward none of
+          them, because nothing was lifted.</p>
+        <ul class="list" id="attemptList"></ul>
       </div>
 
       <div class="card">
@@ -1474,11 +1576,23 @@
     return {
       name: r[0], pri: r[1], sec: r[2] ? r[2].split(',') : [], cat: r[3],
       pat: r[4], bwf: r[5], w: r[6], lad: r[7], cues: r[8].split('|'), custom: false,
-      uni: !!UNI_EXERCISES[r[0]],
+      // UNI_EXERCISES is the default; isUni lets his own switch override it.
+      uni: isUni(r[0], UNI_EXERCISES[r[0]]),
       retired: !!RETIRED_EXERCISES[r[0]]
     };
   }
   var LIB = RAW.map(mkEx);
+  /**
+   * mkEx bakes `uni` in, and LIB is built once at load - before the vault has
+   * answered and before he can have touched the per-side switch. So LIB has to
+   * be rebuilt whenever S.uni changes, or the switch would appear to do
+   * nothing for every built-in exercise while working for his own.
+   *
+   * Rebuilt rather than resolved on read because findEx goes through allEx on
+   * every set in history, and paying for the override there would put a map
+   * over 69 exercises inside that loop.
+   */
+  function rebuildLib(){ LIB = RAW.map(mkEx); }
 
   // Plans are written by hand, here, and shipped with the tile. There is no
   // model in this file and there never will be: no AI key in the app, ever.
@@ -1544,7 +1658,12 @@
     splits:{}, routineToday:{}, deloads:{},
     // Which way the week is divided. An older blob has neither, and defaults
     // to the scheme it was already running, so nothing on screen moves.
-    scheme:'yours', customSplits:[]
+    scheme:'yours', customSplits:[],
+    // Max attempts, hit and missed. Added 2026-08-04.
+    attempts:[],
+    // Per-side overrides. Whether a lift is typed per hand is HIS call, not a
+    // fact about the movement, so this beats UNI_EXERCISES either way.
+    uni:{}
   };
   var loaded = false;
   var trouble = '';
@@ -1588,7 +1707,35 @@
   var restTimer = null, restLeft = 0, restTotal = 0;
   var searchTerm = '';
 
-  function allEx(){ return LIB.concat(S.custom.map(function(c){ var o = mkEx([c.name,c.pri,(c.sec||[]).join(','),c.cat||'custom',c.pat||'curl',c.bwf||0,c.w||1,c.lad||null,(c.cues||[]).join('|')||'Yours.']); o.custom = true; if (!c.lad) o.lad = null; o.uni = !!c.uni; return o; })); }
+  /**
+   * IS THIS LIFT TYPED PER HAND? His answer beats the file's.
+   *
+   * UNI_EXERCISES and a custom exercise's own `uni` are the defaults. S.uni is
+   * the override, and it is stored per exercise NAME because that is what a
+   * set records. Added 2026-08-04: whether you log a dumbbell press as 20 per
+   * hand or 40 total is a habit, not a property of the movement, and hard
+   * coding one lifter's habit made every other lift wrong for him.
+   *
+   * FLIPPING IT NEVER REWRITES HISTORY. Stored kg stays what it always was -
+   * the total on the body - so every rank, every PR and lifting_volume are
+   * untouched by the switch. What changes is how the box is READ on the way in
+   * and how the number is LABELLED on the way out. An old set still describes
+   * the same load, in the other framing. See setLabel and logSet.
+   */
+  function isUni(name, def){
+    // S IS NOT DEFINED YET THE FIRST TIME THIS RUNS. `var S` is declared
+    // further down the file, and LIB is built at load through mkEx, which
+    // calls this - so hoisting leaves S undefined here on the very first pass
+    // and `S.uni` throws. It threw on every board load until the browser check
+    // caught it; no node suite could see it, because none of them evaluate the
+    // file top to bottom the way a browser does.
+    // The defaults are correct at that moment anyway: nothing is overridden
+    // until the vault answers, and rebuildLib() re-runs this afterwards.
+    var over = (typeof S !== 'undefined' && S && S.uni) ? S.uni : null;
+    if (over && Object.prototype.hasOwnProperty.call(over, name)) return !!over[name];
+    return !!def;
+  }
+  function allEx(){ return LIB.concat(S.custom.map(function(c){ var o = mkEx([c.name,c.pri,(c.sec||[]).join(','),c.cat||'custom',c.pat||'curl',c.bwf||0,c.w||1,c.lad||null,(c.cues||[]).join('|')||'Yours.']); o.custom = true; if (!c.lad) o.lad = null; o.uni = isUni(c.name, c.uni); return o; })); }
   function findEx(n){ var a = allEx(); for (var i=0;i<a.length;i++) if (a[i].name === n) return a[i]; return null; }
   // Has this exercise ever actually been done? A retired entry with sets under
   // it still belongs on the ranks page and in the library - that is his record
@@ -1723,6 +1870,96 @@
     }
     return { best: best, prEvents: prEvents };
   }
+  /* ---------- max attempts ----------
+     A single, gone for or missed. See the header for why a hit also writes a
+     real set and a miss writes nothing else. */
+
+  // The heaviest single ACTUALLY LIFTED on this exercise, read from the same
+  // place every PR comes from. Never from `attempts`: a max is a thing that
+  // happened, and attempts is a record of trying.
+  function maxOf(name){
+    var h = history(), top = null;
+    for (var i=0;i<h.length;i++){
+      var s = h[i].s;
+      if (s.ex !== name || s.reps !== 1 || !s.kg) continue;
+      if (!top || s.kg > top.kg) top = { kg:s.kg, date:h[i].d };
+    }
+    return top;
+  }
+  function attemptsFor(name){
+    return (S.attempts || []).filter(function(a){ return a.ex === name; })
+      .sort(function(a, b){ return String(b.date).localeCompare(String(a.date)) || (b.kg - a.kg); });
+  }
+  // What he has tried and not yet got. Only counts misses ABOVE the current
+  // max: once a weight is hit, an older miss at that weight is history rather
+  // than an open target.
+  function unclearedFor(name){
+    var m = maxOf(name), best = m ? m.kg : 0;
+    var out = {};
+    attemptsFor(name).forEach(function(a){
+      if (a.hit || a.kg <= best) return;
+      if (!out[a.kg] || a.date > out[a.kg].date) out[a.kg] = { kg:a.kg, date:a.date, n:0 };
+    });
+    attemptsFor(name).forEach(function(a){
+      if (!a.hit && out[a.kg]) out[a.kg].n++;
+    });
+    return Object.keys(out).map(function(k){ return out[k]; })
+      .sort(function(a, b){ return a.kg - b.kg; });
+  }
+
+  /**
+   * Log an attempt at a single.
+   *
+   * hit=true routes through the ordinary set path on purpose - one rep at that
+   * weight IS a set actually performed, and letting it be one means the PR,
+   * the rank, the e1RM, the XP and today's lifting_volume all move without a
+   * single branch written for maxes. hit=false records the attempt and stops:
+   * nothing was lifted, so nothing may move.
+   */
+  function logAttempt(hit){
+    var ex = $('fEx').value;
+    var raw = parseFloat($('mKg').value);
+    if (!ex){ msg('Pick an exercise first.'); return; }
+    if (!isFinite(raw) || raw <= 0){ msg('Put the weight you went for in the box first.'); return; }
+
+    var e = findEx(ex);
+    var kg = toKg(raw);
+    if (e && e.uni) kg *= 2;          // same per-hand rule every set follows
+    var k = today();
+    var prev = maxOf(ex);
+    var a = { id:'a' + Date.now() + Math.floor(Math.random()*1000), date:k, ex:ex, kg:kg, hit:!!hit };
+
+    if (hit){
+      var row = {
+        id:'s' + Date.now() + Math.floor(Math.random()*1000),
+        ex:ex, kg:kg, reps:1, rpe:10, note:''
+      };
+      S.days[k] = S.days[k] || [];
+      S.days[k].push(row);
+      a.setId = row.id;
+    }
+    S.attempts = S.attempts || [];
+    S.attempts.push(a);
+    $('mKg').value = '';
+    buzz(hit ? 24 : 10);
+    persist();
+
+    if (hit){
+      // The whole point of the feature, and it is only ever said when true.
+      msg(prev && kg > prev.kg
+        ? 'New max on ' + ex + ': ' + showW(kg) + ' ' + unitLabel() +
+          '. Up from ' + showW(prev.kg) + '. Logged as a single, so it counts everywhere.'
+        : (prev
+            ? 'Logged. Your best single on ' + ex + ' is still ' + showW(prev.kg) + ' ' + unitLabel() + '.'
+            : 'First single logged on ' + ex + ': ' + showW(kg) + ' ' + unitLabel() + '.'), true);
+      checkMilestones();
+      startRest();
+    } else {
+      msg('Missed attempt recorded at ' + showW(kg) + ' ' + unitLabel() +
+          '. Nothing was lifted, so nothing moved - it is here so the day you get it, you can see what it took.', true);
+    }
+  }
+
   function prDates(){ return once('prDates', prDatesRaw); }
   function prDatesRaw(){
     var h = history(), seen = {}, out = {};
@@ -2273,6 +2510,19 @@
     var sp = splitFor(k);
     if (!sp) return null;
     var split = splitById(sp);
+
+    // What he actually did last time on this day, in the order he did it.
+    // Beats the staleness guess below because it is a record of his own
+    // session rather than an inference about one, and loses to a routine
+    // started today because that is stated intent for THIS session.
+    var ord = lastOrderFor(sp);
+    for (var j=0;j<ord.length;j++){
+      if (!loggedToday[ord[j]]) {
+        return { name: ord[j], why: 'next in your last ' + split.name + ' day',
+                 order: ord, at: j };
+      }
+    }
+
     var candidates = allEx().filter(function(e){
       return pickable(e) && split.mus.indexOf(e.pri) !== -1 && !loggedToday[e.name];
     });
@@ -2284,6 +2534,35 @@
       return (b.w || 0) - (a.w || 0);
     });
     return { name: candidates[0].name, why: 'least trained on ' + split.name + ' lately' };
+  }
+
+  /**
+   * The exercises from the most recent day that ran this split, in the order
+   * they were first logged.
+   *
+   * FIRST logged, not every appearance: coming back to the bench for a fourth
+   * set after moving on does not make bench the fourth exercise. The order is
+   * the order things were STARTED, which is what "what did I do first" means.
+   *
+   * Deliberately reads the LOG, not a routine. A routine is the plan; this is
+   * what he actually did, which is the thing worth repeating or beating. Days
+   * with the split recorded but nothing logged are skipped - an empty day says
+   * nothing about order.
+   */
+  function lastOrderFor(splitId){
+    if (!splitId) return [];
+    var k = today();
+    var days = Object.keys(S.splits).filter(function(d){
+      return d < k && S.splits[d] === splitId && (S.days[d] || []).length;
+    }).sort();
+    if (!days.length) return [];
+    var seen = {}, out = [];
+    (S.days[days[days.length - 1]] || []).forEach(function(s){
+      if (seen[s.ex]) return;
+      seen[s.ex] = 1;
+      out.push(s.ex);
+    });
+    return out;
   }
 
   function sessionsInLast14(exName){
@@ -2301,8 +2580,24 @@
     if (!box) return;
     var s = suggestNext();
     if (!s){ box.innerHTML = ''; return; }
-    box.innerHTML = '<div class="suggest">Try <b>' + esc(s.name) + '</b> - ' + esc(s.why) + '.' +
+    var html = '<div class="suggest">Try <b>' + esc(s.name) + '</b> - ' + esc(s.why) + '.' +
       '<button class="btn small" type="button" data-suggest-use="' + esc(s.name) + '">Use</button></div>';
+
+    // The whole running order when there is one, not just the next lift.
+    // Seeing the shape of the session is the point - "what did I do after
+    // squats last time" is the question, and one name at a time never answers
+    // it. Done is ticked off from what is logged TODAY, so it is a record and
+    // not a checklist he has to keep.
+    if (s.order && s.order.length > 1){
+      var k = today(), doneToday = {};
+      (S.days[k] || []).forEach(function(x){ doneToday[x.ex] = true; });
+      html += '<ol class="ordList">' + s.order.map(function(n){
+        var done = !!doneToday[n];
+        return '<li class="' + (done ? 'done' : (n === s.name ? 'now' : '')) + '">' +
+          esc(n) + '</li>';
+      }).join('') + '</ol>';
+    }
+    box.innerHTML = html;
   }
 
   function renderSplit(){
@@ -2486,9 +2781,95 @@
     if (box) box.placeholder = (e && e.bwf) ? 'added, or none' : 'none = bodyweight';
   }
 
+  // The per-side switch, and what it currently means for the box above it.
+  function renderUni(){
+    var row = $('uniRow');
+    if (!row) return;
+    var name = $('fEx').value;
+    var e = name ? findEx(name) : null;
+    row.hidden = !e;
+    if (!e) return;
+    var on = !!e.uni;
+    var b = $('bUni');
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.disabled = !loaded;
+    $('uniLabel').textContent = on ? 'Logging per hand' : 'Log this per hand';
+    $('uniNote').textContent = on
+      ? 'Type one hand. It is stored as the total on the body, so ranks and volume stay comparable.'
+      : 'Type the total on the body. Two 20s is 40.';
+  }
+
+  function renderMax(){
+    var note = $('maxNote'), state = $('maxState'), list = $('attemptList');
+    if (!note || !state || !list) return;
+    $('mUnit').textContent = unitLabel();
+    var name = $('fEx').value;
+    state.innerHTML = '';
+    list.innerHTML = '';
+
+    if (!name || !loaded){
+      note.textContent = 'Pick an exercise above and this becomes about that lift.';
+      return;
+    }
+    var e = findEx(name);
+    note.textContent = 'Going for a single on ' + name + '.' +
+      (e && e.uni ? ' Per hand, same as the box above.' : '');
+
+    var m = maxOf(name);
+    var now = document.createElement('div');
+    now.className = 'maxNow';
+    if (m){
+      now.innerHTML = '<span class="v">' + esc(showW(e && e.uni ? m.kg / 2 : m.kg)) + '</span>' +
+        '<span class="u">' + esc(unitLabel()) + (e && e.uni ? ' per hand' : '') + ' best single</span>' +
+        '<span class="w">' + esc(lastTimeWhen(m.date)) + '</span>';
+    } else {
+      now.innerHTML = '<span class="u">No single logged on this lift yet. The first one you hit becomes the mark.</span>';
+    }
+    state.appendChild(now);
+
+    // Weights he has gone for and not got. Only above the current max, so a
+    // miss from before he beat it is not still hanging over him.
+    var open = unclearedFor(name);
+    if (open.length){
+      var p = document.createElement('p');
+      p.className = 'maxOpen';
+      p.textContent = 'Still to get: ' + open.map(function(o){
+        return showW(e && e.uni ? o.kg / 2 : o.kg) + ' ' + unitLabel() +
+          (o.n > 1 ? ' (missed ' + o.n + ' times)' : '');
+      }).join(', ') + '.';
+      state.appendChild(p);
+    }
+
+    var all = attemptsFor(name).slice(0, 12);
+    if (!all.length){
+      var li0 = document.createElement('li');
+      li0.innerHTML = '<span class="empty">No attempts logged on this lift.</span>';
+      list.appendChild(li0);
+      return;
+    }
+    all.forEach(function(a){
+      var li = document.createElement('li');
+      var d = document.createElement('div'); d.className = 'grow';
+      var l1 = document.createElement('div'); l1.className = 'l1';
+      l1.textContent = showW(e && e.uni ? a.kg / 2 : a.kg) + ' ' + unitLabel() +
+        (e && e.uni ? ' per hand' : '');
+      var l2 = document.createElement('div'); l2.className = 'l2';
+      l2.textContent = niceDate(a.date);
+      d.appendChild(l1); d.appendChild(l2);
+      li.appendChild(d);
+      var s = document.createElement('span');
+      s.className = 'pill ' + (a.hit ? 'volt' : 'flat');
+      s.textContent = a.hit ? 'hit' : 'missed';
+      li.appendChild(s);
+      list.appendChild(li);
+    });
+  }
+
   function renderLast(){
     updateWeightLabel();
     updateRestLabel();
+    renderUni();
+    renderMax();
     var box = $('lastTime');
     if (!box) return;
     var ex = $('fEx').value;
@@ -4115,7 +4496,7 @@
   function enable(on){
     var ids = ['fEx','fKg','fReps','fRpe','bLog','bRest','fNote','fRoutine','bAddRoutine',
                'fSearch','cName','cMus','cPat','cUni','bAddCustom','fBw','bBw','fTarget','fRest','ladPick',
-               'csName','bAddSplit'];
+               'csName','bAddSplit','mKg','bHit','bMiss','bUni'];
     ids.forEach(function(id){ var el = $(id); if (el) el.disabled = !on; });
   }
 
@@ -4179,6 +4560,27 @@
         return;
       }
       if (t === $('bLog')) { logSet(); return; }
+      if (t === $('bHit')) { logAttempt(true); return; }
+      if (t === $('bMiss')) { logAttempt(false); return; }
+      // The per-side switch. Stored per exercise name, and it changes how the
+      // box is read and how the label prints - never what is already stored.
+      if (t === $('bUni') || (t.parentNode && t.parentNode === $('bUni'))) {
+        var un = $('fEx').value;
+        if (!un) return;
+        var eu = findEx(un);
+        if (!eu) return;
+        S.uni[un] = !eu.uni;
+        rebuildLib();                  // LIB baked the old value in at load
+        // A half typed weight meant one thing a second ago and would silently
+        // log as double or half. Same reasoning as the kg/lb toggle.
+        $('fKg').value = '';
+        $('mKg').value = '';
+        msg(S.uni[un]
+          ? un + ' is now typed per hand. Nothing already logged changed - it is still stored as the total on the body.'
+          : un + ' is now typed as the total on the body. Nothing already logged changed.', true);
+        persist();
+        return;
+      }
       // Switching how the week is divided. This writes ONE key. Not one day
       // already logged is rewritten, because every split id ever used stays
       // resolvable - which is the whole reason the ids are namespaced.
@@ -4485,6 +4887,15 @@
         // Selected the custom scheme but nothing survived the check above:
         // fall back rather than render a day bar with no days in it.
         if (S.scheme === CUSTOM_SCHEME && !S.customSplits.length) S.scheme = 'yours';
+        // Added 2026-08-04. Both absent on an older blob, which reads
+        // correctly as no attempts logged and no per-side overrides set.
+        S.attempts = (d.attempts || []).filter(function(a){
+          return a && a.ex && a.date && typeof a.kg === 'number' && isFinite(a.kg);
+        });
+        S.uni = (d.uni && typeof d.uni === 'object') ? d.uni : {};
+        // LIB baked `uni` in when this file loaded, before the vault answered.
+        // Without this every built-in exercise ignores his saved switch.
+        rebuildLib();
       } else if (d.days){
         // A v1 blob. Ruben asked for a clean start on 2026-07-30, so only the
         // display unit carries over and the log begins empty.

@@ -67,6 +67,7 @@ vm.runInContext(`
   function allEx(){ return LIB; }
   function findEx(n){ for (var i=0;i<LIB.length;i++) if (LIB[i].name===n) return LIB[i]; return null; }
   ${grab('pickable')}
+  ${grab('lastOrderFor')}
   ${grab('sessionsInLast14')}
   ${grab('suggestNext')}
 `, sandbox)
@@ -146,6 +147,80 @@ reset()
 vm.runInContext(`S.splits['${TODAY}'] = 'push';`, sandbox)
 s = sandbox.suggestNext()
 check('on a push day it never offers a leg exercise', s && s.name === 'Barbell Bench Press', JSON.stringify(s))
+
+console.log('\n[8] last time\'s running order, for this day')
+/**
+ * The ask: "suggest the order exercises I did for that muscle group day on the
+ * last time I did it." It reads the LOG, not a routine - a routine is the
+ * plan, this is what he actually did, and that is the thing worth repeating.
+ */
+reset()
+vm.runInContext(`
+  S.splits['2026-07-24'] = 'legs';
+  S.days['2026-07-24'] = [
+    ${JSON.stringify(set('Back Squat'))}, ${JSON.stringify(set('Romanian Deadlift'))},
+    ${JSON.stringify(set('Leg Press'))}, ${JSON.stringify(set('Standing Calf Raise'))}];
+  S.splits['${TODAY}'] = 'legs';
+`, sandbox)
+check('the order comes back as it was logged',
+  sandbox.lastOrderFor('legs').join(' > ') === 'Back Squat > Romanian Deadlift > Leg Press > Standing Calf Raise',
+  sandbox.lastOrderFor('legs').join(' > '))
+s = sandbox.suggestNext()
+check('nothing done today -> the first lift of last time', s && s.name === 'Back Squat', JSON.stringify(s))
+check('it says where the order came from', s && /last .* day/.test(s.why), s && s.why)
+check('and it hands back the whole order, not just one name',
+  s && s.order && s.order.length === 4, s && s.order && s.order.length)
+
+vm.runInContext(`S.days['${TODAY}'] = [${JSON.stringify(set('Back Squat'))}];`, sandbox)
+s = sandbox.suggestNext()
+check('first one done -> the second', s && s.name === 'Romanian Deadlift', JSON.stringify(s))
+// Out of order is fine. The list is a record of last time, not a rule about
+// today, so skipping ahead just means the skipped one is still waiting.
+vm.runInContext(`S.days['${TODAY}'] = [${JSON.stringify(set('Leg Press'))}];`, sandbox)
+s = sandbox.suggestNext()
+check('doing one out of order still offers the earliest one left',
+  s && s.name === 'Back Squat', JSON.stringify(s))
+
+// FIRST logged, not every appearance: coming back to the squat for a fourth
+// set after moving on does not make the squat the fourth exercise.
+reset()
+vm.runInContext(`
+  S.splits['2026-07-24'] = 'legs';
+  S.days['2026-07-24'] = [
+    ${JSON.stringify(set('Back Squat'))}, ${JSON.stringify(set('Leg Press'))},
+    ${JSON.stringify(set('Back Squat'))}];
+  S.splits['${TODAY}'] = 'legs';
+`, sandbox)
+check('an exercise returned to later keeps its first position',
+  sandbox.lastOrderFor('legs').join(' > ') === 'Back Squat > Leg Press',
+  sandbox.lastOrderFor('legs').join(' > '))
+
+console.log('\n[9] the order never outranks a routine, and never invents itself')
+// A routine started TODAY is stated intent for THIS session. Last time is
+// only ever a record of a different day.
+reset()
+vm.runInContext(`
+  S.splits['2026-07-24'] = 'legs';
+  S.days['2026-07-24'] = [${JSON.stringify(set('Leg Press'))}];
+  S.splits['${TODAY}'] = 'legs';
+  S.routines = [{ id:'r1', name:'Leg day', items:[{ ex:'Back Squat' }] }];
+  S.routineToday['${TODAY}'] = 'r1';
+`, sandbox)
+s = sandbox.suggestNext()
+check('a started routine still wins', s && s.name === 'Back Squat' && /Leg day/.test(s.why), JSON.stringify(s))
+
+// A day with the split recorded but nothing logged says nothing about order.
+reset()
+vm.runInContext(`
+  S.splits['2026-07-24'] = 'legs';
+  S.days['2026-07-24'] = [];
+  S.splits['${TODAY}'] = 'legs';
+`, sandbox)
+check('an empty previous day yields no order', sandbox.lastOrderFor('legs').length === 0)
+check('and it falls through to the staleness guess rather than nothing',
+  sandbox.suggestNext() !== null)
+check('a split never trained yields no order', sandbox.lastOrderFor('push').length === 0)
+check('no split id yields no order', sandbox.lastOrderFor('').length === 0)
 
 console.log(`\n${fails} failure(s)`)
 process.exit(fails ? 1 : 0)

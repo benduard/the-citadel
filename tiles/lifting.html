@@ -4001,8 +4001,8 @@
     // there is never a stale seconds box implying it governs anything.
     $('fRestWrap').hidden = !!S.restAuto;
     $('restNote').textContent = S.restAuto
-      ? 'Multi-joint lifts rest ' + fmtRest(REST_TIERS.compound) + ', isolation ' +
-        fmtRest(REST_TIERS.isolation) +
+      ? 'Squats, deadlifts and flat bench rest ' + fmtRest(REST_TIERS.big) +
+        '. Everything else rests ' + fmtRest(REST_TIERS.standard) +
         '. The Rest button on the log form always says which one the picked exercise gets.'
       : 'Every exercise rests the same. Switch back to follow the exercise and heavy lifts get longer on their own.';
 
@@ -4081,64 +4081,70 @@
   /**
    * HOW LONG TO REST, BY EXERCISE.
    *
-   * TWO tiers, set by Ruben on 2026-08-04: nothing rests less than three
-   * minutes, and anything multi-joint rests five.
+   * TWO tiers, narrowed by Ruben on 2026-08-04:
    *
-   *   300s  Multi-joint work. Every press, squat, hinge, row, pulldown, dip
-   *         and lunge - barbell, dumbbell and machine alike. A flat dumbbell
-   *         press sits here, which is the change he asked for by name: it was
-   *         being treated as a lesser press than the barbell version when the
-   *         demand is the same shape. These lifts are limited by systemic
-   *         fatigue rather than by one muscle, so a short rest costs reps on
-   *         the next set outright.
-   *   180s  Single-joint isolation - curls, extensions, raises, calves, abs,
-   *         neck, flyes. Local fatigue only, and it clears faster. Three
-   *         minutes is more than the evidence demands here; it is the floor he
-   *         wants, and resting longer than necessary costs nothing but time.
+   *   300s  The big three, in every form he trains them: any squat, any
+   *         deadlift, any FLAT bench (barbell or dumbbell). These are the
+   *         lifts where the next set is genuinely limited by how recovered
+   *         the whole body is, not just the muscle.
+   *   180s  Everything else, no exceptions. Machines, rows, pulldowns,
+   *         overhead work, incline pressing, dips, lunges, all isolation.
+   *         Three minutes is the floor: nothing on this board rests less.
    *
-   * IT USED TO BE THREE TIERS (300/180/120) split heavy / other compound /
-   * isolation. Collapsed because the middle tier no longer exists: everything
-   * that was in it is multi-joint and now rests the full five.
+   * NAMED ONE BY ONE, NOT DERIVED. Earlier versions read the tier off `w`,
+   * the rank weight, on the theory that a big lift is a heavy lift. That kept
+   * being not quite right - `w` is about what a lift is WORTH to a rank, and
+   * this is about what it takes out of you - and each time it was patched
+   * with an override list beside the rule, which is two places to keep in
+   * step. This is one list, it says exactly what he said, and a lift is on it
+   * or it is not.
    *
-   * WHERE THE TIER COMES FROM. `w` is the per-exercise weight the rank maths
-   * already carries and it already encodes roughly how big a lift is, so the
-   * tier is read from it rather than from a hand-kept column that could drift
-   * out of step with the library. But `w` was calibrated for RANKING, not for
-   * fatigue, and it puts a few genuinely multi-joint lifts at 1. Those are
-   * named below rather than ignored.
+   * INCLINE PRESSING IS NOT ON IT. He said flat bench specifically, and the
+   * incline variants are a different question, so they take the standard
+   * three rather than being quietly promoted by a "well, it's a bench" rule.
+   *
+   * A LIFT THIS BOARD DOES NOT KNOW - a custom one, or nothing picked yet -
+   * gets the standard three. Not the fixed number from Profile: that is the
+   * answer for "auto is off", and while auto is on an unknown lift is simply
+   * not one of the big three.
    *
    * THIS IS A DEFAULT, NOT A LAW. Profile switches rest back to one fixed
    * number, and that number is left exactly where it was.
    */
-  var REST_TIERS = { compound: 300, isolation: 180 };
-  // Multi-joint lifts that `w` rates as 1, because w is about how much a lift
-  // is worth to a rank, not about how much it takes out of you. Every entry
-  // here changes the answer; anything that agrees with the rule belongs in the
-  // rule, not in a list that has to be kept in step by hand.
-  var REST_OVERRIDE = {
-    'Leg Press':     REST_TIERS.compound, // w:1, but a loaded multi-joint press
-    'Walking Lunge': REST_TIERS.compound, // w:1, both legs, loaded
-    'Goblet Squat':  REST_TIERS.compound, // w:1, still a squat
-    'Push Up':       REST_TIERS.compound  // w:1, but the same joints as a bench
+  var REST_TIERS = { big: 300, standard: 180 };
+
+  // The five minute list, grouped the way he described it. Adding a squat or
+  // press variant to RAW does NOT put it here - that is deliberate, so a new
+  // machine cannot quietly start claiming five minutes.
+  var BIG_LIFTS = {
+    // any form of squat
+    'Back Squat': 1,
+    'Front Squat': 1,
+    'Hack Squat': 1,
+    'Pendulum Squat': 1,
+    'Goblet Squat': 1,
+    'Bulgarian Split Squat': 1,
+    // any deadlift
+    'Deadlift': 1,
+    'Sumo Deadlift': 1,
+    'Romanian Deadlift': 1,
+    // any FLAT bench, barbell or dumbbell. Close Grip is a flat bench press
+    // with the hands moved in, so it belongs; Incline and Decline do not.
+    'Barbell Bench Press': 1,
+    'Dumbbell Bench Press': 1,
+    'Dumbbell Flat Press': 1,
+    'Close Grip Bench Press': 1
   };
 
   function restFor(name){
     if (!S.restAuto) return S.rest;
-    if (REST_OVERRIDE[name]) return REST_OVERRIDE[name];
-    var e = findEx(name);
-    // Nothing picked, or a custom lift that no longer resolves: fall back to
-    // his own number rather than guessing a tier for a lift we cannot see.
-    if (!e) return S.rest;
-    // w >= 2 is every multi-joint lift in the library, checked exercise by
-    // exercise in tiles/lifting.rest.test.js rather than assumed.
-    if (e.w >= 2) return REST_TIERS.compound;
-    return REST_TIERS.isolation;
+    return BIG_LIFTS[name] ? REST_TIERS.big : REST_TIERS.standard;
   }
   function restWhy(name){
     if (!S.restAuto) return 'One fixed rest for every exercise.';
-    var s = restFor(name);
-    if (s === REST_TIERS.compound) return 'Multi-joint lift. The long rest is the point.';
-    return 'Isolation work.';
+    return BIG_LIFTS[name]
+      ? 'Squat, deadlift or flat bench. The long rest is the point.'
+      : 'Everything else rests three minutes.';
   }
   function fmtRest(s){ return Math.floor(s / 60) + ':' + pad(s % 60); }
 

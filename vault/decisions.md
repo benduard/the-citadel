@@ -1204,3 +1204,39 @@ BUILT IN THE ORDER THAT FAILS HONESTLY: the vault side first, proven with a
 deliberately fake number that gets deleted, then Health reading, then the tile.
 Building the tile's "show both" face first would have meant shipping a UI for
 data that may never arrive.
+
+## Rest: five minutes is squats, deadlifts and flat bench only
+
+Narrowed by Ruben, 2026-08-04, the same day the tiers were first widened. The
+five minute rest is now a NAMED LIST - any squat, any deadlift, any flat bench
+barbell or dumbbell - and everything else takes three. Three is the floor;
+nothing on the board rests less.
+
+DERIVED RULES KEPT BEING NOT QUITE RIGHT. Earlier versions read the tier off
+`w`, the rank weight, on the theory that a big lift is a heavy lift. It went
+wrong twice in a day: first missing Incline Barbell Press and Pendlay Row, then
+sweeping in every machine press and pulldown when the rule was widened. `w`
+answers "what is this worth to a rank", and rest is asking "what does this take
+out of you". Related, not the same, and every gap needed a second list of
+overrides sitting beside the rule - two places to keep in step.
+
+BIG_LIFTS is one list that says exactly what he said. A lift is on it or it is
+not. Adding a squat variant to RAW does NOT put it on the list, which is
+deliberate: a new machine should not be able to quietly claim five minutes.
+
+The judgement calls, all flagged rather than buried. Close Grip Bench Press is
+on it - it is a flat bench press with the hands moved in. Incline and Decline
+are NOT - he said flat specifically, and "well, it's a bench" is exactly the
+kind of reasoning that widened this too far the first time. Goblet Squat and
+Bulgarian Split Squat are on it under "any form of squat", which is his wording.
+
+An unknown or custom lift now takes the standard three rather than the Profile
+number. That number is the answer to "auto is off"; while auto is on, an
+unknown lift is simply not one of the big three, and the floor applies to it
+like everything else.
+
+STILL OPEN: the library has Dumbbell Bench Press AND Dumbbell Flat Press, which
+are the same movement. The second was added on 2026-08-01 from his gym list
+without noticing the first. Both rest five minutes so the timer is unaffected,
+but they split history and last-time lookups between two names. Not merged
+here because merging touches logged sets and is his call.

@@ -1240,3 +1240,31 @@ are the same movement. The second was added on 2026-08-01 from his gym list
 without noticing the first. Both rest five minutes so the timer is unaffected,
 but they split history and last-time lookups between two names. Not merged
 here because merging touches logged sets and is his call.
+
+### 2026-08-08: Close Grip moved off the five minute list, and Deadlift moved to Legs
+
+Two corrections, both by name, both his call.
+
+CLOSE GRIP BENCH PRESS now rests three minutes, not five. It is still, by the
+reasoning above, a flat bench press with the hands moved in - that has not
+changed. He called it out specifically to move it, so it moved. `BIG_LIFTS`
+now has 12 named lifts, not 13.
+
+DEADLIFT (and by extension Back Extension, the library's only other lift with
+lowerback as its primary muscle) now shows on Leg day in the "Yours" scheme,
+not Back & Arms. This could not be a simple addition: the scheme carries an
+invariant, enforced by `lifting.splits.test.js`, that every muscle sits in
+exactly one split per scheme, so a muscle cannot be in both Legs and Back &
+Arms at once without a set silently becoming reachable from two days and the
+day-coverage checks going blind to real gaps. `lowerback` moved OUT of
+Back & Arms's `mus` list and INTO Legs's, in `SCHEMES[0]` only - the other
+four schemes (PPL, Upper/Lower, Body part, Full body) were left exactly as
+they were, since he did not ask about those and Upper/Lower already had
+lowerback under Lower anyway.
+
+WHAT DID NOT CHANGE: the `ruben3` preset routine's Back & Arms day still lists
+Deadlift as its first item - routine templates are hardcoded item arrays, not
+filtered by scheme muscle lists, so his actual four-day program runs exactly
+as it did. This only changes what the FREEFORM exercise picker offers on each
+day: Deadlift (and Back Extension) now appear when Legs is the active day,
+and no longer appear when Back & Arms is.

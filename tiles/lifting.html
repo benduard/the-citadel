@@ -1365,9 +1365,14 @@
   var SCHEMES = [
     { id:'yours', name:'Yours', why:'Legs, then chest and shoulders with abs, then back and arms. The split this board was built around.',
       splits:[
-        { id:'legs', name:'Legs', mus:['quads','hams','glutes','adductors','calves'] },
+        // lowerback moved here from Back & Arms on 2026-08-08, at his request
+        // ("add deadlifts to legs"). Deadlift and Back Extension are the only
+        // two lifts with lowerback as their primary muscle, so this is what
+        // put them on the Legs picker - the invariant below means it had to
+        // come OUT of Back & Arms rather than sit in both.
+        { id:'legs', name:'Legs', mus:['quads','hams','glutes','adductors','calves','lowerback'] },
         { id:'push', name:'Chest & Shoulders + Abs', mus:['chest','delts','abs','obliques'] },
-        { id:'pull', name:'Back & Arms', mus:['lats','traps','reardelt','biceps','triceps','forearms','lowerback'] },
+        { id:'pull', name:'Back & Arms', mus:['lats','traps','reardelt','biceps','triceps','forearms'] },
         { id:'neck', name:'Neck', mus:['neck'] }
       ] },
     { id:'ppl', name:'Push Pull Legs', why:'Everything that presses, everything that pulls, everything below the waist. Run it three or six days a week.',
@@ -4102,6 +4107,8 @@
    * INCLINE PRESSING IS NOT ON IT. He said flat bench specifically, and the
    * incline variants are a different question, so they take the standard
    * three rather than being quietly promoted by a "well, it's a bench" rule.
+   * CLOSE GRIP IS NOT ON IT EITHER, by the same request on 2026-08-08 - it
+   * is still a flat press, but he called it out to move it to three.
    *
    * A LIFT THIS BOARD DOES NOT KNOW - a custom one, or nothing picked yet -
    * gets the standard three. Not the fixed number from Profile: that is the
@@ -4128,12 +4135,12 @@
     'Deadlift': 1,
     'Sumo Deadlift': 1,
     'Romanian Deadlift': 1,
-    // any FLAT bench, barbell or dumbbell. Close Grip is a flat bench press
-    // with the hands moved in, so it belongs; Incline and Decline do not.
+    // any FLAT bench, barbell or dumbbell. Close Grip rests three - he
+    // called it out by name to move it off the five minute list even
+    // though it is still a flat press.
     'Barbell Bench Press': 1,
     'Dumbbell Bench Press': 1,
-    'Dumbbell Flat Press': 1,
-    'Close Grip Bench Press': 1
+    'Dumbbell Flat Press': 1
   };
 
   function restFor(name){

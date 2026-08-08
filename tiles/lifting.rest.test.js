@@ -82,8 +82,9 @@ console.log('\n[2] every squat, every deadlift, every flat bench')
 const SQUATS = ['Back Squat', 'Front Squat', 'Hack Squat', 'Pendulum Squat',
                 'Goblet Squat', 'Bulgarian Split Squat']
 const DEADS = ['Deadlift', 'Sumo Deadlift', 'Romanian Deadlift']
-const FLAT = ['Barbell Bench Press', 'Dumbbell Bench Press', 'Dumbbell Flat Press',
-              'Close Grip Bench Press']
+// Close Grip moved OFF this list 2026-08-08, at his request - it is still a
+// flat press, but he called it out by name to rest it at three, not five.
+const FLAT = ['Barbell Bench Press', 'Dumbbell Bench Press', 'Dumbbell Flat Press']
 SQUATS.concat(DEADS).concat(FLAT).forEach(n =>
   check(`${n} rests 5:00`, S.restFor(n) === T.big, S.fmtRest(S.restFor(n))))
 check('every squat in the library is covered - none missed',
@@ -100,11 +101,13 @@ console.log('\n[3] everything else is three minutes, including things that feel 
   'Leg Press', 'Lat Pulldown', 'Seated Cable Row', 'Incline Barbell Press',
   'Incline Dumbbell Press', 'Decline Plate-Loaded Machine Press', 'Hip Thrust',
   'Walking Lunge', 'Push Up', 'Barbell Curl', 'Lateral Raise', 'Leg Extension',
-  'Weighted Neck Curl'].forEach(n =>
+  'Weighted Neck Curl', 'Close Grip Bench Press'].forEach(n =>
   check(`${n} rests 3:00`, S.restFor(n) === T.standard, S.fmtRest(S.restFor(n))))
 check('INCLINE is not treated as flat - he said flat bench specifically',
   S.restFor('Incline Barbell Press') === T.standard &&
   S.restFor('Incline Dumbbell Press') === T.standard)
+check('CLOSE GRIP moved off the big list 2026-08-08 - still a flat press, called out by name',
+  S.restFor('Close Grip Bench Press') === T.standard)
 
 console.log('\n[4] EVERY exercise in the library lands in one of the two tiers')
 S.LIB.forEach(e => {

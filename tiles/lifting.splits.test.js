@@ -114,8 +114,15 @@ check('rows are on back day', pull.includes('Barbell Row'))
 check('curls are on back/arms day', pull.includes('Barbell Curl'))
 check('triceps are on back/arms day, not chest day',
   pull.includes('Cable Triceps Pushdown') && !push.includes('Cable Triceps Pushdown'))
-check('deadlift is on back day', pull.includes('Deadlift'))
+// Moved 2026-08-08, at his request ("add deadlifts to legs"). lowerback came
+// OUT of Back & Arms and into Legs - the invariant in [2] means it could not
+// just be added to both, so Deadlift (and Back Extension, the only other
+// lowerback-primary lift) now live on leg day instead.
+check('deadlift is on leg day', legs.includes('Deadlift'))
+check('deadlift is NOT on back day', !pull.includes('Deadlift'))
+check('back extension moved with it, same muscle', legs.includes('Back Extension') && !pull.includes('Back Extension'))
 check('romanian deadlift is on leg day (hamstrings)', legs.includes('Romanian Deadlift'))
+check('sumo deadlift is on leg day (glutes)', legs.includes('Sumo Deadlift'))
 
 console.log('\n[7] biggest lift first inside a muscle')
 const quads = LIB.filter(e => e.pri === 'quads')

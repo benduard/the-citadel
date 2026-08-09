@@ -25,6 +25,17 @@
                 // sharing a grp.id were done back to back with no rest. A
                 // grouped set is STILL JUST A SET - see the note below.
       notes:    { "YYYY-MM-DD": "session note" },
+                // NOT the same field as a set's own `note` above. This one is
+                // the day; that one is one set. Both existed in the shape from
+                // the start, but only the day's had a box to type it in until
+                // 2026-08-08, when Ruben asked for the per-set one: a machine
+                // that reads heavy at the other gym, or a set done tired, is
+                // the difference between a real drop and one that only looks
+                // real. It is free text, capped at 140, '' when empty, and it
+                // is shown back under that set in the "last time" panel - the
+                // whole point being to read it on the day it explains
+                // something. Nothing computes on it, ever: it is his words,
+                // not an input to a number.
       routines: [ { id, name, items: [ { ex, sets, reps, kg } ] } ],
       custom:   [ { id, name, pri, sec: [], cat, pat, bwf, w, lad: [9], cues: [], uni } ],
       claimed:  { "<weekKey>:<questId>": true },
@@ -36,8 +47,21 @@
       attempts: [ { id, date, ex, kg, hit, setId? } ],  // max attempts, see below
       uni:      { "<exercise name>": true|false },      // per-side override
       routineToday: { "YYYY-MM-DD": "<routine id>" },
-      deloads:  { "<weekKey, the Monday>": true }   // weeks gone light on purpose
+      deloads:  { "<weekKey, the Monday>": true },  // weeks gone light on purpose
+      fuel:     { "YYYY-MM-DD": { pre: "", intra: "" } }
     }
+
+  FUEL IS TEXT AND IS NEVER REPORTED. Added 2026-08-08, at Ruben's request for
+  somewhere to put the pre workout snack or supplement and whatever he drinks
+  during. "Banana and a coffee" is not a measurement, and the ledger's one
+  shape is key/value/date for things that can be counted - so this stays in
+  the tile's own slot beside the session note, which is the field it is most
+  like. It exists to be read back next to a session, not to be scored.
+
+  It is deliberately NOT a nutrition log. Guessing that a banana is 105
+  calories and filing that as a number would be inventing a fact about his
+  day, and the board does not do that. A day with nothing typed has no entry
+  at all rather than an empty one.
 
   SUPERSETS AND DROPSETS ARE A TAG, NOT A SHAPE. `grp` marks which sets were
   done back to back; it changes nothing about what a set IS. setVolume, e1rm,
@@ -116,7 +140,7 @@
   logged as 40. One number per set, one meaning, so volume and ratios stay
   comparable across every exercise. UNILATERAL EXERCISES (UNI_EXERCISES,
   currently Dumbbell Row, plus any custom exercise marked unilateral) follow
-  the SAME rule from the other side: what you type is per hand, and it is
+  the SAME rule from the other side: what you type is per side, and it is
   doubled before it is ever stored, so it is still one total on the body and
   every rank ladder and rank.js's lifting_volume math needs zero special
   casing. Only the label you see (setLabel) divides back by 2.
@@ -414,6 +438,8 @@
   .list li:first-child{ border-top:0; }
   .list .l1{ font-size:13.5px; }
   .list .l2{ font-size:11px; color:var(--muted); margin-top:2px; }
+  /* Fuel sits under the session it belongs to, quieter than the sets. */
+  .list .l2.fuelLine{ color:var(--faint); font-size:10.5px; }
   .list .num{ margin-left:auto; text-align:right; white-space:nowrap;
               font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
 
@@ -528,7 +554,13 @@
   .ltRow.now{ background:var(--volt-soft); border-top-color:var(--volt-line); }
   .ltRow.now .n{ color:var(--volt); }
   .ltRow.now .w{ color:var(--volt); }
+  /* Last time's own words about that set, under the numbers they explain. */
+  .lt .ltWhy{ padding:0 11px 7px 11px; font-size:10.5px; color:var(--faint);
+              line-height:1.4; font-style:italic; }
   .lt .ltNote{ padding:8px 11px; font-size:11px; color:var(--muted); line-height:1.45; }
+  /* What the percentage on each row actually measured. Faint and small on
+     purpose: it is a footnote to the numbers above it, not a finding. */
+  .lt .ltNote.basis{ padding-top:5px; padding-bottom:5px; font-size:10.5px; color:var(--faint); }
   /* Mint: this is the good news line, and it is the only place in the panel
      that earns a colour. Not amber - being ready for more weight is not a
      caution. */
@@ -742,12 +774,12 @@
         <!-- What you did on this exercise the LAST time you trained it, set by
              set, so set 2 today is aimed at set 2 then. Filled by renderLast(). -->
         <div id="lastTime"></div>
-        <!-- Whether THIS lift is typed per hand. His call, not the file's:
-             logging a dumbbell press as 20 per hand or 40 total is a habit.
+        <!-- Whether THIS lift is typed per side. His call, not the file's:
+             logging a dumbbell press as 20 per side or 40 total is a habit.
              Flipping it never rewrites history - see isUni(). -->
         <div class="uniRow" id="uniRow" hidden>
           <button class="uniBtn" id="bUni" type="button" aria-pressed="false">
-            <span class="uniDot"></span><span id="uniLabel">Log this per hand</span>
+            <span class="uniDot"></span><span id="uniLabel">Log this per side</span>
           </button>
           <span class="uniNote" id="uniNote"></span>
         </div>
@@ -760,6 +792,18 @@
           </label>
           <label class="fl grow"><span>RPE</span>
             <input id="fRpe" type="number" inputmode="decimal" step="0.5" min="1" max="10" placeholder="-" disabled>
+          </label>
+        </div>
+        <!-- Why this set was what it was. Optional, and the one thing on this
+             form nothing else can work out: a leg press that reads 10kg heavy
+             at the other gym, or four hours of sleep, is the difference
+             between a real drop and a number that only looks like one. It
+             rides with the SET, not the day - the session note further down
+             is a different field for a different question. A plain input and
+             never a prompt(): the frame has no modals. -->
+        <div class="row" style="margin-bottom:8px">
+          <label class="fl grow" style="flex:1 1 100%"><span>Note for this set, optional</span>
+            <input id="fSetNote" type="text" maxlength="140" placeholder="tired, different machine, felt easy" disabled>
           </label>
         </div>
         <div class="row">
@@ -779,6 +823,23 @@
           <div class="grow"><div class="bar mint"><i id="restBar"></i></div></div>
           <button class="btn small ghost" id="bRestStop">Stop</button>
         </div>
+      </div>
+
+      <!-- What went in, before and during. Saved as you type, like the session
+           note at the bottom of Today. Two plain text boxes on purpose: this
+           is context for reading a session back, not a nutrition log, and
+           turning "a banana and a coffee" into a calorie count would be
+           inventing a number nobody measured. -->
+      <div class="card">
+        <h3>Fuel</h3>
+        <p class="note">What you had before and during today. Optional. Nothing here is counted
+          or scored - it is here so a flat session has its reason next to it.</p>
+        <label class="fl" style="margin-top:10px"><span>Pre workout, snack or supplement</span>
+          <input id="fPre" type="text" maxlength="200" placeholder="banana, coffee, creatine" disabled>
+        </label>
+        <label class="fl" style="margin-top:10px"><span>Intra workout</span>
+          <input id="fIntra" type="text" maxlength="200" placeholder="electrolytes, water, sports drink" disabled>
+        </label>
       </div>
 
       <!-- Going for a single. A hit is logged as a real set of 1, which is
@@ -926,7 +987,7 @@
             <label class="fl grow"><span>Pattern</span><select id="cPat" disabled></select></label>
           </div>
           <label class="checkRow" style="margin-bottom:10px">
-            <input type="checkbox" id="cUni" disabled> Unilateral - typed weight is per hand
+            <input type="checkbox" id="cUni" disabled> Unilateral - typed weight is per side
           </label>
           <button class="btn small" id="bAddCustom" disabled>Add exercise</button>
         </div>
@@ -1155,8 +1216,15 @@
      * A host that has never heard of this - the hosted Vitality board - simply
      * ignores the message, and the timer behaves exactly as it always did.
      * That is why this is safe to add to a shared tile file.
+     *
+     * TWO STRINGS, NOT ONE, and they are not interchangeable. `label` is the
+     * bare exercise name and nothing else, because resumeRestFromServer()
+     * feeds it straight back into restFor() to work out how long the timer
+     * was - append " set 4" to it and every resumed squat quietly drops from
+     * five minutes to three. `note` is the human sentence for the
+     * notification and is never parsed by anything.
      */
-    restTimer: function (seconds, label) { post('restTimer', { seconds: seconds, label: label }); },
+    restTimer: function (seconds, label, note) { post('restTimer', { seconds: seconds, label: label, note: note }); },
 
     /**
      * "Is a timer I started still running?" - asked once, on boot, to resume
@@ -1371,8 +1439,14 @@
         // put them on the Legs picker - the invariant below means it had to
         // come OUT of Back & Arms rather than sit in both.
         { id:'legs', name:'Legs', mus:['quads','hams','glutes','adductors','calves','lowerback'] },
-        { id:'push', name:'Chest & Shoulders + Abs', mus:['chest','delts','abs','obliques'] },
-        { id:'pull', name:'Back & Arms', mus:['lats','traps','reardelt','biceps','triceps','forearms'] },
+        // reardelt moved here from Back & Arms on 2026-08-08, at his request
+        // ("add rear delt fly to shoulders"). Every rear delt lift - the fly
+        // machine, both face pulls - has reardelt as its primary, so this is
+        // the line that decides which day's picker offers them. Same law as
+        // lowerback above: the invariant is one muscle, one day per scheme, so
+        // it MOVES rather than sitting in both. It is a shoulder day now.
+        { id:'push', name:'Chest & Shoulders + Abs', mus:['chest','delts','reardelt','abs','obliques'] },
+        { id:'pull', name:'Back & Arms', mus:['lats','traps','biceps','triceps','forearms'] },
         { id:'neck', name:'Neck', mus:['neck'] }
       ] },
     { id:'ppl', name:'Push Pull Legs', why:'Everything that presses, everything that pulls, everything below the waist. Run it three or six days a week.',
@@ -1545,7 +1619,29 @@
 
     ['Weighted Neck Curl','neck','','neck','curl',0,1,[0.05,0.09,0.13,0.18,0.24,0.30,0.37,0.45,0.54],'Lying on your back, plate or harness resting on the forehead.|Small range - chin toward the chest, then back to neutral.|Light and slow. The neck has no business being trained like a big lift.'],
     ['Weighted Neck Extension','neck','','neck','curl',0,1,[0.06,0.10,0.15,0.20,0.26,0.33,0.40,0.48,0.58],'Lying face down, weight resting at the back of the head.|Small range - lift the head back against the resistance, then return to neutral.|Support yourself with the arms, the neck does the lifting alone.'],
-    ['Weighted Side Neck Curl','neck','','neck','curl',0,1,[0.04,0.07,0.11,0.15,0.20,0.25,0.31,0.38,0.46],'Lying on your side, weight resting above the ear.|Log one side per set - they rarely match exactly.|Bring the ear toward the shoulder, small range, no jerking.']
+    ['Weighted Side Neck Curl','neck','','neck','curl',0,1,[0.04,0.07,0.11,0.15,0.20,0.25,0.31,0.38,0.46],'Lying on your side, weight resting above the ear.|Log one side per set - they rarely match exactly.|Bring the ear toward the shoulder, small range, no jerking.'],
+
+    // ---- Added 2026-08-08, at his request: dips on the arms day as well as
+    // the chest day, and a kneeling face pull.
+    //
+    // TRICEPS DIP IS A SECOND ENTRY, NOT A SETTING ON THE FIRST. `Dip` already
+    // said it in its own cues - lean forward for chest, stay upright for
+    // triceps - and those are two different movements at two different loads.
+    // One entry meant one history, so whichever he did last was "last time" and
+    // the PR was just the heavier of the two. Exactly the Hip Adduction /
+    // Abduction split of 2026-08-04, for exactly the same reason.
+    //
+    // It is ALSO what puts a dip on the Back & Arms picker at all. That picker
+    // groups by PRIMARY muscle, and `Dip` is primarily chest, so it was never
+    // offered on the arms day even though his own routine listed it there.
+    //
+    // BOTH NEW ENTRIES CARRY THEIR PARENT'S LADDER UNCHANGED - Dip's for the
+    // triceps dip, Face Pull's for the kneeling one. Those ratios are a
+    // hand-calibrated editorial scale printed on the Ranks page. Bending a
+    // curve to guess that a kneeling face pull is "about 15 percent lighter"
+    // would be putting a made-up number on that page next to nine real ones.
+    ['Triceps Dip','triceps','chest,delts','push','pressH',1,2,[1.00,1.12,1.25,1.42,1.60,1.82,2.05,2.32,2.60],'Log added weight only. Your bodyweight is counted for you.|Torso UPRIGHT and elbows tucked - the lean forward is the chest version, logged as Dip.|Go to upper arm parallel, no deeper if shoulders complain.'],
+    ['Kneeling Face Pull','reardelt','traps','pull','rowH',0,1,[0.12,0.20,0.28,0.38,0.48,0.60,0.72,0.86,1.02],'Kneeling takes the legs and the hips out of it, so the rear delts get what is left.|Rope at or just above eye height, pull to the forehead, elbows high.|Expect to need less weight than standing. That is the exercise working, not a bad day.']
   ];
 
   /**
@@ -1554,7 +1650,7 @@
    * row would need editing (and re-checking) just to add one boolean most
    * rows do not use. This stays a name away from that table entirely.
    *
-   * WHAT "PER HAND" MEANS FOR VOLUME. Typed weight is per hand, and it is
+   * WHAT "PER SIDE" MEANS FOR VOLUME. Typed weight is per side, and it is
    * DOUBLED before it is ever stored - so 20kg logged here becomes 40 in
    * S.days, the exact convention every other dumbbell exercise already
    * uses ("two 20kg dumbbells is 40" - see this file's header comment).
@@ -1562,6 +1658,13 @@
    * to change: the stored number already means what they expect it to
    * mean. Only setLabel() and the log form divide back by 2, to show the
    * number you actually typed.
+   *
+   * IT SAID "PER HAND" UNTIL 2026-08-08, and Ruben renamed it: a Bulgarian
+   * split squat, a single leg press, a lunge - all logged one side at a time,
+   * none of them a hand. The switch was always generic (any exercise can be
+   * flipped, see isUni), so only the words were wrong. Nothing about the
+   * stored numbers changed, so no migration: it is the same doubling it always
+   * was, described accurately.
    */
   var UNI_EXERCISES = { 'Dumbbell Row': true };
 
@@ -1610,8 +1713,11 @@
     { id:'ruben3', name:'Your split, 3 days', why:'Legs, then chest and shoulders with abs, then back and arms. Built from the machines you actually use.',
       routines:[
         { name:'Legs', items:[['Back Squat',4,5,0],['Hack Squat',3,8,0],['Romanian Deadlift',3,8,0],['Lying Hamstring Curl',3,10,0],['Leg Extension',3,12,0],['Hip Adduction Machine',3,15,0],['Hip Abduction Machine',3,15,0],['Standing Calf Raise',4,12,0],['Seated Calf Raise',3,15,0]] },
-        { name:'Chest & Shoulders + Abs', items:[['Barbell Bench Press',4,5,0],['Incline Plate-Loaded Machine Press',3,8,0],['Plate-Loaded Machine Shoulder Press',3,8,0],['Chest Fly Machine',3,12,0],['Seated Machine Lateral Raise',4,15,0],['Hanging Leg Raise',3,12,0],['Weighted Crunch',3,15,0]] },
-        { name:'Back & Arms', items:[['Deadlift',3,4,0],['Lat Pulldown',4,10,0],['Chest Supported T-Bar Row',3,10,0],['Seated Cable Row',3,10,0],['Rear Delt Fly Machine',3,15,0],['Machine Preacher Curl',3,10,0],['Incline Dumbbell Curl',3,12,0],['Dip',3,8,0],['Rope Triceps Pushdown',3,12,0]] },
+        // 2026-08-08: the rear delt work moved onto this day with the muscle
+        // itself, and a dip joined it. The chest dip lives here, the upright
+        // triceps dip lives on Back & Arms - two entries, two histories.
+        { name:'Chest & Shoulders + Abs', items:[['Barbell Bench Press',4,5,0],['Incline Plate-Loaded Machine Press',3,8,0],['Dip',3,8,0],['Plate-Loaded Machine Shoulder Press',3,8,0],['Chest Fly Machine',3,12,0],['Seated Machine Lateral Raise',4,15,0],['Rear Delt Fly Machine',3,15,0],['Kneeling Face Pull',3,15,0],['Hanging Leg Raise',3,12,0],['Weighted Crunch',3,15,0]] },
+        { name:'Back & Arms', items:[['Deadlift',3,4,0],['Lat Pulldown',4,10,0],['Chest Supported T-Bar Row',3,10,0],['Seated Cable Row',3,10,0],['Machine Preacher Curl',3,10,0],['Incline Dumbbell Curl',3,12,0],['Triceps Dip',3,8,0],['Rope Triceps Pushdown',3,12,0]] },
         { name:'Neck', items:[['Weighted Neck Curl',3,15,0],['Weighted Neck Extension',3,15,0],['Weighted Side Neck Curl',3,15,0]] }
       ] },
     { id:'ul4', name:'Upper lower, 4 days', why:'The default for someone who can train four times a week and wants every lift moving.',
@@ -1666,9 +1772,12 @@
     scheme:'yours', customSplits:[],
     // Max attempts, hit and missed. Added 2026-08-04.
     attempts:[],
-    // Per-side overrides. Whether a lift is typed per hand is HIS call, not a
+    // Per-side overrides. Whether a lift is typed per side is HIS call, not a
     // fact about the movement, so this beats UNI_EXERCISES either way.
-    uni:{}
+    uni:{},
+    // What went in, before and during. Added 2026-08-08. Free text, one entry
+    // a day, never a number - see the header comment.
+    fuel:{}
   };
   var loaded = false;
   var trouble = '';
@@ -1713,7 +1822,7 @@
   var searchTerm = '';
 
   /**
-   * IS THIS LIFT TYPED PER HAND? His answer beats the file's.
+   * IS THIS LIFT TYPED PER SIDE? His answer beats the file's.
    *
    * UNI_EXERCISES and a custom exercise's own `uni` are the defaults. S.uni is
    * the override, and it is stored per exercise NAME because that is what a
@@ -1787,9 +1896,9 @@
     // is the set he did, and it is the same row either way. What it counted
     // toward is a separate question, answered by zeroWeightNote().
     if (!s.kg) return 'bodyweight x ' + s.reps;
-    // Stored kg is the total across both hands (see UNI_EXERCISES) - halve it
-    // back to what was actually typed for one hand.
-    if (e && e.uni) return showW(s.kg / 2) + ' ' + unitLabel() + ' per hand x ' + s.reps;
+    // Stored kg is the total across both sides (see UNI_EXERCISES) - halve it
+    // back to what was actually typed for one side.
+    if (e && e.uni) return showW(s.kg / 2) + ' ' + unitLabel() + ' per side x ' + s.reps;
     return showW(s.kg) + ' ' + unitLabel() + ' x ' + s.reps;
   }
 
@@ -2468,17 +2577,76 @@
     return (S.days[today()] || []).filter(function(s){ return s.ex === ex; });
   }
 
-  // Set for set, is today's heavier work? Volume (load x reps) rather than
-  // weight alone, so 100x8 beating 100x6 counts, which is the whole point of
-  // showing reps next to the weight.
+  /**
+   * Set for set against the SAME set number from the last session that
+   * actually contained this exercise. renderLast() does the pairing - set 1
+   * to set 1, set 2 to set 2 - and this answers "better or worse, by how
+   * much" for one such pair.
+   *
+   * IT USED TO MEASURE VOLUME (load x reps) AND THAT WAS WRONG, changed
+   * 2026-08-08 after Ruben said the percentage did not match what happened.
+   * It did not, and the arithmetic says so:
+   *
+   *     100kg x 10  ->  110kg x 8     volume: DOWN 12%     e1RM: up 5%
+   *     100kg x 8   ->  100kg x 10    volume: UP 25%       e1RM: up 5%
+   *
+   * The first is the one that actually stings: he added ten kilos to the bar
+   * and the panel called it a loss, because volume only knows total tonnage
+   * and tonnage falls when reps fall. The second inflates two extra reps into
+   * a quarter more strength. Volume is a real number - it is what the ledger
+   * reports as lifting_volume, and it stays that - but it is a workload
+   * measure, and "am I stronger on this set" is a strength question.
+   *
+   * SO THE BASIS IS ESTIMATED 1RM, the same Epley already used for PRs and
+   * ranks, which is exactly the number that trades weight against reps. It is
+   * an estimate and the file has always said so; what makes it right HERE is
+   * that both sides of the comparison are estimated the same way, so the
+   * error is in the level and not in the direction.
+   *
+   * THREE BASES, AND IT SAYS WHICH ONE IT USED. Epley stops describing
+   * anything past 12 reps, so a 15-rep machine set has no honest e1RM and
+   * falls back to volume. A set with no load at all on a movement that
+   * carries no bodyweight has no volume either, and falls back to counting
+   * reps. Each is honest for what it has; `basis` carries which, and the
+   * panel prints it, because "up 5%" means a different thing in each and a
+   * bare percentage would hide that.
+   */
   function compareSet(now, then){
-    var a = setVolume(now), b = setVolume(then);
-    if (!isFinite(a) || !isFinite(b) || !b) return null;
-    var d = Math.round((a - b) / b * 100);
-    if (d > 0) return { cls:'up', text:'up ' + d + '%' };
-    if (d < 0) return { cls:'down', text:'down ' + Math.abs(d) + '%' };
-    return { cls:'same', text:'matched' };
+    var pct = function(a, b, cls, basis){
+      var d = Math.round((a - b) / b * 100);
+      if (d > 0) return { cls:'up',   text:'up ' + d + '%',            basis:basis };
+      if (d < 0) return { cls:'down', text:'down ' + Math.abs(d) + '%', basis:basis };
+      return { cls:'same', text:'matched', basis:basis };
+    };
+
+    // 1. Strength. Both sets in the range where Epley means something.
+    var ea = e1rm(now), eb = e1rm(then);
+    if (isFinite(ea) && isFinite(eb) && ea && eb) return pct(ea, eb, null, 'strength');
+
+    // 2. Workload. Past 12 reps, or wherever an estimate would be made up.
+    var va = setVolume(now), vb = setVolume(then);
+    if (isFinite(va) && isFinite(vb) && vb) return pct(va, vb, null, 'volume');
+
+    // Load arrived where there was none. A percentage off zero is not a
+    // number, so it says the thing that happened instead of inventing one.
+    if (isFinite(va) && va > 0 && !vb) return { cls:'up', text:'added weight', basis:'volume' };
+
+    // 3. Reps. Nothing on the bar either time, and the body is not counted
+    // for this movement - so the only thing that changed is how many.
+    if (now.reps && then.reps){
+      return pct(now.reps, then.reps, null, 'reps');
+    }
+    return null;
   }
+
+  // What the percentage beside a set is measuring, said in the panel rather
+  // than left for him to assume. Three bases exist and they are not the same
+  // claim - see compareSet.
+  var BASIS_WORDS = {
+    strength: 'Percentages compare estimated 1RM, so heavier for fewer reps still counts as up.',
+    volume:   'Past 12 reps an estimated 1RM stops meaning anything, so those rows compare total load x reps instead.',
+    reps:     'Nothing on the bar either time, so those rows just compare reps.'
+  };
 
   /**
    * The next exercise worth doing, or null when there is not enough context
@@ -2772,13 +2940,13 @@
   }
 
   // The log form's weight label follows whichever exercise is selected, so
-  // "Weight per hand" only shows up when it is actually true - never a
+  // "Weight per side" only shows up when it is actually true - never a
   // static hint that would be wrong for every other exercise.
   function updateWeightLabel(){
     var w = $('fWeightWord');
     if (!w) return;
     var e = findEx($('fEx').value);
-    w.textContent = (e && e.uni) ? 'Weight per hand' : 'Weight';
+    w.textContent = (e && e.uni) ? 'Weight per side' : 'Weight';
     // Leaving it empty is a real answer, so the box says so rather than making
     // him find out by trying. "Added" on the movements that carry the body,
     // because on a pull up the box was never the whole load anyway.
@@ -2798,9 +2966,9 @@
     var b = $('bUni');
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
     b.disabled = !loaded;
-    $('uniLabel').textContent = on ? 'Logging per hand' : 'Log this per hand';
+    $('uniLabel').textContent = on ? 'Logging per side' : 'Log this per side';
     $('uniNote').textContent = on
-      ? 'Type one hand. It is stored as the total on the body, so ranks and volume stay comparable.'
+      ? 'Type one side. It is stored as the total on the body, so ranks and volume stay comparable.'
       : 'Type the total on the body. Two 20s is 40.';
   }
 
@@ -2818,14 +2986,14 @@
     }
     var e = findEx(name);
     note.textContent = 'Going for a single on ' + name + '.' +
-      (e && e.uni ? ' Per hand, same as the box above.' : '');
+      (e && e.uni ? ' Per side, same as the box above.' : '');
 
     var m = maxOf(name);
     var now = document.createElement('div');
     now.className = 'maxNow';
     if (m){
       now.innerHTML = '<span class="v">' + esc(showW(e && e.uni ? m.kg / 2 : m.kg)) + '</span>' +
-        '<span class="u">' + esc(unitLabel()) + (e && e.uni ? ' per hand' : '') + ' best single</span>' +
+        '<span class="u">' + esc(unitLabel()) + (e && e.uni ? ' per side' : '') + ' best single</span>' +
         '<span class="w">' + esc(lastTimeWhen(m.date)) + '</span>';
     } else {
       now.innerHTML = '<span class="u">No single logged on this lift yet. The first one you hit becomes the mark.</span>';
@@ -2857,7 +3025,7 @@
       var d = document.createElement('div'); d.className = 'grow';
       var l1 = document.createElement('div'); l1.className = 'l1';
       l1.textContent = showW(e && e.uni ? a.kg / 2 : a.kg) + ' ' + unitLabel() +
-        (e && e.uni ? ' per hand' : '');
+        (e && e.uni ? ' per side' : '');
       var l2 = document.createElement('div'); l2.className = 'l2';
       l2.textContent = niceDate(a.date);
       d.appendChild(l1); d.appendChild(l2);
@@ -2893,12 +3061,17 @@
     var html = '<div class="lt"><div class="lth"><b>Last time</b><i>' + esc(lastTimeWhen(prev.date)) +
       '  ·  ' + prev.sets.length + (prev.sets.length === 1 ? ' set' : ' sets') + '</i></div>';
 
+    // Which measures the rows below ended up using, so the panel can say so
+    // once at the bottom instead of repeating it on every row.
+    var basesUsed = {};
+
     prev.sets.forEach(function(s, i){
       var mine = done[i] || null;                 // today's set in the SAME position
       var isNow = i === done.length;              // the one about to be done
       var right = '';
       if (mine){
         var c = compareSet(mine, s);
+        if (c && c.basis) basesUsed[c.basis] = true;
         right = '<span class="r ' + (c ? c.cls : 'same') + '">' + setLabel(mine, e) +
           (c ? '  ·  ' + c.text : '') + '</span>';
       } else if (isNow){
@@ -2913,6 +3086,12 @@
         '<span class="n">SET ' + (i + 1) + '</span>' +
         '<span class="w">' + esc(setLabel(s, e)) + '</span>' +
         rpeTag + right + '</div>';
+      // What he said about that set at the time. This is the whole reason the
+      // note is worth typing: "different machine, reads heavy" sitting under
+      // set 2 is the context that turns an apparent drop into a known one.
+      // Its own line, not squeezed into the row - the row is already four
+      // things wide and a phone is 320px at worst.
+      if (s.note) html += '<div class="ltWhy">' + esc(s.note) + '</div>';
     });
 
     // Sets beyond what was done last time have nothing to beat, and saying so
@@ -2924,6 +3103,13 @@
           : 'That is every set from last time. Anything more is new ground.') +
         '</div>';
     }
+
+    // What the percentages actually measured. Only printed once a row has
+    // been compared, and only for the bases that were really used - on a
+    // normal 8-rep session that is one short line, not a legend.
+    ['strength','volume','reps'].forEach(function(b){
+      if (basesUsed[b]) html += '<div class="ltNote basis">' + esc(BASIS_WORDS[b]) + '</div>';
+    });
 
     // A suggestion, never an instruction: it does not prefill the weight box
     // or touch a routine, the same law the "Try X" exercise hint follows.
@@ -3044,6 +3230,7 @@
     $('fKg').value = shownKg ? Math.round(fromKg(shownKg) * 10) / 10 : '';
     $('fReps').value = s.reps;
     $('fRpe').value = s.rpe == null ? '' : s.rpe;
+    $('fSetNote').value = s.note || '';
     renderHome();
     $('fKg').focus();
     msg('Editing that set. Change what is wrong and press Save edit.', true);
@@ -3054,6 +3241,7 @@
     $('fKg').value = '';
     $('fReps').value = '';
     $('fRpe').value = '';
+    $('fSetNote').value = '';
     renderHome();
     msg('', true);
   }
@@ -3136,6 +3324,13 @@
     renderTodayList(a);
 
     if ($('fNote') !== document.activeElement) $('fNote').value = S.notes[k] || '';
+
+    // Same rule as the session note above: never overwrite a box he is
+    // currently typing in. renderHome() runs on every log, and a re-render
+    // mid-sentence would eat the half-typed word.
+    var fu = S.fuel[k] || {};
+    if ($('fPre') !== document.activeElement) $('fPre').value = fu.pre || '';
+    if ($('fIntra') !== document.activeElement) $('fIntra').value = fu.intra || '';
 
     // 14 day volume
     var ch = $('volChart');
@@ -3526,6 +3721,16 @@
       l2.textContent = Object.keys(byEx).map(function(n){ return n + ' x' + byEx[n]; }).join(', ') +
         (S.notes[k] ? '  ·  ' + S.notes[k] : '');
       d.appendChild(l1); d.appendChild(l2);
+      // Fuel on its own line under the session, because "what did I take
+      // before the day everything went up" is the question it exists to
+      // answer, and it can only be asked of the history.
+      var fk = S.fuel[k];
+      if (fk && (fk.pre || fk.intra)){
+        var l3 = document.createElement('div'); l3.className = 'l2 fuelLine';
+        l3.textContent = [fk.pre ? 'Before: ' + fk.pre : '', fk.intra ? 'During: ' + fk.intra : '']
+          .filter(Boolean).join('  ·  ');
+        d.appendChild(l3);
+      }
       li.appendChild(d);
       var n = document.createElement('div'); n.className = 'num';
       n.textContent = num(fromKg(dayVolume(k))) + ' ' + unitLabel();
@@ -4177,13 +4382,45 @@
     restTimer = setInterval(tickRest, 1000);
   }
 
+  /**
+   * The line the end-of-rest notification carries, added 2026-08-08 at
+   * Ruben's request: name the exact set, not just the exercise.
+   *
+   * "Rest is up. Barbell Bench Press - back to it." tells him nothing he does
+   * not know. Standing at the rack with the phone face down, the two things
+   * worth knowing are WHICH SET is next and WHAT IT HAS TO BEAT, and both are
+   * already sitting in the log.
+   *
+   * The set number is counted the same way renderLast() counts it - sets
+   * logged for this exercise TODAY, plus one - so the notification and the
+   * on-screen panel can never disagree about which set is next. Every caller
+   * of startRest() runs after the finished set is already in S.days, so that
+   * count is correct at the moment the timer starts.
+   *
+   * "Last time" is only appended when there genuinely is a set in that
+   * position to beat. Past the end of last session's sets there is nothing to
+   * say, and saying nothing is the honest version - see the same rule in the
+   * panel itself.
+   */
+  function restNote(ex){
+    if (!ex) return null;
+    var n = todaySetsFor(ex).length + 1;
+    var line = ex + ', set ' + n + '.';
+    var prev = prevSessionFor(ex);
+    var target = prev && prev.sets[n - 1];
+    if (target) line += ' Last time ' + setLabel(target, findEx(ex)) + '.';
+    return line;
+  }
+
   function startRest(){
     stopRest();
     var ex = $('fEx') ? $('fEx').value : '';
     var secs = restFor(ex);
     // The backup that survives a locked phone. Guarded only on the function
     // existing, so an older host - or the hosted board - is simply unaffected.
-    if (window.Vitality && Vitality.restTimer) Vitality.restTimer(secs, ex || null);
+    // ex stays the bare name (restFor reads it back on resume); the sentence
+    // rides alongside it.
+    if (window.Vitality && Vitality.restTimer) Vitality.restTimer(secs, ex || null, restNote(ex));
     beginRestDisplay(secs, secs);
   }
 
@@ -4246,6 +4483,9 @@
     var kgRaw = parseFloat($('fKg').value);
     var reps = parseInt($('fReps').value, 10);
     var rpe = parseFloat($('fRpe').value);
+    // Trimmed, capped, and stored as '' when empty rather than undefined, so
+    // every row keeps the one shape the header declares.
+    var setNote = ($('fSetNote').value || '').trim().slice(0, 140);
     if (!ex) { msg('Pick an exercise first.'); return; }
     if (!isFinite(reps) || reps < 1) { msg('Reps first. An incomplete set logs nothing rather than half a row.'); return; }
     if (!isFinite(kgRaw) || kgRaw < 0) kgRaw = 0;
@@ -4266,7 +4506,7 @@
 
     var k = today();
     S.days[k] = S.days[k] || [];
-    // Uni: what was typed is one hand. Stored total is both, matching the
+    // Uni: what was typed is one side. Stored total is both, matching the
     // convention every other dumbbell exercise already stores under.
     var storedKg = toKg(kgRaw);
     if (e && e.uni) storedKg *= 2;
@@ -4291,9 +4531,14 @@
       row.kg = storedKg;
       row.reps = reps;
       row.rpe = isFinite(rpe) ? rpe : null;
+      // Editable like everything else on the row, INCLUDING back to empty -
+      // a note written on the wrong set has to be removable, and a form that
+      // only ever adds would strand it there.
+      row.note = setNote;
       editingSet = null;
       $('fReps').value = '';
       $('fRpe').value = '';
+      $('fSetNote').value = '';
       buzz(12);
       persist();          // pushReport() inside re-reports today's corrected volume
       checkMilestones();
@@ -4304,7 +4549,7 @@
     var row = {
       id: 's' + Date.now() + Math.floor(Math.random() * 1000),
       ex: ex, kg: storedKg, reps: reps,
-      rpe: isFinite(rpe) ? rpe : null, note: ''
+      rpe: isFinite(rpe) ? rpe : null, note: setNote
     };
     // The tag, and nothing else. No branch below this cares whether a set is
     // grouped, because nothing about a grouped set is different.
@@ -4313,6 +4558,10 @@
 
     $('fReps').value = '';
     $('fRpe').value = '';
+    // CLEARED AFTER EVERY SET, like reps and RPE. A note is about the set it
+    // was written on; leaving "shoulder felt off" sitting in the box would
+    // quietly stamp it onto the next three sets too.
+    $('fSetNote').value = '';
     msg(zeroWeightNote(row), true);
     buzz(12);
     persist();
@@ -4507,7 +4756,7 @@
   }
 
   function enable(on){
-    var ids = ['fEx','fKg','fReps','fRpe','bLog','bRest','fNote','fRoutine','bAddRoutine',
+    var ids = ['fEx','fKg','fReps','fRpe','fSetNote','bLog','bRest','fNote','fRoutine','bAddRoutine',
                'fSearch','cName','cMus','cPat','cUni','bAddCustom','fBw','bBw','fTarget','fRest','ladPick',
                'csName','bAddSplit','mKg','bHit','bMiss','bUni'];
     ids.forEach(function(id){ var el = $(id); if (el) el.disabled = !on; });
@@ -4589,7 +4838,7 @@
         $('fKg').value = '';
         $('mKg').value = '';
         msg(S.uni[un]
-          ? un + ' is now typed per hand. Nothing already logged changed - it is still stored as the total on the body.'
+          ? un + ' is now typed per side. Nothing already logged changed - it is still stored as the total on the body.'
           : un + ' is now typed as the total on the body. Nothing already logged changed.', true);
         persist();
         return;
@@ -4665,6 +4914,11 @@
         // nothing can prefill honestly. An old set with no RPE clears the box
         // rather than leaving the previous set's rating sitting in it.
         $('fRpe').value = isFinite(srcU.rpe) && srcU.rpe !== null ? srcU.rpe : '';
+        // The note deliberately does NOT come across. "Different machine" was
+        // true of that gym on that day; carrying it forward would put words in
+        // his mouth about a set he has not done yet. Cleared rather than left,
+        // so a note typed for an abandoned set cannot ride along either.
+        $('fSetNote').value = '';
         $('fReps').focus();
         msg('Last time’s set ' + (parseInt(a, 10) + 1) + ' is in the form. Change it to what you actually do.', true);
         return;
@@ -4747,7 +5001,7 @@
         var kg = parseFloat($('reKg').value);
         var reEx = findEx(name);
         var reKgStored = isFinite(kg) ? toKg(kg) : 0;
-        if (reEx && reEx.uni) reKgStored *= 2;   // per hand typed, total stored - same rule logSet() follows
+        if (reEx && reEx.uni) reKgStored *= 2;   // per side typed, total stored - same rule logSet() follows
         re.items.push({ ex:name, sets:sets, reps:reps, kg: reKgStored });
         $('reKg').value = '';
         persist();
@@ -4809,6 +5063,26 @@
       if (v) S.notes[k] = v; else delete S.notes[k];
       if (loaded) { Vitality.save(S); }
     });
+
+    /**
+     * Pre and intra workout fuel, saved as it is typed, exactly like the
+     * session note above it.
+     *
+     * A DAY WITH NOTHING TYPED HAS NO ENTRY, not an entry holding two empty
+     * strings. Same reason the session note deletes rather than storing '':
+     * this blob is capped and synced, and a year of `{pre:'',intra:''}` is a
+     * year of rows that say nothing. Clearing both fields removes the day.
+     */
+    function saveFuel(){
+      var k = today();
+      var pre = ($('fPre').value || '').trim().slice(0, 200);
+      var intra = ($('fIntra').value || '').trim().slice(0, 200);
+      if (pre || intra) S.fuel[k] = { pre: pre, intra: intra };
+      else delete S.fuel[k];
+      if (loaded) { Vitality.save(S); }
+    }
+    $('fPre').addEventListener('input', saveFuel);
+    $('fIntra').addEventListener('input', saveFuel);
     $('fSearch').addEventListener('input', function(){ searchTerm = this.value; libPick = ''; renderWorkouts(); });
     $('ladPick').addEventListener('change', function(){ ladPick = this.value; renderLadder(); });
     $('fTarget').addEventListener('change', function(){
@@ -4906,6 +5180,22 @@
           return a && a.ex && a.date && typeof a.kg === 'number' && isFinite(a.kg);
         });
         S.uni = (d.uni && typeof d.uni === 'object') ? d.uni : {};
+        // Added 2026-08-08. Absent on an older blob, which reads correctly as
+        // no fuel ever typed. Each day is rebuilt into the exact { pre, intra }
+        // shape rather than trusted as-is, so a day that somehow holds a
+        // number or an object cannot reach an input's .value as [object
+        // Object]. Days that end up with nothing in either field are dropped,
+        // the same rule saveFuel() follows.
+        S.fuel = {};
+        if (d.fuel && typeof d.fuel === 'object'){
+          Object.keys(d.fuel).forEach(function(dk){
+            var f = d.fuel[dk];
+            if (!f || typeof f !== 'object') return;
+            var pre = typeof f.pre === 'string' ? f.pre : '';
+            var intra = typeof f.intra === 'string' ? f.intra : '';
+            if (pre || intra) S.fuel[dk] = { pre: pre, intra: intra };
+          });
+        }
         // LIB baked `uni` in when this file loaded, before the vault answered.
         // Without this every built-in exercise ignores his saved switch.
         rebuildLib();

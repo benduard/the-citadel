@@ -263,8 +263,8 @@ check('isEnabled reads the browser, not a saved flag',
   /Notification\.permission !== 'granted'/.test(push) && /getSubscription\(\)/.test(push))
 
 console.log('\n[10] the sealed tile asks the host, because it cannot do it itself')
-check('the tile exposes restTimer on the bridge', /restTimer: function \(seconds, label\)/.test(lifting))
-check('startRest asks for the backup push', /Vitality\.restTimer\(secs, ex \|\| null\)/.test(lifting))
+check('the tile exposes restTimer on the bridge', /restTimer: function \(seconds, label, note\)/.test(lifting))
+check('startRest asks for the backup push', /Vitality\.restTimer\(secs, ex \|\| null, restNote\(ex\)\)/.test(lifting))
 check('guarded, so an older host or the hosted board is unaffected',
   /window\.Vitality && Vitality\.restTimer/.test(lifting))
 check('the host handles restTimer', /msg\.type === 'restTimer'/.test(host))
@@ -274,7 +274,24 @@ check('the host handles restTimer', /msg\.type === 'restTimer'/.test(host))
 // second entirely for anyone who had not turned them on.
 check('the timer row is written whenever signed in, not only when notifications are on',
   !/VitalityPush\.isEnabled\(\)\.then\(function \(on\) \{\s*\n\s*if \(!on\) return/.test(host) &&
-  /window\.VitalityRemote\.scheduleRestPush\(secs, msg\.label \|\| null\)/.test(host))
+  /window\.VitalityRemote\.scheduleRestPush\(secs, msg\.label \|\| null, msg\.note \|\| null\)/.test(host))
+
+// The notification names the exact set, 2026-08-08. The two strings must stay
+// two strings: `label` is looked up by restFor() when a timer is resumed, so
+// folding "set 4" into it would quietly drop a resumed squat from five minutes
+// to three. Nothing ever parses `note`.
+console.log('\n[10b] the alert names the exact set, and the label stays a key')
+check('restNote counts the next set the same way the panel does',
+  /function restNote\(ex\)\{[\s\S]{0,400}?todaySetsFor\(ex\)\.length \+ 1/.test(lifting))
+check('and carries what that set has to beat', /Last time ' \+ setLabel\(target/.test(lifting))
+check('the note is a separate column, not appended to the label',
+  /alter table rest_timers add column if not exists note text/.test(sql) &&
+  /label: label \|\| null,\s*\n\s*note: note \|\| null/.test(remote))
+check('the sender prefers the note and still falls back to the bare label',
+  /t\.note[\s\S]{0,160}t\.label \? `\$\{t\.label\} - back to it\.`/.test(fn) &&
+  /select\('id, user_id, fire_at, label, note'\)/.test(fn))
+check('resuming still reads the LABEL, so rest length survives a reopen',
+  /var total = restFor\(r\.timer\.label \|\| ''\)/.test(lifting))
 check('and signing out still writes nothing - scheduleRestPush refuses on its own',
   /if \(!session \|\| !session\.user\) return \{ ok: false, reason: 'Not signed in\.' \}/.test(remote))
 check('a failure there never breaks the on-screen countdown',
@@ -324,7 +341,7 @@ check('checkRestTimer on the bridge is a SINGLE attempt, not load\x27s retry loo
   !/checkRestTimer[\s\S]{0,400}setInterval/.test(lifting))
 check('beginRestDisplay is the one place that starts the interval, used by both paths',
   (lifting.match(/restTimer = setInterval\(tickRest, 1000\)/g) || []).length === 1)
-check('startRest still schedules the backup push', /if \(window\.Vitality && Vitality\.restTimer\) Vitality\.restTimer\(secs, ex \|\| null\)/.test(lifting))
+check('startRest still schedules the backup push', /if \(window\.Vitality && Vitality\.restTimer\) Vitality\.restTimer\(secs, ex \|\| null, restNote\(ex\)\)/.test(lifting))
 check('resumeRestFromServer does NOT call Vitality.restTimer - the row already exists',
   !/function resumeRestFromServer[\s\S]{0,600}?Vitality\.restTimer\(/.test(lifting))
 check('a countdown already running locally is left alone, not overwritten',

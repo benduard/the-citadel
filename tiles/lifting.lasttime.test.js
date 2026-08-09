@@ -20,7 +20,7 @@ function grab(name, kind = 'function') {
 }
 
 const parts = ['prevSessionFor', 'todaySetsFor', 'compareSet', 'lastTimeWhen', 'fromKey', 'niceDate', 'setLabel',
-               'effLoad', 'setVolume', 'esc', 'showW', 'fromKg', 'unitLabel']
+               'effLoad', 'setVolume', 'e1rm', 'esc', 'showW', 'fromKg', 'unitLabel']
   .map(n => grab(n)).join('\n')
 
 const sandbox = { console }
@@ -81,7 +81,7 @@ check('nothing logged today -> next is set 1 (index 0)', sandbox.todaySetsFor('B
 sandbox.S.days['2026-07-31'] = [{ id: 'x', ex: 'Bench Press', kg: lb(105), reps: 10 }]
 check('after one set -> next is set 2 (index 1)', sandbox.todaySetsFor('Bench Press').length === 1)
 
-console.log('\n[5] set-for-set comparison, by volume not weight alone')
+console.log('\n[5] set-for-set comparison, by estimated 1RM not weight alone')
 let now = { ex: 'Bench Press', kg: lb(105), reps: 10 }
 let then = { ex: 'Bench Press', kg: lb(100), reps: 10 }
 let c = sandbox.compareSet(now, then)
@@ -97,9 +97,44 @@ check('identical -> matched', c.cls === 'same', JSON.stringify(c))
 c = sandbox.compareSet({ ex:'Bench Press', kg: lb(90), reps: 10 }, { ex:'Bench Press', kg: lb(100), reps: 10 })
 check('lighter -> down, never an error', c.cls === 'down', JSON.stringify(c))
 
+console.log('\n[5b] THE BUG RUBEN REPORTED: heavier for fewer reps is progress')
+// Volume (the old basis) called this "down 12%" because total tonnage fell.
+// He added 10kg to the bar. That is not a loss and the panel may not say so.
+c = sandbox.compareSet({ ex:'Bench Press', kg: 110, reps: 8 }, { ex:'Bench Press', kg: 100, reps: 10 })
+check('110x8 after 100x10 reads UP, not down', c.cls === 'up', JSON.stringify(c))
+check('and by a believable 5%, not 25%', c.text === 'up 5%', c.text)
+check('it says the basis was strength', c.basis === 'strength', c.basis)
+
+// The mirror of it: two extra reps at the same weight used to inflate to 25%.
+c = sandbox.compareSet({ ex:'Bench Press', kg: 100, reps: 10 }, { ex:'Bench Press', kg: 100, reps: 8 })
+check('two extra reps is up 5%, not up 25%', c.text === 'up 5%', c.text)
+
+// Dropping weight to chase reps is NOT progress, and must not read as up.
+c = sandbox.compareSet({ ex:'Bench Press', kg: 80, reps: 12 }, { ex:'Bench Press', kg: 100, reps: 10 })
+check('80x12 after 100x10 reads down', c.cls === 'down', JSON.stringify(c))
+
+console.log('\n[5c] past 12 reps Epley says nothing, so it falls back and admits it')
+c = sandbox.compareSet({ ex:'Bench Press', kg: 40, reps: 15 }, { ex:'Bench Press', kg: 40, reps: 20 })
+check('a 15-rep machine set still compares', !!c, JSON.stringify(c))
+check('on the volume basis', c.basis === 'volume', c.basis)
+check('fewer reps at the same weight -> down', c.cls === 'down', JSON.stringify(c))
+
 console.log('\n[6] bodyweight movements count the body')
 c = sandbox.compareSet({ ex:'Pull Up', kg: 0, reps: 14 }, { ex:'Pull Up', kg: 0, reps: 12 })
 check('more pull ups -> up even at 0 on the bar', c && c.cls === 'up', JSON.stringify(c))
+
+console.log('\n[6b] a movement carrying no bodyweight, nothing on the bar, still compares')
+// Volume is zero on both sides here, so the old code returned null and the
+// row simply showed no comparison at all. Reps are the only thing that
+// changed, so reps are what it counts - and it says that is what it did.
+c = sandbox.compareSet({ ex:'Bench Press', kg: 0, reps: 20 }, { ex:'Bench Press', kg: 0, reps: 15 })
+check('more reps at no load -> up', c && c.cls === 'up', JSON.stringify(c))
+check('on the reps basis', c && c.basis === 'reps', c && c.basis)
+
+console.log('\n[6c] load arriving where there was none is not a percentage')
+c = sandbox.compareSet({ ex:'Bench Press', kg: 20, reps: 10 }, { ex:'Bench Press', kg: 0, reps: 10 })
+check('says what happened instead of dividing by zero', c && c.cls === 'up', JSON.stringify(c))
+check('no Infinity, no NaN in the text', c && !/Infinity|NaN/.test(c.text), c && c.text)
 
 console.log('\n[7] never trained before')
 check('unknown exercise -> null, not a crash', sandbox.prevSessionFor('Zercher Squat') === null)

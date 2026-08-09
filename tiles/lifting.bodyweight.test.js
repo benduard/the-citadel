@@ -78,12 +78,12 @@ check('bodyweight PLUS added weight still says both',
   setLabel({ ex:'Pull Up', kg:20, reps:5 }, sandbox.findEx('Pull Up')))
 // The unilateral rule halves stored kg back to what was typed. A zero has no
 // per-hand half to show, so it must not fall into that branch and print
-// "0 kg per hand x 15".
-check('a unilateral lift at no weight does not say "0 kg per hand"',
+// "0 kg per side x 15".
+check('a unilateral lift at no weight does not say "0 kg per side"',
   setLabel({ ex:'Dumbbell Row', kg:0, reps:15 }, sandbox.findEx('Dumbbell Row')) === 'bodyweight x 15',
   setLabel({ ex:'Dumbbell Row', kg:0, reps:15 }, sandbox.findEx('Dumbbell Row')))
 check('a loaded unilateral lift still halves',
-  setLabel({ ex:'Dumbbell Row', kg:40, reps:8 }, sandbox.findEx('Dumbbell Row')) === '20 kg per hand x 8',
+  setLabel({ ex:'Dumbbell Row', kg:40, reps:8 }, sandbox.findEx('Dumbbell Row')) === '20 kg per side x 8',
   setLabel({ ex:'Dumbbell Row', kg:40, reps:8 }, sandbox.findEx('Dumbbell Row')))
 
 console.log('\n[3] THE LINE: no weight never becomes invented load')

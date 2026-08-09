@@ -45,6 +45,21 @@ create table if not exists rest_timers (
   created_at timestamptz not null default now()
 );
 
+-- `note` is the sentence the notification actually says: which set is next and
+-- what it has to beat. Added 2026-08-08, at Ruben's request that the alert name
+-- the exact set rather than just the exercise.
+--
+-- IT IS A SECOND COLUMN AND NOT PART OF `label` FOR A REASON. The board reads
+-- `label` back when the app reopens mid-timer and feeds it to the tile, which
+-- looks the exercise name up to know whether that timer was three minutes or
+-- five. Append " set 4" to the label and every resumed squat silently becomes a
+-- three minute rest. `label` stays a key; `note` is prose and nothing parses it.
+--
+-- A separate statement, not a change to the create above: this table already
+-- exists on his project, and `create table if not exists` would skip a new
+-- column there entirely. Safe to re-run, like everything else in this file.
+alter table rest_timers add column if not exists note text;
+
 alter table rest_timers enable row level security;
 
 drop policy if exists "own timers" on rest_timers;

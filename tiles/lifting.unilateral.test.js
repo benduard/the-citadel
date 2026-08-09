@@ -1,5 +1,5 @@
 /**
- * Unilateral ("per hand") weight, checked against tiles/lifting.html itself.
+ * Unilateral ("per side") weight, checked against tiles/lifting.html itself.
  * Plain node: `node tiles/lifting.unilateral.test.js`.
  *
  * The one invariant worth a test here: what gets typed, doubled at storage,
@@ -48,23 +48,23 @@ check('Dumbbell Row is marked unilateral', /UNI_EXERCISES = \{ 'Dumbbell Row': t
 
 console.log('\n[2] storage doubles what was typed (the logSet() rule)')
 // Mirrors exactly what logSet() does: storedKg = toKg(kgRaw); if (uni) storedKg *= 2
-function storeAsIfLogged(typedPerHand, uni) {
-  let stored = sandbox.toKg(typedPerHand)
+function storeAsIfLogged(typedPerSide, uni) {
+  let stored = sandbox.toKg(typedPerSide)
   if (uni) stored *= 2
   return stored
 }
 const stored20 = storeAsIfLogged(20, true)
-check('20 typed, kg unit -> 40 stored (total, both hands)', stored20 === 40, stored20)
+check('20 typed, kg unit -> 40 stored (total, both sides)', stored20 === 40, stored20)
 
 console.log('\n[3] setLabel halves it back for display - round trip is exact')
 const label = sandbox.setLabel({ kg: stored20, reps: 10 }, { uni: true })
-check('reads "20 kg per hand x 10", not the stored 40', label === '20 kg per hand x 10', label)
+check('reads "20 kg per side x 10", not the stored 40', label === '20 kg per side x 10', label)
 
 console.log('\n[4] a non-uni exercise is completely unaffected')
 const storedBilateral = storeAsIfLogged(20, false)
 check('20 typed, not uni -> 20 stored, no doubling', storedBilateral === 20, storedBilateral)
 const labelBilateral = sandbox.setLabel({ kg: storedBilateral, reps: 10 }, { uni: false })
-check('reads plain "20 kg x 10", no "per hand"', labelBilateral === '20 kg x 10', labelBilateral)
+check('reads plain "20 kg x 10", no "per side"', labelBilateral === '20 kg x 10', labelBilateral)
 
 console.log('\n[5] round-trips cleanly across a spread of real weights, both units')
 ;[5, 7.5, 12.5, 20, 22.5, 45, 60].forEach(typed => {
@@ -76,9 +76,9 @@ console.log('\n[5] round-trips cleanly across a spread of real weights, both uni
 
 console.log('\n[6] the round trip also holds in lb, not just kg')
 vm.runInContext(`S.unit = 'lb';`, sandbox)
-const storedLb = storeAsIfLogged(44, true) // "44 lb per hand" typed; toKg() converts once, inside the helper
+const storedLb = storeAsIfLogged(44, true) // "44 lb per side" typed; toKg() converts once, inside the helper
 const displayedBackLb = sandbox.showW(storedLb / 2)
-check('44 lb per hand -> round-trips to 44', Math.abs(displayedBackLb - 44) < 0.1, displayedBackLb)
+check('44 lb per side -> round-trips to 44', Math.abs(displayedBackLb - 44) < 0.1, displayedBackLb)
 
 console.log(`\n${fails} failure(s)`)
 process.exit(fails ? 1 : 0)

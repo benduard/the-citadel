@@ -65,6 +65,46 @@ laptop is still on the phone. The data was the point; the layout is a later job.
 
 ---
 
+# The scale, so you stop typing your weight
+
+Your VeSync scale already knows the number. This gets it to the Body tile
+without the board ever holding a password to VeSync.
+
+Nothing fetches. Your phone pushes: VeSync writes into Apple Health, and a
+Shortcut hands one morning to your vault. If you swap the scale next year for
+any other brand that writes to Health, none of this changes.
+
+- [ ] Run `supabase/scale.sql` in the Supabase SQL editor
+       makes `body_auto_upsert`. Safe to run again. Calling it by hand in the
+       editor will say "not signed in" - that is it proving it is scoped to
+       you, not a fault
+- [ ] VeSync app, turn on Apple Health
+       Profile, then Settings, then Connect to Apple Health. Allow WEIGHT to
+       write. Step on the scale once and check the Health app shows it
+- [ ] Set a password on your account, once
+       a Shortcut cannot read the email code. The gear, then the account
+       panel. This password exists for the Shortcut and lives on your phone -
+       you still sign in with the emailed code yourself
+- [ ] Build the Shortcut, and set it to run each morning
+       Get Health Sample (Weight, latest) -> Get Contents of URL, POST to
+       `https://<your-project>.supabase.co/rest/v1/rpc/body_auto_upsert`
+       Headers: `apikey` and `Authorization: Bearer <token>`
+       Body (JSON): `p_date` today as YYYY-MM-DD, `p_kg` the weight
+       IN KILOGRAMS
+- [ ] Weigh yourself, then open Body
+       the morning shows up tagged `scale`
+
+CAUTION, THE ONE WAY TO GET THIS WRONG: send kilograms. If your Health is set
+to pounds, convert in the Shortcut before it sends. The function refuses
+anything outside 20 to 400 so a pounds figure usually bounces, but it cannot
+catch every case and a wrong unit in the trend is there for good.
+
+A weight you typed yourself always wins. The scale only ever fills a morning
+you left empty, and if both exist and disagree the tile shows you both and
+changes nothing.
+
+---
+
 # Checking the board still works
 
 `./run-tests.sh` runs everything: the rank maths, the shell panels, backups,

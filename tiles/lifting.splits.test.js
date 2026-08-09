@@ -123,6 +123,21 @@ check('deadlift is NOT on back day', !pull.includes('Deadlift'))
 check('back extension moved with it, same muscle', legs.includes('Back Extension') && !pull.includes('Back Extension'))
 check('romanian deadlift is on leg day (hamstrings)', legs.includes('Romanian Deadlift'))
 check('sumo deadlift is on leg day (glutes)', legs.includes('Sumo Deadlift'))
+// Moved 2026-08-08, at his request ("add rear delt fly to shoulders"). Same
+// law as the deadlift move above: the invariant in [2] means reardelt could
+// not sit on two days, so it came OUT of Back & Arms and into Chest &
+// Shoulders, and every rear-delt-primary lift moved with it.
+check('rear delt fly is on the shoulder day', push.includes('Rear Delt Fly Machine'))
+check('rear delt fly is NOT on back/arms day', !pull.includes('Rear Delt Fly Machine'))
+check('both face pulls moved with the muscle',
+  push.includes('Face Pull') && push.includes('Kneeling Face Pull') &&
+  !pull.includes('Face Pull') && !pull.includes('Kneeling Face Pull'))
+// A dip on both days, which is two entries rather than one entry on two days -
+// the picker groups by PRIMARY muscle, so one entry can only ever be offered
+// on one of them. Chest lean is `Dip`, upright is `Triceps Dip`.
+check('the chest dip is on the chest day', push.includes('Dip'))
+check('the triceps dip is on the arms day', pull.includes('Triceps Dip'))
+check('neither dip turns up on both', !pull.includes('Dip') && !push.includes('Triceps Dip'))
 
 console.log('\n[7] biggest lift first inside a muscle')
 const quads = LIB.filter(e => e.pri === 'quads')
@@ -136,9 +151,9 @@ const names = LIB.map(e => e.name)
   check(`${n} is on leg day`, legs.includes(n)))
 ;['Dumbbell Flat Press','Incline Plate-Loaded Machine Press','Decline Plate-Loaded Machine Press',
   'Plate-Loaded Machine Shoulder Press','Standing Machine Lateral Raise','Seated Machine Lateral Raise',
-  'Chest Fly Machine','Weighted Crunch'].forEach(n =>
+  'Chest Fly Machine','Weighted Crunch','Rear Delt Fly Machine'].forEach(n =>
   check(`${n} is on chest/shoulder day`, push.includes(n)))
-;['Chest Supported T-Bar Row','Rear Delt Fly Machine','Incline Dumbbell Curl',
+;['Chest Supported T-Bar Row','Incline Dumbbell Curl',
   'Machine Preacher Curl','Barbell Preacher Curl','Rope Triceps Pushdown',
   'Cable Reverse Curl','Dumbbell Reverse Curl','Standing Forearm Curl'].forEach(n =>
   check(`${n} is on back/arms day`, pull.includes(n)))

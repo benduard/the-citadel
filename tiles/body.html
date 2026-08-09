@@ -14,6 +14,30 @@
       days: { "YYYY-MM-DD": kg }      // one number per day, always kilograms
     }
 
+  THE SCALE HAS ITS OWN SLOT AND THIS TILE NEVER WRITES IT. Added 2026-08-08.
+  Ruben's VeSync scale pushes each morning into Apple Health, an iPhone
+  Shortcut passes it to body_auto_upsert (supabase/scale.sql), and that lands
+  in 'body:auto' - a SECOND slot beside this one, read here through
+  Vitality.loadAuto():
+
+    { days: { "YYYY-MM-DD": { kg, fat?, src, at } } }
+
+  Two slots, not one, for the reason recovery:auto was built that way: this
+  tile saves its slot wholesale on every edit, so an automation writing the
+  same slot would race a person typing and destroy a weight entered by hand.
+
+  TYPED ALWAYS WINS. entryOf() reads days first and only falls back to the
+  scale, so a morning he entered himself is never replaced - the scale can
+  only ever fill a day he left empty. Where both exist and disagree, the
+  recent list shows both and resolves nothing, because whether the gym scale
+  in shoes or the one at home is right is not a thing this file can know.
+
+  The scale's readings are held in memory only and re-read on every boot. They
+  are never copied into `days`, or there would be no telling afterwards which
+  morning he stood there and read the display and which arrived while he was
+  asleep. `fat` is stored by the inlet because the scale measures it; nothing
+  here shows it yet.
+
   WEIGHT IS ALWAYS STORED IN KG, whatever the display unit says. Storing what
   was typed alongside its unit means the day someone flips the toggle their
   whole history changes meaning, and the ledger ends up holding two units in
@@ -236,6 +260,23 @@
     font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
     font-size:12px; color:var(--mint); font-variant-numeric:tabular-nums; white-space:nowrap;
   }
+  /* Where the number came from, drawn ONLY on a morning the scale filled - so
+     the ordinary case, a weight he typed, carries no chrome at all. The
+     margin-right:auto keeps it beside the date and leaves the value on the
+     right, where every other row already has it. */
+  .entrySrc{
+    margin-right:auto;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:9.5px; letter-spacing:.12em; text-transform:uppercase;
+    color:var(--faint); border:1px solid var(--border);
+    border-radius:999px; padding:2px 7px; white-space:nowrap;
+  }
+  /* A typed weight and a scale weight that disagree about the same morning.
+     Faint on purpose: it is a footnote to the row above it, not a problem
+     that needs solving. */
+  .entryAlt{
+    font-size:10.5px; color:var(--faint); line-height:1.4; padding:0 0 8px;
+  }
   .empty{ color:var(--faint); font-size:13px; }
 
   @keyframes rise{
@@ -314,6 +355,11 @@
       if (p) { delete pending[msg.id]; p.resolve({ ok: true, data: msg.data }); }
       return;
     }
+    if (msg.type === 'loadAuto:result') {
+      var pa = pending[msg.id];
+      if (pa) { delete pending[msg.id]; pa.resolve({ ok: !!msg.ok, data: msg.data || null }); }
+      return;
+    }
     if (msg.type === 'save:error' || msg.type === 'report:error') {
       writeErrorHandlers.forEach(function (fn) { fn(msg.type, msg.reason); });
     }
@@ -354,6 +400,34 @@
     },
 
     report: function (stream) { post('report', { stream: stream }); },
+
+    /**
+     * The automation's half of this tile's data: slot "body:auto", written by
+     * body_auto_upsert (supabase/scale.sql) when the phone pushes a morning in
+     * from Apple Health. Read only - there is no saveAuto, on purpose, so the
+     * scale's slot and the typed slot can never overwrite each other.
+     *
+     * A SINGLE ATTEMPT, not load()'s retry loop. load() retries because an
+     * unanswered load must never be mistaken for an empty vault: the next save
+     * would write that emptiness over real history. Nothing is ever written on
+     * the strength of this answer, so a host that stays quiet just means no
+     * scale readings are shown, which is the same honest "nothing to show" as
+     * genuinely having none. A host that has never heard of loadAuto - the
+     * hosted Vitality board - simply never replies, and this resolves empty.
+     */
+    loadAuto: function () {
+      var id = 'a' + (++seq);
+      return new Promise(function (resolve) {
+        pending[id] = { resolve: resolve };
+        post('loadAuto', { id: id });
+        setTimeout(function () {
+          if (!pending[id]) return;
+          delete pending[id];
+          resolve({ ok: false, data: null });
+        }, 2500);
+      });
+    },
+
     onWriteError: function (fn) { writeErrorHandlers.push(fn); }
   };
 })();
@@ -410,14 +484,58 @@
     return (kgDiff < 0 ? '-' : '+') + v.toFixed(1);
   }
 
-  // Reads never rewrite the slot. An entry that is not a positive number is
-  // ignored here rather than deleted, so nothing a future save could erase.
-  function entryOf(key){
-    var v = Number(state.days[key]);
+  /**
+   * What the scale pushed in, read from the 'body:auto' slot on boot and kept
+   * in memory only. { "YYYY-MM-DD": { kg, fat, src, at } }.
+   *
+   * IT IS NEVER COPIED INTO state.days AND NEVER SAVED. state.days means "the
+   * numbers he typed", and the moment a scale reading is written into it the
+   * two become indistinguishable - there is no telling afterwards which
+   * morning he stood there and read the display and which one arrived while
+   * he was asleep. Keeping them apart also means the whole feature can be
+   * switched off by simply not reading the slot, with nothing to unpick.
+   *
+   * Re-read fresh on every boot, so a morning corrected in Apple Health
+   * corrects here too rather than being frozen at whatever first landed.
+   */
+  var autoDays = {};
+
+  function autoOf(key){
+    var d = autoDays[key];
+    if (!d) return null;
+    var v = Number(d.kg);
     return (isFinite(v) && v > 0) ? v : null;
   }
+
+  /**
+   * The weight for a day. TYPED ALWAYS WINS.
+   *
+   * This is the whole conflict rule, in one line of precedence: if he stood on
+   * a different scale and typed 84.2, that is the number, and the smart
+   * scale's 83.9 for the same morning does not get to quietly replace it. The
+   * scale only ever fills a day he left empty. renderRecent() shows the
+   * disagreement where there is one rather than hiding it.
+   *
+   * Reads never rewrite the slot. An entry that is not a positive number is
+   * ignored here rather than deleted, so nothing a future save could erase.
+   */
+  function entryOf(key){
+    var v = Number(state.days[key]);
+    if (isFinite(v) && v > 0) return v;
+    return autoOf(key);
+  }
+  // True when the number on show for that day came from the scale because he
+  // typed nothing. Used to label it, never to treat it as worth less.
+  function isAuto(key){
+    var v = Number(state.days[key]);
+    if (isFinite(v) && v > 0) return false;
+    return autoOf(key) != null;
+  }
   function loggedKeys(){
-    return Object.keys(state.days).filter(function (k) { return entryOf(k) != null; }).sort();
+    var seen = {};
+    Object.keys(state.days).forEach(function (k) { if (entryOf(k) != null) seen[k] = true; });
+    Object.keys(autoDays).forEach(function (k) { if (entryOf(k) != null) seen[k] = true; });
+    return Object.keys(seen).sort();
   }
   function latestKey(){
     var keys = loggedKeys();
@@ -454,6 +572,38 @@
       kind: 'measure',
       goalDirection: 'neutral'
     });
+  }
+
+  /**
+   * Put the scale's mornings into the ledger, so a weight he never typed still
+   * reaches rank.js and anything else reading body_weight.
+   *
+   * WHY IT IS NEEDED AT ALL: report() only ever ran on save, because until now
+   * a weight could only arrive by someone pressing the button. A morning that
+   * lands while he is asleep has no such moment, so boot is the moment.
+   *
+   * ONE ROW PER KEY PER DATE means re-reporting the same day is a replace, not
+   * a duplicate - so running this on every boot is safe by the ledger's own
+   * rule, and it is also what makes a corrected reading in Apple Health
+   * correct the ledger on the next open.
+   *
+   * BOUNDED TO THE RECENT WINDOW. Without a bound this walks every morning the
+   * scale has ever pushed, on every single boot, to rewrite rows that already
+   * say the right thing. The trend draws SPAN days and the average needs a
+   * week before that, so anything older is not on screen and not worth the
+   * writes.
+   *
+   * Only days he did NOT type are reported here; a typed day is reported by
+   * save() as it always was, and reporting it again from a scale reading that
+   * lost to it would put the losing number in the ledger.
+   */
+  function reportAuto(){
+    if (!loaded || !window.Vitality) return;
+    var k = today();
+    for (var i = 0; i <= SPAN + WINDOW; i++) {
+      var key = shiftKey(k, -i);
+      if (isAuto(key)) report(key);
+    }
   }
 
   // render
@@ -630,8 +780,33 @@
       v.className = 'entryVal';
       v.textContent = fmt(entryOf(k)) + ' ' + state.unit;
       row.appendChild(d);
+      // WHERE THE NUMBER CAME FROM, said on the row rather than left to be
+      // assumed. A morning he never typed is not a worse number, but it is a
+      // different claim, and a trend that quietly grew points nobody entered
+      // is the kind of thing that makes a person stop trusting the whole tile.
+      if (isAuto(k)) {
+        var tag = document.createElement('span');
+        tag.className = 'entrySrc';
+        tag.textContent = 'scale';
+        row.appendChild(tag);
+      }
       row.appendChild(v);
       list.appendChild(row);
+      /**
+       * Both a typed weight AND a scale reading for the same morning, and they
+       * disagree. Shown, never resolved: he is the one who knows whether he
+       * stood on the gym scale in shoes.
+       *
+       * 0.1kg is the display's own resolution, so anything at or under it
+       * would print as two identical numbers and read as a bug.
+       */
+      var mine = Number(state.days[k]), theirs = autoOf(k);
+      if (isFinite(mine) && mine > 0 && theirs != null && Math.abs(mine - theirs) > 0.1) {
+        var alt = document.createElement('div');
+        alt.className = 'entryAlt';
+        alt.textContent = 'scale said ' + fmt(theirs) + ' ' + state.unit + ' - yours is the one counted';
+        list.appendChild(alt);
+      }
     });
   }
 
@@ -727,6 +902,38 @@
         trouble = 'Could not reach your vault. Nothing was changed.';
       }
       renderAll();
+
+      /**
+       * The scale's half, asked for AFTER the typed half has landed and the
+       * board has already drawn.
+       *
+       * After, because typed always wins and entryOf() decides that by looking
+       * at state.days first - reading the scale into an empty state.days would
+       * paint every morning as a scale reading for a moment and then correct
+       * itself, which looks exactly like the data changing under him.
+       *
+       * Never blocks the first paint, and a failure here is not `trouble`:
+       * nothing was written, nothing is at risk, and a board with no scale
+       * connected must not grow a warning about it. It just has no auto days.
+       */
+      if (!loaded || !Vitality.loadAuto) return;
+      Vitality.loadAuto().then(function (a) {
+        if (!a || !a.ok || !a.data || !a.data.days) return;
+        var d = a.data.days;
+        if (typeof d !== 'object') return;
+        autoDays = {};
+        Object.keys(d).forEach(function (key) {
+          var row = d[key];
+          if (!row || typeof row !== 'object') return;
+          var kg = Number(row.kg);
+          // The same floor every read here uses. A row that is not a positive
+          // number is skipped rather than shown as a gap-filling zero.
+          if (!isFinite(kg) || kg <= 0) return;
+          autoDays[key] = row;
+        });
+        renderAll();
+        reportAuto();
+      });
     });
   }
 

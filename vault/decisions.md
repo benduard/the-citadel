@@ -1268,3 +1268,201 @@ filtered by scheme muscle lists, so his actual four-day program runs exactly
 as it did. This only changes what the FREEFORM exercise picker offers on each
 day: Deadlift (and Back Extension) now appear when Legs is the active day,
 and no longer appear when Back & Arms is.
+
+## Eight asks, 2026-08-08
+
+One message, eight things. Written down together because several of them turned
+out to be the same underlying mistake wearing different clothes.
+
+### The percentage was measuring the wrong thing
+
+He said the improvement number "doesn't seem accurate". It was not. `compareSet`
+had always compared VOLUME - load times reps - and volume answers a different
+question than the one the panel was asking:
+
+    100kg x 10  ->  110kg x 8     volume said DOWN 12%     e1RM says up 5%
+    100kg x 8   ->  100kg x 10    volume said UP 25%       e1RM says up 5%
+
+The first line is the one that would make a person stop trusting the tile. He
+put ten more kilos on the bar and the board called it a loss, because tonnage
+falls when reps fall. The second inflates two extra reps into a quarter more
+strength.
+
+SO THE BASIS IS ESTIMATED 1RM NOW, the same Epley this file already uses for
+PRs and every rank. It is the number that trades weight against reps, which is
+exactly the trade being measured. It is an estimate, and both sides of the
+comparison are estimated identically, so the error lands in the level and never
+in the direction.
+
+VOLUME IS NOT WRONG, IT IS A DIFFERENT MEASURE, and it stays exactly where it
+belongs: `lifting_volume` in the ledger is still total tonnage and did not
+move. What changed is only which question the set-by-set panel answers.
+
+THREE BASES, AND THE PANEL SAYS WHICH ONE IT USED. Epley stops describing
+anything past 12 reps, so a 15-rep machine set falls back to volume. A set with
+nothing on the bar, on a movement carrying no bodyweight, has no volume either
+and falls back to counting reps - which the old code could not do at all: it
+divided by a zero and showed nothing. "Up 5%" means three different things
+across those three, so a bare percentage with no basis beside it would be
+hiding the difference.
+
+THE PAIRING WAS ALREADY RIGHT and was left alone. Set N today is compared to
+set N from the last session that actually contained that exercise, which is what
+he asked for. `prevSessionFor` finds that session; `renderLast` walks it
+positionally.
+
+### One entry cannot live on two days
+
+Three of the asks were the same shape: "put this exercise on that day too".
+
+The exercise picker groups by PRIMARY muscle, and the scheme carries an
+invariant - one muscle, one split, enforced by `lifting.splits.test.js`. So an
+exercise can only ever be offered on the one day its primary muscle lives on.
+There are exactly two honest moves, and which one applies depends on whether
+the exercise is really one movement or two.
+
+MOVE THE MUSCLE, when it is one movement on the wrong day. `reardelt` came out
+of Back & Arms and into Chest & Shoulders, so the rear delt fly and both face
+pulls moved with it. Identical to the `lowerback` move recorded above, same
+law, same reason it could not just be added to both.
+
+SPLIT THE ENTRY, when it is genuinely two movements. "Weighted dips on both
+arms and chest" is that: `Dip` already said so in its own cues - lean forward
+for chest, stay upright for triceps - and those are different movements at
+different loads. One entry meant one history, so whichever he did last was
+"last time" and the PR was just the heavier of the two. `Triceps Dip` is now
+its own entry with `triceps` as its primary, which is also what finally puts a
+dip on the arms day picker at all. Exactly the Hip Adduction / Abduction split
+of 2026-08-04.
+
+BOTH NEW ENTRIES CARRY THEIR PARENT'S LADDER UNCHANGED - Dip's for the triceps
+dip, Face Pull's for the kneeling one. Those nine ratios are a hand-calibrated
+editorial scale and every one of them is printed on the Ranks page. Bending a
+curve to guess that a kneeling face pull is "about 15 percent lighter" would put
+an invented number on that page beside nine real ones.
+
+THE PRESET ROUTINE FOLLOWED THIS TIME, unlike the deadlift move. That entry
+says routine templates were deliberately left alone because they log items
+directly rather than filtering through the picker, which is still true. But
+"add rear delt fly to shoulders" is a statement about where he wants to do the
+work, and leaving a second copy sitting on Back & Arms would have meant doing
+it twice a week without asking for that.
+
+### Per hand became per side
+
+His reason, and it is the right one: he might be doing the movement for legs. A
+Bulgarian split squat, a single leg press, a lunge - all logged one side at a
+time, none of them a hand. The switch was always generic (any exercise can be
+flipped), so only the words were wrong. No stored number changed, so no
+migration: it is the same doubling it always was, described accurately.
+
+### A note per set, and what it is for
+
+The set shape has carried a `note` field since v2 and nothing ever wrote to it.
+Now the log form does.
+
+IT IS ABOUT THE SET, NOT THE DAY. The session note at the bottom of Today
+already exists and answers a different question. "The leg press at the other
+gym reads ten kilos heavy" belongs to set 3, not to Tuesday, and it is shown
+back under that exact set in the "last time" panel - which is the whole point.
+Reading it on the day it explains something is the only time it is worth
+anything.
+
+NOTHING COMPUTES ON IT, EVER. It does not adjust a percentage, discount a set
+or feed a rank. It is his words sitting beside the numbers, so that a drop he
+already knows the reason for stops looking like a mystery.
+
+Cleared after every set, like reps and RPE, or "shoulder felt off" would
+quietly stamp itself onto the next three sets too.
+
+### Fuel is text and is never reported
+
+Somewhere to put the pre workout snack or supplement, and whatever he drinks
+during. Two free text lines a day, in the tile's own slot beside the session
+note.
+
+DELIBERATELY NOT A NUTRITION LOG. "A banana and a coffee" is not a measurement.
+Deciding it is 105 calories and filing that as a number would be inventing a
+fact about his day, and the ledger's one shape is key/value/date for things
+that can actually be counted. This exists to be read next to a flat session, so
+the reason is sitting there when he asks why.
+
+### The notification names the exact set
+
+"Rest is up. Barbell Bench Press - back to it." tells him nothing he does not
+know. Standing at the rack with the phone face down, the two useful things are
+which set is next and what it has to beat, and both were already in the log.
+It now reads "Barbell Bench Press, set 4. Last time 100 kg x 8."
+
+THE SET NUMBER RIDES IN A SECOND COLUMN, NOT IN THE LABEL. `rest_timers.label`
+is read back when the app reopens mid-timer and fed to `restFor()` to work out
+whether that timer was three minutes or five. Appending " set 4" to it would
+have silently dropped every resumed squat to three minutes - a real bug, and an
+invisible one, since the countdown would simply be wrong rather than broken.
+`label` stays a key that something looks up; `note` is prose and nothing parses
+it.
+
+The set number is counted the same way the on-screen panel counts it, so the
+notification and the panel can never disagree about which set is next.
+
+### The scale pushes in, exactly like the wearable
+
+VeSync has no supported API. What exists is unofficial reverse engineering of
+the phone app's private endpoints, which is not something to hang a daily
+number on, and it would need a credential in a scheduled job.
+
+IT DOES NOT NEED ONE. The VeSync app already writes weight into Apple Health -
+Etekcity list Apple Health, Google Fit, Fitbit, MyFitnessPal and Samsung Health
+as their sync targets. So this is the same shape as the ring: nothing fetches,
+the phone pushes. A Shortcut reads the morning out of Health once a day and
+calls `body_auto_upsert` (`supabase/scale.sql`). The phone holds the
+credential, the repo holds no key, the tile stays sealed.
+
+APPLE HEALTH IS THE INTERFACE, NOT VESYNC, for the same reason it is not
+FitCloudPro: a scale bought next year from anyone feeds this unchanged.
+
+A SECOND SLOT, `body:auto`, never the tile's own. Same reasoning as
+`recovery:auto` and it is not negotiable - the tile saves its slot wholesale on
+every edit, so an automation sharing it would race a person typing.
+
+TYPED ALWAYS WINS. The scale can only ever fill a morning he left empty. Where
+both exist and disagree by more than the display's own resolution, the recent
+list shows both and resolves nothing, because whether the gym scale in shoes or
+the one at home is right is not a thing the file can know. That is the same
+"show both, you decide" he chose for the wearable.
+
+THE READINGS ARE NEVER COPIED INTO `days`. That slot means "what he typed". The
+moment a scale reading is written into it there is no telling afterwards which
+morning he stood there and read the display and which arrived while he was
+asleep. They are held in memory and re-read on every boot, so a reading
+corrected in Health corrects here too.
+
+UNLIKE THE WEARABLE, THIS ONE DOES WRITE THE LEDGER. `recovery:auto`
+deliberately does not, because `sleep_hours` is Recovery's own reported number
+and accepting the watch's figure was the choice Ruben wanted to keep. Weight is
+not like that: `body_weight` is a measurement of a body, this tile is already
+its only reporter, and a morning that never reaches the ledger is invisible to
+rank.js. So scale-only days are reported on boot, bounded to the window that is
+actually on screen. One row per key per date makes that a replace rather than a
+pile of duplicates.
+
+A RANGE CHECK CATCHES THE UNIT TRAP. 20 to 400 kg is wide enough for any human
+and narrow enough that a pounds figure sent as kilograms trips it - an 80kg man
+reads 176 lb, which lands outside. It cannot catch every case, but it catches
+the shape of the mistake, and a refusal the Shortcut can show beats a silent
+lie sitting in the trend for ever.
+
+### A tile can now read its own automation slot
+
+`loadAuto` on the host, added for this. A tile asks for slot `<its id>:auto`
+and gets it back.
+
+THE ID IS THE SENDER'S, NEVER THE MESSAGE'S - `reg.get(src)`, the window
+identity the host rendered - so there is no way to phrase a request for another
+tile's data. The same rule `save` and `load` already follow, and the reason the
+seal holds.
+
+READ ONLY, AND THERE IS NO `saveAuto`. The entire point of a second slot is
+that the automation writes one and the person writes the other. A tile that
+could write here would put back exactly the race the two slots exist to
+prevent.

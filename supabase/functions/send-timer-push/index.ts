@@ -112,7 +112,7 @@ async function handle(): Promise<Response> {
   const now = Date.now()
   const { data: timers, error } = await db
     .from('rest_timers')
-    .select('id, user_id, fire_at, label')
+    .select('id, user_id, fire_at, label, note')
     .eq('fired', false)
     .lte('fire_at', new Date(now).toISOString())
     .gte('fire_at', new Date(now - STALE_AFTER_MS).toISOString())
@@ -154,9 +154,16 @@ async function handle(): Promise<Response> {
           endpoint: s.endpoint,
           keys: { p256dh: s.p256dh, auth: s.auth }
         })
+        // `note` names the exact set and what it has to beat ("Barbell Bench
+        // Press, set 4. Last time 100 kg x 8."). It is what the tile sends
+        // now. `label` is the older, barer form and stays as the fallback so
+        // a timer scheduled before this shipped - or by a build that only
+        // sends the label - still reads as a sentence rather than blank.
         await subscriber.pushTextMessage(JSON.stringify({
           title: 'Rest is up',
-          body: t.label ? `${t.label} - back to it.` : 'Back to it.',
+          body: t.note
+            ? `${t.note} Back to it.`
+            : (t.label ? `${t.label} - back to it.` : 'Back to it.'),
           tag: 'rest-timer',
           url: '/'
         }), {})

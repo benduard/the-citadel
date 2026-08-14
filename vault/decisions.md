@@ -1466,3 +1466,76 @@ READ ONLY, AND THERE IS NO `saveAuto`. The entire point of a second slot is
 that the automation writes one and the person writes the other. A tile that
 could write here would put back exactly the race the two slots exist to
 prevent.
+
+### A placeholder nothing was looking at, 2026-08-08
+
+Spotted by looking at a screenshot of the work above, not by a test. The weight
+box read `none = t`.
+
+The placeholder was "none = bodyweight". That box is one of three across, so on
+a phone it is about 100px wide, and a browser does not wrap or ellipsis a
+placeholder - it just clips it mid-word. So the hint explaining that an empty
+weight box is a real answer had been painting as a broken string.
+
+EVERY CHECK IN THE REPO WAS GREEN. The third time that sentence has been
+written here, and the pattern is worth naming: the text WAS in the DOM, so a
+node suite reading the source saw the whole string; the box WAS big enough to
+tap, so touch-check passed; nothing was crushed into a vertical column, so
+squeeze-check passed; the number-check measures NUMBERS, and this is a
+placeholder. A clipped placeholder falls in the gap between all four, because
+each of them asks whether an element is well formed and none of them asks
+whether the words inside it are all visible.
+
+THE ROW IS NOT ALLOWED TO WRAP OUT OF IT. Weight, reps and RPE on one line is a
+deliberate decision, recorded in the CSS: it is what makes a set loggable one
+handed at the rack. So the fix is shorter words, not more room - "added" and
+"none" - and the sentence they came from moved up to the hint at the top of the
+card, which has the full width to say it in.
+
+THAT HINT IS NOW PER EXERCISE, which is the part worth keeping. It was one
+static line, "Total load on the body. Two 20kg dumbbells is 40.", and that is
+simply not true of a dip, where the box means the plate hanging off you. It now
+says the right thing for a bodyweight movement, a per-side movement, and
+everything else.
+
+AND THAT IMMEDIATELY CAUGHT A SECOND ONE. With the hint made honest per
+exercise, the per-side switch's own note underneath it - "Type the total on the
+body. Two 20s is 40." - openly contradicted it: on a Dip the card said "added
+weight only, your bodyweight is already counted" directly above "type the total
+on the body". Both cannot be true and nothing tells the reader which to
+believe. That note is now about what the SWITCH does and nothing else, which is
+the only question it was ever there to answer. Two lines explaining the same
+thing is how they drift apart.
+
+SO THERE IS A CHECK FOR IT NOW, `tools/clip-check.js`, the sixth browser check.
+It measures every placeholder's text against the box it sits in, plus any
+single-line element that has been told not to wrap AND sits somewhere that
+clips. Written the same day, for the reason the other five were: nobody should
+have to remember this.
+
+IT IMMEDIATELY FOUND ONE NOBODY HAD SEEN. Progress's new-quest box read "What
+are yo" at 320px - the placeholder was "What are you chasing", needing 135px in
+a 93px box, because that input shares its row with a number field and the Add
+button. It is "Name it" now; the eyebrow directly above already says New quest,
+so the placeholder never had to carry that context alone. That bug was live and
+nothing in the repo could see it.
+
+TWO THINGS IT DELIBERATELY DOES NOT FAIL ON, both learned by writing it and
+watching what it said:
+
+`overflow: visible` LOSES NOTHING. The first cut flagged any nowrap text wider
+than its content box, which put four Lifting buttons on the list - "Routines",
+"Body map", the two rest-mode buttons - whose labels are entirely legible. A
+plain button paints its text straight past its own border when a flex row
+squeezes it. Untidy, maybe; but every word is on screen, and this check is
+about text that is GONE. A check that cries about readable text is a check
+people stop running.
+
+`clientWidth` IS ZERO ON AN INLINE ELEMENT. Every `<span>` and `<i>` label on
+the board reported "needs 5px, has 0px" until the measurement fell back to
+getBoundingClientRect(). Not a clipped word - the wrong ruler.
+
+AN ELLIPSIS IS REPORTED BUT NEVER FAILED. Truncating a long user-typed title
+with "..." is a real design choice, and the "..." tells the reader there is
+more. A clipped placeholder has no such mark, which is exactly what made this
+class of bug invisible for so long.

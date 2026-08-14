@@ -114,9 +114,10 @@ Lists with its calendar and day view, Notes, the sealed-frame rules, and the
 rest-timer push wiring. Plain node, no install, no framework. Run it before
 you push.
 
-If `tools/node_modules` is installed, it also runs five browser checks:
+If `tools/node_modules` is installed, it also runs six browser checks:
 every tile actually paints (`visual-check.js`), nothing sits under the page's
 close button at any width (`collision-check.js`), every control is big
 enough to hit with a thumb (`touch-check.js`), every big number fits its
-box and stays readable on a phone (`number-check.js`), and no text is
-crushed into a vertical column of letters (`squeeze-check.js`).
+box and stays readable on a phone (`number-check.js`), no text is
+crushed into a vertical column of letters (`squeeze-check.js`), and no hint
+or label is cut off mid-word by its own box (`clip-check.js`).

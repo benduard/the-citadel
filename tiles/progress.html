@@ -380,7 +380,14 @@
     <div class="section">
       <p class="eyebrow sectionTitle">New quest</p>
       <div class="addRow">
-        <input id="newTitle" type="text" placeholder="What are you chasing" maxlength="80" disabled>
+        <!-- SHORT BECAUSE THE BOX IS SHORT. This input shares its row with a
+             number field and the Add button, so on a 320px phone it is about
+             93px wide - and a browser clips a placeholder rather than wrapping
+             it. "What are you chasing" needed 135px and was painting as "What
+             are yo". The eyebrow directly above already says New quest, so the
+             placeholder does not have to carry that context on its own.
+             tools/clip-check.js measures this. -->
+        <input id="newTitle" type="text" placeholder="Name it" maxlength="80" disabled>
         <input id="newTarget" type="number" min="1" max="999" step="1" value="1" aria-label="Ticks to finish" disabled>
         <button class="addBtn" id="addBtn" type="button" disabled>Add</button>
       </div>

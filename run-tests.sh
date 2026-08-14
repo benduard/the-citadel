@@ -27,7 +27,7 @@ node tiles/sealed.test.js
 echo "All suites passed."
 
 # The browser checks (paint, close-button collision, touch targets, number fit,
-# squeezed text) are
+# squeezed text, clipped text) are
 # optional and not part of the "all suites passed" line
 # above ON PURPOSE: it needs a Chromium binary on disk and the board actually
 # running on :3000, neither of which the plain-node suites require, and this

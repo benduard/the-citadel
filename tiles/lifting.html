@@ -803,7 +803,7 @@
              never a prompt(): the frame has no modals. -->
         <div class="row" style="margin-bottom:8px">
           <label class="fl grow" style="flex:1 1 100%"><span>Note for this set, optional</span>
-            <input id="fSetNote" type="text" maxlength="140" placeholder="tired, different machine, felt easy" disabled>
+            <input id="fSetNote" type="text" maxlength="140" placeholder="tired, or a different machine" disabled>
           </label>
         </div>
         <div class="row">
@@ -2947,11 +2947,39 @@
     if (!w) return;
     var e = findEx($('fEx').value);
     w.textContent = (e && e.uni) ? 'Weight per side' : 'Weight';
-    // Leaving it empty is a real answer, so the box says so rather than making
-    // him find out by trying. "Added" on the movements that carry the body,
-    // because on a pull up the box was never the whole load anyway.
+
+    /**
+     * THE PLACEHOLDER HAS TO FIT, AND IT DID NOT. Fixed 2026-08-08.
+     *
+     * This box is one of three across, so on a 390px phone it is about 100px
+     * wide and the browser simply clips a long placeholder mid-word:
+     * "none = bodyweight" painted as "none = t", which reads as a broken
+     * string rather than a hint. Invisible to every check in the repo - the
+     * text WAS there, the box WAS big enough to tap, nothing was squeezed
+     * into a column. It only shows up by looking at it.
+     *
+     * The row is not allowed to wrap its way out of this: weight, reps and
+     * RPE staying on one line is what makes this loggable one handed at the
+     * rack, and that is a deliberate decision (see the CSS). So the words get
+     * shorter instead, and the sentence they came from moves up to the hint
+     * below, which has the whole width of the card to say it in.
+     */
     var box = $('fKg');
-    if (box) box.placeholder = (e && e.bwf) ? 'added, or none' : 'none = bodyweight';
+    if (box) box.placeholder = (e && e.bwf) ? 'added' : 'none';
+
+    // What the number in that box MEANS, which is not the same on every
+    // exercise: on a dip it is the plate hanging off you, everywhere else it
+    // is everything on the body. Leaving it empty is a real answer in all
+    // three cases, and saying so here beats making him find out by trying.
+    var hint = $('logNote');
+    if (!hint) return;
+    if (e && e.bwf){
+      hint.textContent = 'Added weight only - your bodyweight is already counted. Leave it empty for a set with nothing added.';
+    } else if (e && e.uni){
+      hint.textContent = 'One side only, and it is stored as the total on the body. Leave it empty for a set with no weight on it.';
+    } else {
+      hint.textContent = 'Total load on the body. Two 20kg dumbbells is 40. Leave it empty for a bodyweight set.';
+    }
   }
 
   // The per-side switch, and what it currently means for the box above it.
@@ -2967,9 +2995,23 @@
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
     b.disabled = !loaded;
     $('uniLabel').textContent = on ? 'Logging per side' : 'Log this per side';
+    /**
+     * THIS LINE IS ABOUT THE SWITCH, NOT ABOUT WHAT THE WEIGHT MEANS.
+     *
+     * It used to say "Type the total on the body. Two 20s is 40." when the
+     * switch was off, which was a second answer to a question the hint above
+     * the form already answers - and once that hint became per-exercise
+     * (2026-08-08) the two openly contradicted each other. On a Dip the top
+     * of the card said "added weight only, your bodyweight is already
+     * counted" and this said "type the total on the body", one directly under
+     * the other. Both cannot be true and the reader has no way to tell which
+     * one to believe.
+     *
+     * So it stays in its own lane: what flipping this does, and nothing else.
+     */
     $('uniNote').textContent = on
-      ? 'Type one side. It is stored as the total on the body, so ranks and volume stay comparable.'
-      : 'Type the total on the body. Two 20s is 40.';
+      ? 'Typing one side. It is doubled and stored as the total on the body, so ranks and volume stay comparable.'
+      : 'Typing one number for the whole exercise. Turn this on for a lift you do one side at a time.';
   }
 
   function renderMax(){

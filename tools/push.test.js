@@ -150,6 +150,11 @@ console.log('\n[3d] the Edge Function is at least syntactically valid')
 {
   const stripped = fn
     .replace(/^import .*$/gm, '')
+    // A `type X = { ... }` alias, indented inside a function or at top level.
+    // Added 2026-08-08 with the Timer alias; exactly the "future annotation
+    // the stripper does not know" this comment predicted.
+    .replace(/^([ \t]*)type \w+ = \{[\s\S]*?^\1\}[ \t]*$/gm, '')
+    .replace(/ as unknown as \w+\[\]/g, '')
     .replace(/: Promise<Response>/g, '')
     .replace(/: (Uint8Array|string|number|boolean)\b/g, '')
     .replace(/\bas \{[^}]*\}/g, '')
@@ -286,10 +291,39 @@ check('restNote counts the next set the same way the panel does',
 check('and carries what that set has to beat', /Last time ' \+ setLabel\(target/.test(lifting))
 check('the note is a separate column, not appended to the label',
   /alter table rest_timers add column if not exists note text/.test(sql) &&
-  /label: label \|\| null,\s*\n\s*note: note \|\| null/.test(remote))
+  /full\.note = note \|\| null/.test(remote))
 check('the sender prefers the note and still falls back to the bare label',
   /t\.note[\s\S]{0,160}t\.label \? `\$\{t\.label\} - back to it\.`/.test(fn) &&
-  /select\('id, user_id, fire_at, label, note'\)/.test(fn))
+  /due\('id, user_id, fire_at, label, note'\)/.test(fn))
+
+/**
+ * A COLUMN THAT HAS NOT BEEN MIGRATED YET MUST NOT KILL THE ALERT.
+ *
+ * This is the bug Ruben hit: `note` shipped in the code before
+ * supabase/push.sql had been re-run on his project, so PostgREST rejected the
+ * insert, no timer row was ever written, and the notification just stopped -
+ * with nothing on screen saying why. The on-screen countdown kept working,
+ * which is what made it look like "notifications are broken" rather than "a
+ * migration is missing".
+ *
+ * Both ends now degrade to the older shape instead of failing. Losing the set
+ * number is a worse alert; losing the write, or the query, is NO alert.
+ */
+console.log('\n[10c] one migration behind still sends the alert')
+check('the insert retries without `note` when the column is not there',
+  /isMissingColumn\(res\.error, 'note'\)/.test(remote) &&
+  /insert\(base\)/.test(remote))
+check('and it recognises both PostgREST and Postgres saying so',
+  /PGRST204/.test(remote) && /42703/.test(remote))
+check('it says which migration is missing rather than failing silently',
+  /run supabase\/push\.sql again/.test(remote))
+check('the sender falls back to the older column list too',
+  /due\('id, user_id, fire_at, label'\)/.test(fn))
+check('a missing column is a warning, a real failure is still a 500',
+  /console\.warn\('reading timers with `note` failed/.test(fn) &&
+  /console\.error\('reading timers failed:'/.test(fn))
+check('the degraded path is reported, not swallowed',
+  /degraded: 'note'/.test(remote))
 check('resuming still reads the LABEL, so rest length survives a reopen',
   /var total = restFor\(r\.timer\.label \|\| ''\)/.test(lifting))
 check('and signing out still writes nothing - scheduleRestPush refuses on its own',

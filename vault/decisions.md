@@ -1539,3 +1539,57 @@ AN ELLIPSIS IS REPORTED BUT NEVER FAILED. Truncating a long user-typed title
 with "..." is a real design choice, and the "..." tells the reader there is
 more. A clipped placeholder has no such mark, which is exactly what made this
 class of bug invisible for so long.
+
+## Code shipped ahead of its migration, and the alert died quietly
+
+2026-08-08, same day, reported by Ruben as "the notification feature is not
+working". It was, until I changed it that morning.
+
+WHAT HAPPENED. The set-number alert added a `note` column to `rest_timers`.
+The CODE went out in a commit; the COLUMN only exists once someone runs
+`supabase/push.sql` again on the actual project. In between, `scheduleRestPush`
+was inserting a row with a field the table did not have, PostgREST refused the
+whole insert (PGRST204, "could not find the 'note' column ... in the schema
+cache"), no timer row was ever written, and no notification ever fired.
+
+WHAT MADE IT NASTY, and worth writing down: the on-screen countdown carried on
+working perfectly. It is fire-and-forget by design - the tile starts its own
+clock and does not wait to hear whether the backup push was scheduled, which is
+right, because a locked-out vault must never stop a timer. So every visible
+thing looked healthy and only the invisible half was dead. That is why it read
+as "notifications are broken" rather than "a migration is missing", and it is
+the exact failure mode fire-and-forget buys you.
+
+THE SECOND, WORSE ONE WAS WAITING. The Edge Function selects a fixed column
+list. Redeployed against an un-migrated table, `select('... , note')` fails the
+whole query, and then NOTHING sends - not just the new alerts, every rest alert
+on the board, including rows written before any of this. A migration gap that
+takes out one field is a bug; one that takes out the entire feature for anyone
+who deploys in the wrong order is a different size of problem.
+
+BOTH ENDS DEGRADE NOW. The insert retries without `note` when the column is
+missing; the sender falls back to the older column list and the older alert
+text. Losing the set number is a worse alert. Losing the write, or the query,
+is NO alert, and those are not the same size of problem.
+
+IT IS NOT SILENT ABOUT IT. Both paths log which migration is missing, and
+scheduleRestPush hands `degraded: 'note'` back to its caller. A fallback that
+hides the fact it fired is how a board runs for a year in a degraded mode
+nobody knows about.
+
+A REAL FAILURE IS STILL A FAILURE. The retry is scoped to exactly "that column
+is not there" - PGRST204 or Postgres's own 42703, and the message has to name
+the column. An RLS rejection, a bad session, a network error: all still fail,
+and none of them get a pointless second write.
+
+THE LESSON, WHICH IS NOT "REMEMBER TO RUN THE SQL". Anything that adds a column
+and starts writing it in the same change has to tolerate the column being
+absent, because the code and the database are deployed by two different actions
+and there is always a window between them. Vercel deploys on push; Supabase
+migrations are run by hand in a browser. On this board that window is
+guaranteed, not hypothetical.
+
+`tools/push-degrade.test.js` runs the real vault-remote against a fake Supabase
+that rejects the column, and asserts the alert is still scheduled. The
+string-matching in push.test.js proves the fallback is written; this proves it
+runs.

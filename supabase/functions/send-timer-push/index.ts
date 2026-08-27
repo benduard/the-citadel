@@ -110,14 +110,46 @@ async function handle(): Promise<Response> {
   // of retries and then stops. A rest timer an hour late is not worth sending
   // anyway; the set is long over.
   const now = Date.now()
-  const { data: timers, error } = await db
+
+  /**
+   * `note` (the set number and what it has to beat) arrived on 2026-08-08 and
+   * only exists once supabase/push.sql has been RUN again. Selecting a column
+   * that is not there fails the WHOLE query, which would mean this function
+   * sends nothing at all - every rest alert on the board dead, because a
+   * migration had not been applied yet.
+   *
+   * So it asks for `note` and drops back to the older column list if the
+   * database has not caught up. Losing the set number is a worse alert; losing
+   * the query is no alert, and those are not the same size of problem.
+   */
+  // `note` is optional in the TYPE as well as in the table, because on a
+  // project one migration behind the column genuinely is not in the row.
+  type Timer = {
+    id: number
+    user_id: string
+    fire_at: string
+    label: string | null
+    note?: string | null
+  }
+
+  const due = (cols: string) => db
     .from('rest_timers')
-    .select('id, user_id, fire_at, label, note')
+    .select(cols)
     .eq('fired', false)
     .lte('fire_at', new Date(now).toISOString())
     .gte('fire_at', new Date(now - STALE_AFTER_MS).toISOString())
     .order('fire_at', { ascending: true })
     .limit(200)
+
+  let { data, error } = await due('id, user_id, fire_at, label, note')
+  if (error) {
+    console.warn('reading timers with `note` failed, retrying without it:', error.message)
+    ;({ data, error } = await due('id, user_id, fire_at, label'))
+    if (!error) {
+      console.warn('rest_timers has no `note` column - run supabase/push.sql again ' +
+                   'to put the set number back in the alert.')
+    }
+  }
 
   if (error) {
     console.error('reading timers failed:', error.message)
@@ -125,7 +157,8 @@ async function handle(): Promise<Response> {
       status: 500, headers: { 'Content-Type': 'application/json' }
     })
   }
-  if (!timers || timers.length === 0) {
+  const timers = (data ?? []) as unknown as Timer[]
+  if (timers.length === 0) {
     return new Response(JSON.stringify({ ok: true, sent: 0 }), {
       headers: { 'Content-Type': 'application/json' }
     })

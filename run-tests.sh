@@ -8,6 +8,7 @@ node lib/shell.test.js
 node lib/backup.test.js
 node tools/icons.test.js
 node tools/push.test.js
+node tools/push-degrade.test.js
 node tiles/lifting.lasttime.test.js
 node tiles/lifting.splits.test.js
 node tiles/lifting.unilateral.test.js

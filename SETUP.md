@@ -65,6 +65,29 @@ laptop is still on the phone. The data was the point; the layout is a later job.
 
 ---
 
+# The rest alert, and the one step that breaks it
+
+The alert now names the exact set and what it has to beat: "Barbell Bench
+Press, set 4. Last time 100 kg x 8." That needs one new column in your
+database, and the code shipped before the column did.
+
+- [ ] Run `supabase/push.sql` again in the SQL editor
+       safe to re-run, it only adds the `note` column. WITHOUT THIS you still
+       get the alert, but the older, barer one: "Barbell Bench Press - back to
+       it." Nothing is lost and nothing is broken, you just do not get the set
+       number until this is run
+- [ ] Redeploy the sender, so it reads that column
+       `supabase functions deploy send-timer-push`
+
+WHY THIS BIT YOU. For a while the board wrote the new column into a table that
+did not have it yet, so the whole write was refused and no alert was scheduled
+at all - while the countdown on screen kept running perfectly, which is what
+made it look like notifications had broken rather than a column being missing.
+Both ends now fall back to the older shape on their own, so the alert keeps
+working whether or not the SQL has been run. Run it anyway, for the set number.
+
+---
+
 # The scale, so you stop typing your weight
 
 Your VeSync scale already knows the number. This gets it to the Body tile

@@ -76,6 +76,27 @@ const MISSING = {
   message: "Could not find the 'note' column of 'rest_timers' in the schema cache"
 }
 
+/**
+ * THE EXACT PAYLOAD RUBEN'S PROJECT RETURNS, copied from a live request on
+ * 2026-08-28 rather than imagined:
+ *
+ *   GET /rest/v1/rest_timers?select=note  ->  400
+ *   {"code":"42703","details":null,"hint":null,
+ *    "message":"column rest_timers.note does not exist"}
+ *
+ * Worth pinning verbatim. The first guess at this fallback only looked for
+ * PostgREST's PGRST204 ("could not find the column ... in the schema cache"),
+ * and the database actually answers with Postgres's own 42703 and completely
+ * different wording. A fallback that does not recognise the real error is not
+ * a fallback.
+ */
+const MISSING_LIVE = {
+  code: '42703',
+  details: null,
+  hint: null,
+  message: 'column rest_timers.note does not exist'
+}
+
 ;(async () => {
   // ── 1. The database is up to date ──────────────────────────────────────────
   console.log('\n[1] column present: one insert, with the note')
@@ -113,6 +134,19 @@ const MISSING = {
     const r = await b.remote.scheduleRestPush(180, 'Dip', 'Dip, set 3.')
     check('still scheduled', r.ok === true, JSON.stringify(r))
     check('retried once', b.inserts.length === 2, b.inserts.length)
+  }
+
+  // ── 3b. The real thing, verbatim ───────────────────────────────────────────
+  console.log('\n[3b] the EXACT error Ruben’s project returned on 2026-08-28')
+  {
+    const b = makeBoard(row => ('note' in row ? MISSING_LIVE : null))
+    const r = await b.remote.scheduleRestPush(300, 'Barbell Bench Press',
+      'Barbell Bench Press, set 4. Last time 100 kg x 8.')
+    check('the alert is still scheduled against the real failure', r.ok === true, JSON.stringify(r))
+    check('and it degraded rather than pretending nothing happened', r.degraded === 'note', JSON.stringify(r))
+    check('the row that landed carries the label, not the note',
+      b.inserts[1] && b.inserts[1].row.label === 'Barbell Bench Press' && !('note' in b.inserts[1].row),
+      JSON.stringify(b.inserts[1] && b.inserts[1].row))
   }
 
   // ── 4. A REAL failure must NOT be swallowed by the retry ───────────────────

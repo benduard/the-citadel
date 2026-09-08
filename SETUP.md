@@ -128,15 +128,126 @@ changes nothing.
 
 ---
 
+# Screen time, and the one honest thing to know first
+
+Apple gives NOTHING away here. There is no API for Screen Time usage, for
+anybody: the frameworks are native only, need Apple's permission, and put the
+numbers inside a sealed view that even the app showing them cannot read. The
+Shortcuts app has no action for it. So nothing can ask your iPhone what your
+screen time was, and any app claiming to sync it is doing one of the two
+things below.
+
+The tile is on the board now and works today by typing the number in. The two
+automatic paths are both optional and neither is magic.
+
+## The Mac path. Apple's own numbers, automatically, about an hour behind
+
+This is the good one. Screen Time syncs across your devices, and on a Mac that
+lands in a database your own account can read.
+
+- [ ] Both devices sharing. iPhone: Settings, Screen Time, Share Across
+       Devices, on. Mac: System Settings, Screen Time, same switch. Same Apple
+       ID on both. The first sync is not instant
+- [ ] Run `supabase/screentime.sql` in the Supabase SQL editor
+       makes `screentime_auto_upsert` and `screentime_app_event`. Safe to run
+       again. Calling them by hand in the editor says "not signed in" - that
+       is them proving they are scoped to you, not a fault
+- [ ] On the Mac, give your terminal Full Disk Access
+       System Settings, Privacy & Security, Full Disk Access, turn it on for
+       Terminal. Then QUIT Terminal fully and reopen it. The switch does not
+       apply to a window that was already open
+- [ ] Find your iPhone in the database
+       `./tools/screentime-export.sh --list-devices`. It prints every device
+       syncing into it. Copy the id of the iPhone one
+- [ ] Make the config file, `~/.citadel/screentime.env`
+       the script prints the exact contents to make if it is not there. It
+       needs your project URL, the anon key, your email, your account
+       password, and that device id. `chmod 600` it
+- [ ] Try it without sending anything
+       `./tools/screentime-export.sh --dry-run`. It prints the day it read
+- [ ] Send it for real, then open Screen time
+       `./tools/screentime-export.sh`. The number shows up tagged as coming
+       from Apple Screen Time via the Mac
+- [ ] Optional, run it on its own. A `launchd` job or a cron line every hour:
+       `0 * * * * /path/to/The\ Citadel/tools/screentime-export.sh >/dev/null`
+
+IT IS NOT LIVE, and nothing will make it live. Apple syncs on its own
+schedule, so expect anywhere from minutes to an hour behind, and expect today's
+number to keep climbing each time it runs. The tile shows you when each number
+arrived so you can always see how fresh it is.
+
+The total will sit CLOSE TO but not exactly on what Settings shows. There is no
+stored "your screen time was 4h 32m" row to copy - the script measures the
+union of your app sessions, which is the honest version of the same question.
+Treat it as your own consistent measure, not as a copy of Apple's headline.
+
+WHAT IT DELIBERATELY DOES NOT SEND: pickups. That count is not in the database
+and could only be guessed at. The tile has a box for it if you want to type it.
+
+## The live path. Near real time, and only the apps you pick
+
+iPhone Shortcuts can run something the moment an app opens or closes. That is
+genuinely live, and it only ever sees apps you set up, so it is a floor on your
+day rather than your day. The tile labels it that way and never files a partial
+count as a real one.
+
+Worth doing for the two or three apps you actually care about. Not worth doing
+for forty.
+
+- [ ] Set a password on your account, once, if you have not already
+       a Shortcut cannot read the email code. The gear, then the account
+       panel. Same password the scale Shortcut uses
+- [ ] Shortcuts app, Automation tab, new automation, App
+       pick one app, choose "Is Opened", and turn OFF "Ask Before Running"
+- [ ] Add one action: Get Contents of URL
+       POST to `https://<your-project>.supabase.co/rest/v1/rpc/screentime_app_event`
+       Headers: `apikey` and `Authorization: Bearer <token>`
+       Body (JSON): `p_app` the app's name, `p_event` the word `open`,
+       `p_date` today as yyyy-MM-dd (Format Date, Custom)
+- [ ] Duplicate it for "Is Closed", changing `p_event` to `close`
+       both halves are needed. An open with no close is thrown away after
+       twelve hours rather than counted as a twelve hour session
+
+`p_date` is required and it is the PHONE's date. The server runs in UTC and
+would otherwise file your evening under tomorrow.
+
+## Which number wins
+
+Three sources, and they are never added together, because they measure the same
+hours rather than different ones:
+
+1. Anything you TYPE wins, always. Nothing overwrites you.
+2. Then the Mac's count, because it is Apple's own.
+3. Then the live count, marked "so far".
+
+The tile always says on screen which one you are looking at.
+
+---
+
 # Checking the board still works
 
 `./run-tests.sh` runs everything: the rank maths, the shell panels, backups,
 the icon set, Lifting's own suite (last-time, splits, unilateral, grouping,
 suggestions, the body map, rest timing, routines, supersets, bodyweight sets),
-Lists with its calendar and day view, Notes, the sealed-frame rules, the
-rest-timer push wiring, and the reminder rules - whether one fires twice,
-whether it fires the moment you save it, and what happens to 07:00 when the
-clocks change. Plain node, no install, no framework. Run it before you push.
+Lists with its calendar and day view, Notes, Screen time, the sealed-frame
+rules, the rest-timer push wiring, and the reminder rules - whether one fires
+twice, whether it fires the moment you save it, and what happens to 07:00 when
+the clocks change. Plain node, no install, no framework. Run it before you push.
+
+Screen time's suite is worth knowing about, because the thing it guards is
+invisible: a day can arrive from three places and they are never added
+together. It pins that the Mac's count beats the live count without summing
+them, that a typed day beats both, and that a partial live count never reaches
+your ledger. It also pins that the rank reads a FALLING number as improving
+here, which is the one place on this board where down is the good direction.
+
+And `tools/screentime-merge.test.js` checks the export's arithmetic without
+needing a Mac at all. It builds a fake Screen Time database, runs the REAL
+query lifted straight out of `screentime-export.sh`, and proves that
+overlapping app sessions are merged rather than added. That matters more than
+it sounds: adding them up is the obvious thing to write, and it can report
+thirty hours of screen time in a twenty-four hour day. On the test's own
+fixture the naive version says 170 minutes where the truth is 110.
 
 If `tools/node_modules` is installed, it also runs seven browser checks:
 every tile actually paints (`visual-check.js`), nothing sits under the page's

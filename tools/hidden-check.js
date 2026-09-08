@@ -37,7 +37,7 @@
 const { chromium } = require('playwright')
 
 const URL = process.env.BOARD_URL || 'http://localhost:3000/'
-const TILES = ['Lists', 'Check in', 'Body', 'Recovery', 'Lifting', 'Progress', 'Notes', 'Reminders']
+const TILES = ['Lists', 'Check in', 'Body', 'Recovery', 'Lifting', 'Progress', 'Notes', 'Screen time', 'Reminders']
 const WIDTH = 390
 
 /**

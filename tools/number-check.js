@@ -57,6 +57,11 @@ const TARGETS = [
   // widest case is not a big number but a long day name. '22:30' next to
   // 'Wednesday' is the one that has to survive 320px.
   { tile: 'reminders', sel: '.posterHero .num, .posterHero .unit' },
+  // Two things to measure here, not one. The hero is '13h 47m', which is
+  // seven glyphs where Body's worst case is five. The pill under it carries a
+  // number too ('2h 14m over') and on a heavy day it is the WIDER of the two,
+  // so measuring only the hero would miss the thing most likely to overflow.
+  { tile: 'screentime', sel: '.posterHero .num, .posterHero .unit, .posterFoot .pill' },
 ]
 
 const MIN_READABLE = 11
@@ -136,7 +141,14 @@ const SEED = {
       { id:'rb', title:'Weigh in before breakfast', body:'',
         time:'07:00', repeat:'weekdays', days:[], date:'', enabled:true, sticky:true,
         tz:'Europe/Zurich', createdAt:day(7) + 'T09:00:00.000Z', updatedAt:day(7) + 'T09:00:00.000Z' }
-    ] }
+    ] },
+  // DELIBERATELY A HEAVY DAY, and a target well under it. 827 minutes renders
+  // '13h 47m' - seven glyphs, the longest this hero ever gets - and being 647
+  // minutes past a 3h target puts '10h 47m over' in the pill beneath it. Both
+  // are the wide end of plausible, which is the only question this tool
+  // answers. A gentle 2h day would fit anywhere and prove nothing.
+  'v:tile:screentime': { v:1, goalMin:180, days:{ [TODAY]:
+      { min:827, pickups:142, apps:{ Instagram:203, YouTube:186, Safari:141 } } } },
 }
 
 /**

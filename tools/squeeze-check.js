@@ -24,7 +24,7 @@
 const { chromium } = require('playwright')
 
 const URL = process.env.BOARD_URL || 'http://localhost:3000/'
-const TILES = ['Lists', 'Check in', 'Body', 'Recovery', 'Lifting', 'Progress', 'Notes', 'Reminders']
+const TILES = ['Lists', 'Check in', 'Body', 'Recovery', 'Lifting', 'Progress', 'Notes', 'Screen time', 'Reminders']
 // 320 is the narrowest phone that has to work; 430 is a Pro Max. If it reads
 // at 320 it reads everywhere.
 const WIDTHS = [320, 390]
@@ -81,7 +81,17 @@ const SEED = {
       tz:'Europe/Zurich', createdAt:day(7) + 'T09:00:00.000Z', updatedAt:day(7) + 'T09:00:00.000Z' },
     { id:'rb', title:'Weigh in before breakfast, before anything else', body:'',
       time:'07:00', repeat:'days', days:[1,3,5], date:'', enabled:false, sticky:true,
-      tz:'Europe/Zurich', createdAt:day(7) + 'T09:00:00.000Z', updatedAt:day(7) + 'T09:00:00.000Z' }] }
+      tz:'Europe/Zurich', createdAt:day(7) + 'T09:00:00.000Z', updatedAt:day(7) + 'T09:00:00.000Z' }] },
+  // THE OTHER ROW SHAPED LIKE THE ONE THIS CHECK EXISTS FOR. An app name sits
+  // in a row beside a fixed-width duration and a percentage, and the name is
+  // the only part that can give - the exact geometry that measured Lists'
+  // titles at 0px wide. The unrecognised bundle id is on purpose: the export
+  // prints the raw id when it has no name for an app, and that is far longer
+  // than 'Safari' and is what will actually be on his board.
+  'v:tile:screentime': { v:1, goalMin:180, days:{ [TODAY]:
+      { min:412, pickups:97, apps:{
+        'com.some.verylongbundleidentifier.thatnobodymapped': 143,
+        Instagram: 121, YouTube: 88, Safari: 60 } } } }
 }
 
 /**

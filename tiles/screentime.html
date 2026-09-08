@@ -1,0 +1,1097 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Screen time</title>
+<!--
+  Vitality tile: screentime
+  Hours on the phone, one number a day, read as a trend and not as a verdict.
+
+  store shape via Vitality.save/load:
+    {
+      v: 1,
+      goalMin: 180,                  // optional daily target in minutes, 0 = none
+      days: { "YYYY-MM-DD": {
+          min,       // total screen minutes that day
+          pickups,   // optional, integer
+          apps       // optional { "App name": minutes }
+      } }
+    }
+
+  WHAT APPLE ACTUALLY ALLOWS, so nobody re-litigates this. Written 2026-09-07.
+
+  There is NO public API for Screen Time usage. The DeviceActivity and
+  FamilyControls frameworks are native only, need an entitlement, and render
+  their numbers inside a privacy extension that the containing app cannot read
+  and that has no network. Shortcuts has no action for it either. So no web
+  page, no Shortcut and no server can ask an iPhone what its screen time was.
+  Anything claiming otherwise is describing something that does not exist.
+
+  Everything here therefore arrives one of three ways, and the tile always says
+  which, because a number whose origin is hidden is a number you cannot check:
+
+    typed   read off Settings > Screen Time and entered here.
+    mac     the only fully automatic path to Apple's OWN figures. With Screen
+            Time "Share Across Devices" on, the iPhone's rows sync into the
+            Mac's local knowledgeC.db, and tools/screentime-export.sh reads
+            them and calls screentime_auto_upsert (supabase/screentime.sql).
+            Apple syncs that on its own schedule, so it lags by minutes to
+            about an hour. It is not live and this tile never pretends it is.
+    live    iPhone Shortcuts personal automations on app open and app close,
+            each calling screentime_app_event. This IS near real time, and it
+            is an approximation: it only sees apps you set an automation for,
+            and a close that never fires is dropped rather than guessed.
+
+  THE AUTOMATION HAS ITS OWN SLOT AND THIS TILE NEVER WRITES IT, the same law
+  body:auto and recovery:auto already follow. It lands in 'screentime:auto',
+  read here through Vitality.loadAuto():
+
+    { days: { "YYYY-MM-DD": {
+        min, pickups, apps,        // the authoritative day, from the Mac
+        live, liveApps,            // minutes accumulated from open/close events
+        src, at
+    } },
+      open: { "<app>": "<iso>" } }  // sessions still running
+
+  min AND live ARE NEVER ADDED TOGETHER. They are two different measurements of
+  the same hours, not two parts of it, so summing them would double the day.
+  min wins where it exists because it is Apple's own count; live is what shows
+  before the Mac has caught up. Which one is on screen is always labelled.
+
+  TYPED ALWAYS WINS over both, so a day entered by hand is never replaced. The
+  automatic readings are held in memory only and re-read on every boot: copying
+  them into `days` would destroy the one thing worth knowing afterwards, which
+  is which days were measured and which were remembered.
+
+  reports one stream:
+    key   "screen_minutes"
+    label "Screen time"
+    kind  "duration"
+    value total MINUTES on screen that day, never hours. One unit in a ledger
+          column, or the column means nothing.
+    goalDirection "down"
+
+  WHY "down" IS NOT AN INVENTED FACT, given Body deliberately reports neutral.
+  Body is neutral because this file cannot know whether someone is cutting or
+  bulking. Here the intent was stated: screen time was weighted into "Feel good
+  every day" and "Show up every day" in weights.ts, and both of those improve
+  as the hours fall. The direction is recorded intent, not a health claim.
+
+  NOTHING HERE IS RED, and none of the copy is a telling off. Over target is
+  amber and is worded as an observation about the day. A phone is not a
+  failing build.
+
+  THIS TILE NEVER FETCHES. It is sealed: no network, no key, no Apple API.
+-->
+<style>
+  :root{
+    --bg:#050505;
+    --card:rgba(9,13,12,0.72);
+    --border:rgba(148,163,158,0.16);
+    --text:#E7ECEA;
+    --muted:#94A39E;
+    --faint:#5C6B66;
+    --mint:#6EE7B7;
+    --amber:#FCD34D;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    min-height:100vh;
+    background:transparent;
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    accent-color:var(--mint);
+    overflow-x:hidden;
+  }
+  /* SAFE AREA INSETS BELONG TO PAGE MODE ONLY. In the grid this tile is a card
+     in the middle of the board, nowhere near the screen edge, and the shell
+     already keeps its own distance from the notch. Putting these on `body`
+     unconditionally is the bug that pushed the check-in score below its own
+     fold on Ruben's phone, invisible on every desktop where env() is 0.
+     tiles/sealed.test.js enforces this scoping across every tile. */
+  html[data-mode="page"] body{
+    background:var(--bg);
+    padding-top:env(safe-area-inset-top);
+    padding-right:env(safe-area-inset-right);
+    padding-bottom:env(safe-area-inset-bottom);
+    padding-left:env(safe-area-inset-left);
+  }
+
+  ::selection{ background:rgba(110,231,183,.28); }
+
+  .eyebrow{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin:0;
+  }
+  .hero{ font-family:Georgia,"Times New Roman",serif; font-weight:400; line-height:1; }
+  .pill{
+    display:inline-flex; align-items:center;
+    border-radius:999px;
+    border:1px solid rgba(110,231,183,.35);
+    padding:4px 10px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px; letter-spacing:.08em;
+    color:var(--mint); white-space:nowrap;
+  }
+  .pill.quiet{ border-color:var(--border); color:var(--muted); }
+  .pill.warm{ border-color:rgba(252,211,77,.4); color:var(--amber); }
+
+  /* poster */
+  .posterView{
+    display:flex; flex-direction:column; justify-content:center;
+    gap:10px; height:100%; min-height:100vh; padding:20px;
+  }
+  /* NOT opacity:0 plus an entrance animation - see checkin.html and
+     vault/decisions.md. Chromium sometimes never starts a fresh iframe's CSS
+     animation and the poster stays invisible for ever. */
+  .posterHero{ display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; }
+  /* A SEALED TILE'S vw IS THE TILE, NOT THE SCREEN: an iframe carries its own
+     viewport, so this tracks the card at every breakpoint. A fixed size was
+     measured overflowing a 320px phone by 18px on another tile, which is what
+     tools/number-check.js exists to catch. "4h 32m" is six glyphs, wider than
+     a body weight, so the vw term here is tuned lower than Body's. */
+  .posterHero .num{ font-size:clamp(22px,15vw,40px); }
+  .posterHero .unit{ font-size:13px; color:var(--muted); }
+  .posterEmpty{ font-size:13px; color:var(--faint); }
+  .posterFoot{ display:flex; gap:7px; flex-wrap:wrap; }
+  /* 11px, NOT the 10px every other pill on this board uses, and the difference
+     is that this one carries a NUMBER rather than a word. "10h 47m over" is
+     the second thing read on this poster and it has to survive a 320px phone.
+     tools/number-check.js measures anything numeric against an 11px floor and
+     failed this at 10px on all five widths - the elsewhere pills are labels
+     like "last night", which is why nobody has hit it before. */
+  .posterFoot .pill{ font-size:11px; }
+
+  /* page */
+  .pageView{ display:none; }
+  html[data-mode="page"] .pageView{
+    display:block; min-height:100vh;
+    padding:28px 20px calc(40px + env(safe-area-inset-bottom));
+    max-width:560px; margin:0 auto;
+  }
+  html[data-mode="page"] .posterView{ display:none; }
+
+  .pageHero{ display:flex; align-items:baseline; gap:12px; margin:10px 0 22px; flex-wrap:wrap; }
+  .pageHero .num{ font-size:clamp(30px,11vw,52px); }
+  .pageHero .unit{ font-size:14px; color:var(--muted); }
+  /* The pill here says where the number came from, and that sentence is the
+     one string in this tile whose length is not up to me - it grows with the
+     source name. Every other pill on the board is nowrap because it holds two
+     words. Letting this one wrap costs nothing and means a longer source can
+     never be silently clipped, which is the failure clip-check.js exists to
+     find and which it cannot see for a source it has no way to seed. */
+  .pageHero .pill{ white-space:normal; }
+
+  .trouble{
+    margin:0 0 16px; padding:10px 14px;
+    border:1px solid rgba(252,211,77,.32); border-radius:12px;
+    background:rgba(252,211,77,.06); color:var(--amber); font-size:13px;
+  }
+
+  .block{
+    background:var(--card); border:1px solid var(--border);
+    border-radius:18px; padding:18px; margin-bottom:12px;
+  }
+  .blockTitle{ margin:0 0 12px; }
+
+  .field{ margin-bottom:10px; }
+  .fieldLabel{
+    display:block; margin-bottom:6px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
+  }
+  input[type="number"]{
+    width:100%; min-height:46px;
+    background:transparent; border:1px solid var(--border); border-radius:12px;
+    padding:10px 12px; color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif; font-size:15px;
+  }
+  input::placeholder{ color:var(--faint); }
+  input:disabled{ opacity:.4; }
+
+  .pair{ display:flex; gap:8px; }
+  .pair .field{ flex:1; }
+
+  .saveBtn{
+    width:100%; margin-top:4px;
+    background:var(--mint); color:#04120c;
+    border:0; border-radius:999px; min-height:50px;
+    font-size:15px; font-weight:600;
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    cursor:pointer; transition:transform .14s ease, opacity .2s ease;
+  }
+  .saveBtn:active{ transform:scale(.97); }
+  .saveBtn:disabled{ opacity:.45; cursor:not-allowed; }
+
+  /* the day, and where each number came from */
+  .verdict{ display:flex; align-items:center; gap:11px; flex-wrap:wrap; }
+  .verdictGlyph{ flex:none; display:flex; align-items:center; justify-content:center; color:var(--muted); }
+  .verdictGlyph svg{ width:19px; height:19px; }
+  .verdictGlyph.good{ color:var(--mint); }
+  .verdictGlyph.warm{ color:var(--amber); }
+  .verdictName{ font-size:26px; }
+  .verdictName.good{ color:var(--mint); }
+  .verdictName.warm{ color:var(--amber); }
+  .verdictNote{ font-size:13px; color:var(--muted); }
+
+  /* per app rows.
+     THE NAME GETS A REAL FLOOR, NEVER min-width:0. In a row of fixed-width
+     figures the name is the only thing that can give, and min-width:0 lets it
+     give all of it - Lists' titles measured literally 0px wide and read as one
+     letter per line. A floor plus flex-wrap drops the figures to a second line
+     instead of crushing the word. tools/squeeze-check.js measures this. */
+  .appRow{
+    display:flex; align-items:baseline; justify-content:space-between;
+    gap:10px; padding:9px 0; border-top:1px solid var(--border); flex-wrap:wrap;
+  }
+  .appRow:first-child{ border-top:0; }
+  .appName{ font-size:13px; flex:1 1 auto; min-width:min(100%, 11rem); overflow-wrap:anywhere; }
+  .appRight{ display:flex; align-items:baseline; gap:9px; white-space:nowrap; flex:0 0 auto; }
+  .appVal{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:12px; color:var(--text); font-variant-numeric:tabular-nums;
+  }
+  .appShare{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10px; color:var(--faint); }
+
+  .srcRow{ display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .srcTag{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--faint);
+  }
+
+  .fine{ margin:14px 0 0; font-size:11.5px; line-height:1.5; color:var(--faint); }
+  .empty{ color:var(--faint); font-size:13px; }
+  .waiting{ font-size:13px; color:var(--muted); line-height:1.5; margin:0; }
+
+  /* 7 day chart */
+  .chart{ display:flex; align-items:flex-end; gap:7px; height:78px; margin-top:14px; }
+  .bar{ flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; }
+  .barFill{ width:100%; border-radius:5px; background:rgba(110,231,183,.5); min-height:3px; }
+  .barFill.today{ background:var(--mint); }
+  .barFill.over{ background:rgba(252,211,77,.55); }
+  .barFill.over.today{ background:var(--amber); }
+  .barFill.none{ background:rgba(148,163,158,.16); }
+  .chartDays{ display:flex; gap:7px; margin-top:7px; }
+  .chartDay{
+    flex:1; text-align:center;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:9.5px; letter-spacing:.06em; color:var(--faint);
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .posterView{ animation:none; opacity:1; }
+    .saveBtn{ transition:none; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="posterView" id="posterView">
+    <p class="eyebrow">Screen time</p>
+    <div class="posterHero" id="posterHero"></div>
+    <div class="posterFoot" id="posterFoot"></div>
+  </div>
+
+  <div class="pageView" id="pageView">
+    <p class="eyebrow">Screen time</p>
+    <div class="pageHero" id="pageHero"></div>
+
+    <p class="trouble" id="trouble" hidden></p>
+
+    <div class="block">
+      <p class="eyebrow blockTitle">Today</p>
+      <div id="verdictWrap"></div>
+    </div>
+
+    <div class="block">
+      <p class="eyebrow blockTitle">Where the day went</p>
+      <div id="appsWrap"></div>
+    </div>
+
+    <div class="block">
+      <p class="eyebrow blockTitle">Last 7 days</p>
+      <div id="chartWrap"></div>
+    </div>
+
+    <div class="block">
+      <p class="eyebrow blockTitle">Log today by hand</p>
+      <div class="pair">
+        <div class="field">
+          <label class="fieldLabel" for="inH">Hours</label>
+          <input type="number" id="inH" inputmode="numeric" step="1" min="0" max="24" placeholder="4" disabled>
+        </div>
+        <div class="field">
+          <label class="fieldLabel" for="inM">Minutes</label>
+          <input type="number" id="inM" inputmode="numeric" step="1" min="0" max="59" placeholder="32" disabled>
+        </div>
+        <div class="field">
+          <label class="fieldLabel" for="inP">Pickups</label>
+          <input type="number" id="inP" inputmode="numeric" step="1" min="0" placeholder="87" disabled>
+        </div>
+      </div>
+      <button class="saveBtn" id="saveBtn" type="button" disabled>Save today</button>
+      <p class="fine">Settings, then Screen Time, then today. A day you type here always
+      wins over anything that arrived on its own, and a blank box stores nothing
+      rather than a zero.</p>
+    </div>
+
+    <div class="block">
+      <p class="eyebrow blockTitle">Daily target</p>
+      <div class="field">
+        <label class="fieldLabel" for="inGoal">Minutes a day, blank for none</label>
+        <input type="number" id="inGoal" inputmode="numeric" step="15" min="0" max="1440" placeholder="180" disabled>
+      </div>
+      <button class="saveBtn" id="goalBtn" type="button" disabled>Set target</button>
+      <p class="fine">A target only changes the colour of a bar and the sentence above it.
+      Nothing here is a score and nothing here is a telling off.</p>
+    </div>
+
+    <p class="fine" id="sourceNote"></p>
+  </div>
+
+<script>
+// The Vitality bridge. postMessage only: a sealed tile has no storage of its
+// own, so save/load/report all travel to the host and back.
+(function(){
+  'use strict';
+
+  var seq = 0;
+  var pending = {};
+  var writeErrorHandlers = [];
+
+  window.addEventListener('message', function (e) {
+    var msg = e.data;
+    if (!msg || msg.source !== 'vitality-host') return;
+    if (msg.type === 'load:result') {
+      var p = pending[msg.id];
+      if (p) { delete pending[msg.id]; p.resolve({ ok: true, data: msg.data }); }
+      return;
+    }
+    if (msg.type === 'loadAuto:result') {
+      var pa = pending[msg.id];
+      if (pa) { delete pending[msg.id]; pa.resolve({ ok: !!msg.ok, data: msg.data || null }); }
+      return;
+    }
+    if (msg.type === 'save:error' || msg.type === 'report:error') {
+      writeErrorHandlers.forEach(function (fn) { fn(msg.type, msg.reason); });
+    }
+  });
+
+  function post(type, payload) {
+    var msg = { source: 'vitality-tile', type: type };
+    for (var k in payload) { if (Object.prototype.hasOwnProperty.call(payload, k)) msg[k] = payload[k]; }
+    parent.postMessage(msg, '*');
+    return msg;
+  }
+
+  window.Vitality = {
+    save: function (data) { post('save', { data: data }); },
+
+    /**
+     * Resolves { ok, data }. ok:false means the host never answered, NOT that
+     * the slot is empty. Treating an unanswered load as "you have nothing"
+     * lets the next save write that emptiness over real data.
+     */
+    load: function () {
+      var id = 'l' + (++seq);
+      return new Promise(function (resolve) {
+        pending[id] = { resolve: resolve };
+        post('load', { id: id });
+        var tries = 0;
+        var retry = setInterval(function () {
+          if (!pending[id]) { clearInterval(retry); return; }
+          if (++tries > 12) {
+            clearInterval(retry);
+            delete pending[id];
+            resolve({ ok: false, data: null });
+            return;
+          }
+          post('load', { id: id });
+        }, 800);
+      });
+    },
+
+    report: function (stream) { post('report', { stream: stream }); },
+
+    /**
+     * The automation's half: slot "screentime:auto", written by
+     * screentime_auto_upsert and screentime_app_event (supabase/screentime.sql).
+     * Read only - there is no saveAuto, on purpose, so the automation's slot
+     * and the typed slot can never overwrite each other.
+     *
+     * A SINGLE ATTEMPT, not load()'s retry loop. load() retries because an
+     * unanswered load must never be mistaken for an empty vault: the next save
+     * would write that emptiness over real history. Nothing is ever written on
+     * the strength of this answer, so a quiet host just means no automatic
+     * readings are shown. A host that has never heard of loadAuto - the hosted
+     * Vitality board - simply never replies, and this resolves empty.
+     */
+    loadAuto: function () {
+      var id = 'a' + (++seq);
+      return new Promise(function (resolve) {
+        pending[id] = { resolve: resolve };
+        post('loadAuto', { id: id });
+        setTimeout(function () {
+          if (!pending[id]) return;
+          delete pending[id];
+          resolve({ ok: false, data: null });
+        }, 2500);
+      });
+    },
+
+    onWriteError: function (fn) { writeErrorHandlers.push(fn); }
+  };
+})();
+</script>
+
+<script>
+(function(){
+  'use strict';
+
+  var mode = location.hash === '#page' ? 'page' : 'grid';
+  document.documentElement.setAttribute('data-mode', mode);
+
+  var state = { v: 1, goalMin: 0, days: {} };
+  var autoDays = {};       // "YYYY-MM-DD" -> the auto row. Memory only, never saved.
+  var openNow = {};        // app -> iso start, sessions still running
+  var loaded = false;
+  var trouble = '';
+  var draft = { h: '', m: '', p: '' };
+  var goalDraft = '';
+
+  var SPAN = 7;            // days in the chart
+  var TOP_APPS = 6;        // rows in the breakdown
+  var REFRESH_MS = 60000;  // how often the page re-reads the automation's slot
+  var BACKFILL = 30;       // days looked at when pushing automatic days to the ledger
+
+  function pad(n){ n = String(n); return n.length < 2 ? '0' + n : n; }
+  function dayKey(d){
+    // Local getters, never toISOString: that is UTC and drifts a day.
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+  function today(){ return dayKey(new Date()); }
+  function daysAgo(n){ var d = new Date(); d.setDate(d.getDate() - n); return d; }
+
+  function num(v){
+    if (v === null || v === undefined || v === '') return null;
+    var n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+
+  /** 272 -> "4h 32m". Under an hour keeps its own shape rather than "0h 41m". */
+  function hm(mins){
+    if (mins == null || !isFinite(mins)) return '';
+    var t = Math.max(0, Math.round(mins));
+    var h = Math.floor(t / 60);
+    var m = t % 60;
+    if (h === 0) return m + 'm';
+    if (m === 0) return h + 'h';
+    return h + 'h ' + m + 'm';
+  }
+
+  // ── reading a day. Typed first, then the Mac's count, then the live events.
+  //    Never a sum of the last two: they measure the same hours, not two
+  //    halves of them.
+  function typedOn(key){
+    var e = state.days[key];
+    if (!e || typeof e !== 'object') return null;
+    var m = num(e.min);
+    return (m != null && m >= 0) ? e : null;
+  }
+  function autoOn(key){
+    var e = autoDays[key];
+    return (e && typeof e === 'object') ? e : null;
+  }
+
+  /**
+   * The one number for a day, and where it came from. Returns null when the day
+   * genuinely has nothing, which renders an empty state rather than a zero: a
+   * day nobody measured is not a day with no screen time.
+   */
+  function readOn(key){
+    var t = typedOn(key);
+    if (t) {
+      return { min: num(t.min), pickups: num(t.pickups), apps: t.apps || null,
+               src: 'typed', at: null, partial: false };
+    }
+    var a = autoOn(key);
+    if (!a) return null;
+    var m = num(a.min);
+    if (m != null && m >= 0) {
+      return { min: m, pickups: num(a.pickups), apps: a.apps || null,
+               src: a.src || 'auto', at: a.at || null, partial: false };
+    }
+    var live = num(a.live);
+    if (live != null && live > 0) {
+      // PARTIAL ON PURPOSE. App automations only see apps that have one, so
+      // this is a floor on the day, never the day. Labelling it as anything
+      // else would be the made up number the house rules forbid.
+      return { min: live, pickups: null, apps: a.liveApps || null,
+               src: 'live', at: a.at || null, partial: true };
+    }
+    return null;
+  }
+
+  function srcWords(src){
+    if (src === 'typed') return 'typed in by hand';
+    if (src === 'live') return 'from app automations, still counting';
+    if (src === 'mac-knowledgec') return 'from Apple Screen Time, via the Mac';
+    return 'from ' + String(src);
+  }
+
+  function daysMeasured(){
+    var seen = {};
+    Object.keys(state.days).forEach(function (k) { if (typedOn(k)) seen[k] = 1; });
+    Object.keys(autoDays).forEach(function (k) { if (readOn(k)) seen[k] = 1; });
+    return Object.keys(seen).length;
+  }
+
+  function persist(){
+    if (!loaded) return;
+    if (window.Vitality) Vitality.save(state);
+  }
+
+  /**
+   * One stream, in MINUTES. A partial live figure is deliberately NOT reported:
+   * the ledger is what a local model reads later and what weights.ts turns into
+   * y, and a floor-on-the-day filed as the day would quietly understate every
+   * day the Mac had not caught up on yet. It reaches the ledger once it is a
+   * real count.
+   */
+  function report(key){
+    if (!loaded || !window.Vitality) return;
+    var r = readOn(key);
+    if (!r || r.min == null || r.partial) return;
+    Vitality.report({
+      key: 'screen_minutes',
+      label: 'Screen time',
+      value: Math.round(r.min),
+      date: key,
+      kind: 'duration',
+      goalDirection: 'down'
+    });
+  }
+
+  /** Every automatic day in the window, so a backfilled export reaches the ledger. */
+  function reportAuto(){
+    if (!loaded || !window.Vitality) return;
+    for (var i = 0; i <= BACKFILL; i++) {
+      var key = dayKey(daysAgo(i));
+      if (!typedOn(key) && readOn(key)) report(key);
+    }
+  }
+
+  // glyphs, drawn not typed
+  function icoUnder(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M20 6L9 17l-5-5"/></svg>';
+  }
+  function icoOver(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+  }
+  function icoLevel(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M3 12h18"/></svg>';
+  }
+
+  // ── render
+  function heroInto(el, emptyText){
+    if (!el) return;
+    el.innerHTML = '';
+    var r = readOn(today());
+    if (!r || r.min == null) {
+      var e = document.createElement('span');
+      e.className = 'posterEmpty';
+      e.textContent = emptyText;
+      el.appendChild(e);
+      return;
+    }
+    var n = document.createElement('span');
+    n.className = 'num hero';
+    n.textContent = hm(r.min);
+    var unit = document.createElement('span');
+    unit.className = 'unit';
+    unit.textContent = 'on screen';
+    el.appendChild(n);
+    el.appendChild(unit);
+  }
+
+  function renderPoster(){
+    heroInto(document.getElementById('posterHero'), 'nothing logged today');
+    var foot = document.getElementById('posterFoot');
+    if (!foot) return;
+    foot.innerHTML = '';
+    var r = readOn(today());
+    if (!r || r.min == null) return;
+
+    if (r.partial) {
+      var p = document.createElement('span');
+      p.className = 'pill quiet';
+      p.textContent = 'so far';
+      foot.appendChild(p);
+    }
+    if (state.goalMin > 0) {
+      var g = document.createElement('span');
+      var over = r.min > state.goalMin;
+      g.className = over ? 'pill warm' : 'pill';
+      g.textContent = over ? hm(r.min - state.goalMin) + ' over' : hm(state.goalMin - r.min) + ' left';
+      foot.appendChild(g);
+    }
+  }
+
+  function renderPageHero(){
+    var el = document.getElementById('pageHero');
+    heroInto(el, 'nothing logged today yet');
+    if (!el) return;
+    var r = readOn(today());
+    if (!r || r.min == null) return;
+    var pill = document.createElement('span');
+    pill.className = 'pill quiet';
+    pill.textContent = srcWords(r.src);
+    el.appendChild(pill);
+  }
+
+  function renderVerdict(){
+    var wrap = document.getElementById('verdictWrap');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+
+    var r = readOn(today());
+    if (!r || r.min == null) {
+      var p0 = document.createElement('p');
+      p0.className = 'waiting';
+      p0.textContent = 'Nothing has arrived for today. Either the Mac has not run its export ' +
+        'yet, or none of the apps you have opened has an automation, or you can just type the ' +
+        'number in below.';
+      wrap.appendChild(p0);
+      return;
+    }
+
+    var hasGoal = state.goalMin > 0;
+    var over = hasGoal && r.min > state.goalMin;
+    var tone = hasGoal ? (over ? 'warm' : 'good') : '';
+    var glyph = hasGoal ? (over ? icoOver() : icoUnder()) : icoLevel();
+
+    var name, note;
+    if (!hasGoal) {
+      name = hm(r.min);
+      note = 'on screen. No target set, so this is a count and nothing more.';
+    } else if (over) {
+      name = hm(r.min - state.goalMin) + ' over';
+      note = 'past the ' + hm(state.goalMin) + ' you picked.';
+    } else {
+      name = hm(state.goalMin - r.min) + ' left';
+      note = 'of the ' + hm(state.goalMin) + ' you picked.';
+    }
+    if (r.partial) note += ' Counting only the apps that have an automation, so the real day is longer.';
+
+    var row = document.createElement('div');
+    row.className = 'verdict';
+
+    var g = document.createElement('span');
+    g.className = 'verdictGlyph' + (tone ? ' ' + tone : '');
+    g.innerHTML = glyph;
+
+    var nm = document.createElement('span');
+    nm.className = 'verdictName hero' + (tone ? ' ' + tone : '');
+    nm.textContent = name;
+
+    var nt = document.createElement('span');
+    nt.className = 'verdictNote';
+    nt.textContent = note;
+
+    row.appendChild(g);
+    row.appendChild(nm);
+    row.appendChild(nt);
+    wrap.appendChild(row);
+
+    // The SOURCE is deliberately not repeated here. It is already on the pill
+    // under the hero, about two hundred pixels up the same screen, and having
+    // "typed in by hand" twice in one view reads as a rendering bug rather
+    // than as emphasis. This row carries what the hero does not.
+    var src = document.createElement('div');
+    src.className = 'srcRow';
+    if (r.pickups != null) {
+      var pk = document.createElement('span');
+      pk.className = 'srcTag';
+      pk.textContent = Math.round(r.pickups) + ' pickups';
+      src.appendChild(pk);
+    }
+    var running = Object.keys(openNow);
+    if (running.length) {
+      var run = document.createElement('span');
+      run.className = 'pill quiet';
+      run.textContent = running.length === 1 ? running[0] + ' open now' : running.length + ' apps open now';
+      src.appendChild(run);
+    }
+    wrap.appendChild(src);
+  }
+
+  function renderApps(){
+    var wrap = document.getElementById('appsWrap');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+
+    var r = readOn(today());
+    var apps = r && r.apps && typeof r.apps === 'object' ? r.apps : null;
+    var names = apps ? Object.keys(apps).filter(function (k) {
+      var v = num(apps[k]);
+      return v != null && v > 0;
+    }) : [];
+
+    if (!names.length) {
+      var none = document.createElement('p');
+      none.className = 'empty';
+      none.textContent = 'no per-app breakdown for today';
+      wrap.appendChild(none);
+      return;
+    }
+
+    names.sort(function (a, b) { return num(apps[b]) - num(apps[a]); });
+    var total = 0;
+    names.forEach(function (n) { total += num(apps[n]); });
+
+    names.slice(0, TOP_APPS).forEach(function (n) {
+      var v = num(apps[n]);
+      var row = document.createElement('div');
+      row.className = 'appRow';
+
+      var nm = document.createElement('div');
+      nm.className = 'appName';
+      nm.textContent = n;
+
+      var right = document.createElement('div');
+      right.className = 'appRight';
+
+      var val = document.createElement('span');
+      val.className = 'appVal';
+      val.textContent = hm(v);
+
+      var share = document.createElement('span');
+      share.className = 'appShare';
+      share.textContent = total > 0 ? Math.round((v / total) * 100) + '%' : '';
+
+      right.appendChild(val);
+      right.appendChild(share);
+      row.appendChild(nm);
+      row.appendChild(right);
+      wrap.appendChild(row);
+    });
+
+    if (names.length > TOP_APPS) {
+      var more = document.createElement('p');
+      more.className = 'fine';
+      more.textContent = (names.length - TOP_APPS) + ' more apps below these.';
+      wrap.appendChild(more);
+    }
+    // The share is of what is listed, which is not always the whole day. Saying
+    // "58% of your day" when the breakdown only accounts for half of it would
+    // be a made up number with a mint dot next to it.
+    var fine = document.createElement('p');
+    fine.className = 'fine';
+    fine.textContent = 'Percentages are of the ' + hm(total) + ' this breakdown accounts for' +
+      (r && r.min != null && Math.round(total) !== Math.round(r.min)
+        ? ', not of the ' + hm(r.min) + ' total.' : '.');
+    wrap.appendChild(fine);
+  }
+
+  function renderChart(){
+    var wrap = document.getElementById('chartWrap');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+
+    var days = [];
+    var max = 0;
+    for (var i = SPAN - 1; i >= 0; i--) {
+      var d = daysAgo(i);
+      var key = dayKey(d);
+      var r = readOn(key);
+      var v = r ? r.min : null;
+      if (v != null && v > max) max = v;
+      days.push({ key: key, min: v, date: d });
+    }
+
+    var any = days.some(function (d) { return d.min != null; });
+    if (!any) {
+      var none = document.createElement('p');
+      none.className = 'empty';
+      none.textContent = 'nothing logged in the last 7 days';
+      wrap.appendChild(none);
+      return;
+    }
+
+    // A sane ceiling so a steady week still reads as a shape rather than seven
+    // full bars, and so a target has somewhere to sit above it.
+    var ceil = Math.max(max, state.goalMin > 0 ? state.goalMin * 1.25 : 0, 120);
+
+    var chart = document.createElement('div');
+    chart.className = 'chart';
+    var labels = document.createElement('div');
+    labels.className = 'chartDays';
+    var t = today();
+
+    days.forEach(function (d) {
+      var bar = document.createElement('div');
+      bar.className = 'bar';
+      var fill = document.createElement('div');
+      // A day with no reading gets a flat trace, never a zero bar. Zero minutes
+      // on a phone is a real and remarkable number, and drawing "not measured"
+      // that way would be inventing one.
+      var over = state.goalMin > 0 && d.min != null && d.min > state.goalMin;
+      fill.className = 'barFill' + (d.key === t ? ' today' : '') +
+        (over ? ' over' : '') + (d.min == null ? ' none' : '');
+      fill.style.height = d.min == null ? '3px' : Math.max(4, (d.min / ceil) * 78) + 'px';
+      bar.appendChild(fill);
+      chart.appendChild(bar);
+
+      var lab = document.createElement('div');
+      lab.className = 'chartDay';
+      lab.textContent = ['S', 'M', 'T', 'W', 'T', 'F', 'S'][d.date.getDay()];
+      labels.appendChild(lab);
+    });
+
+    wrap.appendChild(chart);
+    wrap.appendChild(labels);
+
+    var have = daysMeasured();
+    if (have < 3) {
+      var fine = document.createElement('p');
+      fine.className = 'fine';
+      fine.textContent = have + (have === 1 ? ' day' : ' days') +
+        ' measured so far. A week of them is where this starts telling you anything.';
+      wrap.appendChild(fine);
+    }
+  }
+
+  function renderControls(){
+    var h = document.getElementById('inH');
+    var m = document.getElementById('inM');
+    var p = document.getElementById('inP');
+    var g = document.getElementById('inGoal');
+    [h, m, p, g].forEach(function (el) { if (el) el.disabled = !loaded; });
+    if (h && document.activeElement !== h) h.value = draft.h;
+    if (m && document.activeElement !== m) m.value = draft.m;
+    if (p && document.activeElement !== p) p.value = draft.p;
+    if (g && document.activeElement !== g) g.value = goalDraft;
+
+    var save = document.getElementById('saveBtn');
+    if (save) {
+      save.disabled = !loaded;
+      save.textContent = typedOn(today()) ? 'Update today' : 'Save today';
+    }
+    var goalBtn = document.getElementById('goalBtn');
+    if (goalBtn) {
+      goalBtn.disabled = !loaded;
+      goalBtn.textContent = state.goalMin > 0 ? 'Change target' : 'Set target';
+    }
+
+    var tr = document.getElementById('trouble');
+    if (tr) { tr.textContent = trouble; tr.hidden = !trouble; }
+  }
+
+  function renderSourceNote(){
+    var el = document.getElementById('sourceNote');
+    if (!el) return;
+    el.textContent = 'Apple publishes no API for Screen Time, so nothing here is read off the ' +
+      'phone directly. It arrives one of three ways and the tile always says which: typed in ' +
+      'here, exported from your Mac where Screen Time syncs across devices, or counted live by ' +
+      'iPhone app automations. This tile is sealed, so it holds no key and cannot reach Apple, ' +
+      'a server or any API on its own.';
+  }
+
+  function renderAll(){
+    renderPoster();
+    renderPageHero();
+    renderControls();
+    renderVerdict();
+    renderApps();
+    renderChart();
+    renderSourceNote();
+  }
+
+  // ── actions
+  function save(){
+    if (!loaded) return;
+    var hEl = document.getElementById('inH');
+    var mEl = document.getElementById('inM');
+    var pEl = document.getElementById('inP');
+    var h = num(hEl && hEl.value);
+    var m = num(mEl && mEl.value);
+    var p = num(pEl && pEl.value);
+
+    // Both time boxes empty means no time was given. Silence beats a wrong row:
+    // an empty form writes nothing and erases nothing.
+    if (h == null && m == null) return;
+    if ((h != null && h < 0) || (m != null && m < 0)) return;
+    var mins = Math.round((h || 0) * 60 + (m || 0));
+    if (!isFinite(mins) || mins < 0 || mins > 1440) return;
+
+    var entry = { min: mins };
+    if (p != null && p >= 0) entry.pickups = Math.round(p);
+
+    // A day typed by hand keeps any per-app breakdown that already arrived for
+    // it. The total is the person's; the breakdown was never theirs to retype.
+    var a = autoOn(today());
+    if (a && a.apps && typeof a.apps === 'object') entry.apps = a.apps;
+
+    state.days[today()] = entry;
+    draft.h = String(Math.floor(mins / 60));
+    draft.m = String(mins % 60);
+    draft.p = entry.pickups == null ? '' : String(entry.pickups);
+
+    persist();
+    report(today());
+    renderAll();
+  }
+
+  function saveGoal(){
+    if (!loaded) return;
+    var el = document.getElementById('inGoal');
+    var g = num(el && el.value);
+    // Blank or zero clears the target, which is a real choice and not an error.
+    state.goalMin = (g != null && g > 0 && g <= 1440) ? Math.round(g) : 0;
+    goalDraft = state.goalMin > 0 ? String(state.goalMin) : '';
+    persist();
+    renderAll();
+  }
+
+  function loadDraftFromToday(){
+    var t = typedOn(today());
+    if (t) {
+      var mins = num(t.min) || 0;
+      draft.h = String(Math.floor(mins / 60));
+      draft.m = String(mins % 60);
+      draft.p = t.pickups == null ? '' : String(t.pickups);
+    }
+    goalDraft = state.goalMin > 0 ? String(state.goalMin) : '';
+  }
+
+  function wire(){
+    ['inH', 'inM', 'inP'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      var k = id === 'inH' ? 'h' : (id === 'inM' ? 'm' : 'p');
+      el.addEventListener('input', function () { draft[k] = el.value; });
+      el.addEventListener('keydown', function (e) { if (e.key === 'Enter') save(); });
+    });
+    var g = document.getElementById('inGoal');
+    if (g) {
+      g.addEventListener('input', function () { goalDraft = g.value; });
+      g.addEventListener('keydown', function (e) { if (e.key === 'Enter') saveGoal(); });
+    }
+    var btn = document.getElementById('saveBtn');
+    if (btn) btn.addEventListener('click', save);
+    var gb = document.getElementById('goalBtn');
+    if (gb) gb.addEventListener('click', saveGoal);
+  }
+
+  /**
+   * Take in whatever the automation's slot currently holds. Called on boot and
+   * again on a timer, which is what makes the live app automations appear while
+   * the page is open rather than only after a refresh.
+   */
+  function takeAuto(a){
+    if (!a || !a.ok || !a.data) return false;
+    var d = a.data.days;
+    if (!d || typeof d !== 'object') return false;
+    var next = {};
+    Object.keys(d).forEach(function (key) {
+      var row = d[key];
+      if (!row || typeof row !== 'object') return;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return;
+      next[key] = row;
+    });
+    autoDays = next;
+    openNow = (a.data.open && typeof a.data.open === 'object') ? a.data.open : {};
+    return true;
+  }
+
+  function pullAuto(){
+    if (!window.Vitality || !Vitality.loadAuto) return;
+    Vitality.loadAuto().then(function (a) {
+      if (takeAuto(a)) { renderAll(); reportAuto(); }
+    });
+  }
+
+  /**
+   * The live half of "syncs to the dashboard". A sealed tile cannot be pushed
+   * to and cannot fetch, so the honest version of live is asking the host again
+   * on a timer - and only while the page is actually in front of someone, so a
+   * board left open in a background tab is not polling a vault all night.
+   *
+   * PAGE MODE ONLY. Six posters each polling their own vault every minute is a
+   * lot of traffic for a number nobody is looking at, and the grid poster is
+   * re-created by the host anyway whenever the page closes.
+   */
+  function startRefresh(){
+    if (mode !== 'page') return;
+    setInterval(function () {
+      if (document.visibilityState === 'hidden') return;
+      pullAuto();
+    }, REFRESH_MS);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') pullAuto();
+    });
+  }
+
+  function boot(){
+    wire();
+    if (!window.Vitality) { loaded = true; renderAll(); return; }
+
+    Vitality.onWriteError(function () {
+      trouble = 'Not saved. Check your connection.';
+      renderAll();
+    });
+
+    Vitality.load().then(function (res) {
+      if (res && res.ok) {
+        loaded = true;
+        var data = res.data;
+        if (data && data.days && typeof data.days === 'object') state.days = data.days;
+        var g = data ? num(data.goalMin) : null;
+        if (g != null && g > 0 && g <= 1440) state.goalMin = Math.round(g);
+        loadDraftFromToday();
+      } else {
+        // The vault never answered. Staying read only is the only safe move: an
+        // empty form saved over real days would wipe them.
+        trouble = 'Could not reach your vault. Nothing was changed, and this stays read only until it answers.';
+      }
+      renderAll();
+
+      /**
+       * The automation's half, asked for AFTER the typed half has landed and
+       * the board has already drawn. Typed always wins and readOn() decides
+       * that by looking at state.days first, so reading the automation into an
+       * empty state.days would paint every day as automatic for a moment and
+       * then correct itself, which looks exactly like the data changing.
+       *
+       * A failure here is not `trouble`: nothing was written, nothing is at
+       * risk, and a board with no export set up must not grow a warning about
+       * it. It just has no automatic days.
+       */
+      if (!loaded || !Vitality.loadAuto) return;
+      Vitality.loadAuto().then(function (a) {
+        if (takeAuto(a)) { renderAll(); reportAuto(); }
+        startRefresh();
+      });
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>
+</body>
+</html>

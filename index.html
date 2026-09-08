@@ -859,9 +859,21 @@ function attrRow(p) {
   else {
     var d = p.detail || {}
     var pair = fmt(d.recent, p.unit) + ' v ' + fmt(d.prior, p.unit)
-    if (p.trend > 0.55) { trend = '↑ ' + pair; cls = 'up' }
-    else if (p.trend < 0.45) { trend = '↓ ' + pair; cls = 'down' }
-    else { trend = '→ ' + pair; cls = 'flat' }
+    /**
+     * THE ARROW FOLLOWS THE NUMBERS, THE COLOUR FOLLOWS WHETHER THAT IS GOOD.
+     *
+     * For every stream up is better, so the two agree and this reads exactly
+     * as it always did. Screen time is the one where they are opposites:
+     * p.trend is high when the minutes FELL, so keeping the arrow tied to the
+     * score would print "↑ 180m v 240m" in mint - an up arrow over a pair of
+     * numbers that plainly went down. The arrow is what someone reads first
+     * and it has to match what they can see.
+     */
+    cls = p.trend > 0.55 ? 'up' : (p.trend < 0.45 ? 'down' : 'flat')
+    var better = p.trend > 0.55
+    var arrow = cls === 'flat' ? '→'
+      : (p.dir === 'down' ? (better ? '↓' : '↑') : (better ? '↑' : '↓'))
+    trend = arrow + ' ' + pair
   }
 
   return '<div class="attr">' +

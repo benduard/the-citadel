@@ -1756,3 +1756,85 @@ is how two copies of a rule drift apart with one of them wrong, which this repo
 has already paid for once. `tools/reminders.test.js` runs the real thing
 against a fake clock: DST in both directions, midnight, the moved reminder, the
 one saved for a time already gone.
+
+## Screen time: what Apple allows, and the three sources that survived it
+
+Added 2026-09-07. The ask was a tile that connects to iPhone Screen Time and
+syncs to the board in real time, so the data can feed a local model later.
+
+THE HARD FACT, so this is never re-litigated: there is NO public API for
+Screen Time usage, for anyone. The DeviceActivity and FamilyControls
+frameworks are native only, require an entitlement from Apple, and render
+their numbers inside a privacy extension that has no network access and whose
+values the containing app cannot read. Shortcuts has no action for it either.
+So no web page, no Shortcut, no server and no key can ask an iPhone what its
+screen time was. Real-time sync of Apple's own figure does not exist and no
+amount of work will produce it. Anything on the App Store claiming to do it is
+doing one of the two things below.
+
+WHAT WAS BUILT INSTEAD. Three sources, in order of how much they can be
+trusted, and the tile always says on screen which one produced a number:
+
+1. TYPED. Read off Settings and entered in the tile. Always wins.
+2. THE MAC. Screen Time syncs across devices, and on a Mac it lands in
+   knowledgeC.db, which the account that owns it can read given Full Disk
+   Access. tools/screentime-export.sh reads it and calls screentime_auto_upsert.
+   These are Apple's own rows. It lags by minutes to about an hour, because
+   Apple syncs on its own schedule. It is the best that exists and it is not
+   live.
+3. LIVE. iPhone Shortcuts automations on app open and app close, calling
+   screentime_app_event, which pairs them server-side. This IS near real time
+   and it only ever sees apps that have an automation, so it is a floor on the
+   day and never the day.
+
+THE RULE THAT MATTERS MOST: the Mac's count and the live count are NEVER added
+together. They measure the same hours, not two halves of them, so summing them
+would double a day - and it would look entirely plausible on the board, which
+is the worst kind of wrong. The tile prefers the Mac's, falls back to live,
+and marks live as partial. tiles/screentime.test.js pins all of it.
+
+A partial live count is also never reported to the ledger. The ledger is what
+weights.ts turns into y and what a local model reads later, and filing a floor
+as a fact would quietly understate every day the Mac had not caught up on.
+
+TWO THINGS DELIBERATELY NOT BUILT. Pickups are not exported from the Mac: the
+count is not in that database and could only be approximated from display-wake
+events, which would be wrong in a way nobody could see afterwards. And the
+total is computed, not copied - there is no stored headline figure to take, so
+the export merges overlapping app sessions and measures the union. It sits
+close to what Settings shows without being identical, and saying so is the
+point.
+
+## The rank could have scored a worsening habit as progress
+
+Same day, and it is the part of the screen time work most worth knowing.
+
+lib/rank.js compares your last fortnight to the one before it, and trendScore()
+reads any RISE as an improvement. That was correct for every stream on this
+board until screen time, because sleep, volume, check-in score and projects
+done are all better when they go up, and body weight is scored rhythm-only
+precisely because nobody stated a direction for it.
+
+screen_minutes is the first stream where fewer is the win. Dropped in as-is, it
+would have pushed the rank UP the more he scrolled - rewarding the exact thing
+the tile was added to watch, while looking like the board working perfectly.
+
+THE FIX is a `dir` field on each row in TILES, defaulting to 'up', and one line
+in scoreTile that flips the trend for 'down'. It is `1 - t`, which is an exact
+mirror rather than an approximation, because trendScore is symmetric about 0.5:
+flat is the middle, a full improvement is 1, a full slide is 0. The test asserts
+the mirror is exact, or the same size of change would be worth more in one
+direction than the other and the rank would drift.
+
+The rank panel in index.html needed the other half. Its arrow was tied to the
+score, so a good screen time fortnight printed "↑ 180m v 240m" in mint - an up
+arrow over two numbers that plainly went down. The arrow now follows the
+NUMBERS and the colour follows whether that was good. They agree for every
+other tile, which is why nobody had to think about it before.
+
+WEIGHTS were recomputed by hand, as lib/rank.js says they must be: screen time
+takes 10 from `feel` and 10 from `showup`, proportionally off the other tiles,
+and nothing from `strong` - hours on a phone do not move a squat, and a weight
+there would be a claim the data cannot support. The rank's own weights are the
+three-goal averages, and the rounding uses largest remainder, because four of
+the six landed on .67 and rounding all four up gave 101.

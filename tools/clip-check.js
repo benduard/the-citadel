@@ -36,7 +36,7 @@
 const { chromium } = require('playwright')
 
 const URL = process.env.BOARD_URL || 'http://localhost:3000/'
-const TILES = ['Lists', 'Check in', 'Body', 'Recovery', 'Lifting', 'Progress', 'Notes', 'Reminders']
+const TILES = ['Lists', 'Check in', 'Body', 'Recovery', 'Lifting', 'Progress', 'Notes', 'Screen time', 'Reminders']
 // 320 is the narrowest phone that has to work. If it reads at 320 it reads
 // everywhere, so a pass here is the one that matters.
 const WIDTHS = [320, 390]
@@ -89,7 +89,13 @@ const SEED = {
       tz:'Europe/Zurich', createdAt:day(7) + 'T09:00:00.000Z', updatedAt:day(7) + 'T09:00:00.000Z' },
     { id:'rc', title:'Renew the parking permit', body:'',
       time:'09:15', repeat:'once', days:[], date:day(-3), enabled:true, sticky:false,
-      tz:'Europe/Zurich', createdAt:TODAY + 'T09:00:00.000Z', updatedAt:TODAY + 'T09:00:00.000Z' }] }
+      tz:'Europe/Zurich', createdAt:TODAY + 'T09:00:00.000Z', updatedAt:TODAY + 'T09:00:00.000Z' }] },
+  // Seeded so the page renders its real controls rather than an empty state:
+  // three number boxes with placeholders in them, and the nowrap pill that
+  // says where the day's figure came from, which is the longest single-line
+  // string on the page and the one thing here that can clip.
+  'v:tile:screentime': { v:1, goalMin:180, days:{ [TODAY]:
+      { min:412, pickups:97, apps:{ Instagram:143, YouTube:121, Safari:88 } } } }
 }
 
 /**

@@ -63,21 +63,43 @@ export const DEFAULT_GOALS: Goal[] = [
     id: 'feel',
     label: 'Feel good every day, consistently.',
     weights: {
-      checkin: 35,  // how you actually felt, in your own words
-      recovery: 30,
-      lifting: 20,  // training serves the feeling here, not the reverse
-      projects: 10, // finishing things you meant to finish
-      body: 5
+      checkin: 32,  // how you actually felt, in your own words
+      recovery: 27,
+      lifting: 18,  // training serves the feeling here, not the reverse
+      screentime: 10,
+      projects: 9,  // finishing things you meant to finish
+      body: 4
     }
   },
   {
     id: 'showup',
     label: 'Show up every day, no matter what.',
     weights: {
-      checkin: 40,  // the log IS the showing up
-      lifting: 25,
-      projects: 20,
-      recovery: 15
+      checkin: 36,  // the log IS the showing up
+      lifting: 22,
+      projects: 18,
+      recovery: 14,
+      screentime: 10
     }
   }
 ]
+
+/**
+ * SCREEN TIME, added 2026-09-07, and the reasoning kept here so it is not
+ * re-argued from scratch in six months.
+ *
+ * It takes 10 from `feel` and 10 from `showup`, and NOTHING from `strong`.
+ * That last part is the point: hours on a phone do not move a squat, and a
+ * weight in `strong` would be this file claiming a relationship the data
+ * cannot support. An honest zero is a real answer.
+ *
+ * The 10 came off the other tiles PROPORTIONALLY rather than out of one of
+ * them, so the balance between checkin, recovery, lifting and the rest is
+ * exactly what it was - the whole set just makes room. Both goals still sum
+ * to 100, which is the one invariant this file has.
+ *
+ * It is worth a weight at all because it is the only tile here that measures
+ * where the day actually went, rather than what was done on purpose. It
+ * reports 'screen_minutes' with goalDirection 'down', so the direction is
+ * recorded intent - stated when it was added - and not a health claim.
+ */

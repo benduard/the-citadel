@@ -9,6 +9,7 @@ node lib/backup.test.js
 node tools/icons.test.js
 node tools/push.test.js
 node tools/push-degrade.test.js
+node tools/screentime-merge.test.js
 node tools/reminders.test.js
 node tiles/lifting.lasttime.test.js
 node tiles/lifting.splits.test.js
@@ -25,6 +26,7 @@ node tiles/lists.test.js
 node tiles/lists.calendar.test.js
 node tiles/lists.day.test.js
 node tiles/notes.test.js
+node tiles/screentime.test.js
 node tiles/sealed.test.js
 echo "All suites passed."
 

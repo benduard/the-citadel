@@ -1,0 +1,1136 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Reminders</title>
+<!--
+  Vitality tile: reminders
+  One job: say a thing you wrote, on your phone, at a time you chose, whether
+  or not this app is open. Nothing else. It measures nothing and judges
+  nothing.
+
+  store shape via Vitality.save/load:
+    {
+      v: 1,
+      items: [
+        {
+          id,                  // 'r' + base36, [a-z0-9] only. THE ROW KEY.
+          title,               // the notification's headline. His words.
+          body,                // the line underneath. May be empty.
+          time,                // 'HH:MM', LOCAL. Never UTC.
+          repeat,              // 'once' | 'daily' | 'weekdays' | 'weekends' | 'days'
+          days,                // [0..6], 0 = Sunday. Only read when repeat = 'days'
+          date,                // 'YYYY-MM-DD'. Only read when repeat = 'once'
+          enabled,             // false is a reminder kept but silenced
+          sticky,              // stays on screen until tapped, where the OS allows
+          tz,                  // IANA zone, e.g. 'Europe/Zurich'
+          createdAt, updatedAt // ISO. updatedAt is load bearing, see below
+        }
+      ]
+    }
+
+  THE TIME IS A RULE, NOT A MOMENT. '07:00' plus a timezone, never an absolute
+  timestamp. 07:00 means 07:00 on the clock in the room - in March and in
+  November, and in a different country next month. An absolute instant would
+  drift an hour twice a year and be wrong the moment he travels.
+
+  updatedAt IS NOT DECORATION. The sender refuses to fire an occurrence that is
+  older than the rule itself, and this is what it compares against. Without it,
+  setting a reminder at 08:00 for 07:30 would go off in his hand the second he
+  saved it, because 07:30 today is still inside the sender's grace window. It
+  is bumped when THAT reminder is edited and never when its neighbour is - a
+  shared stamp would let switching one reminder off swallow another one's
+  alert. See supabase/functions/send-reminder-push/index.ts.
+
+  WHERE IT ACTUALLY FIRES FROM. Not here. A page cannot wake a locked phone -
+  its JavaScript is suspended and setTimeout never runs - so the list is pushed
+  to the `reminders` table (supabase/reminders.sql) and a cron job reads it
+  every minute and sends. That is the same road the rest timer already takes:
+  same VAPID keys, same push_subscriptions, same sw.js, one permission for
+  both. This tile adds the rules and its own sender, and touches none of that.
+
+  THE LIST HERE IS THE SOURCE OF TRUTH, and the table is a one-way projection
+  of it: every change pushes the whole list, upserting what is in it and
+  deleting what is not. No merge, no second copy that can disagree. The one
+  thing that only the server knows is whether a reminder was actually SENT,
+  and that is read back so a row can say so out of the record instead of out of
+  hope. A reminder that never left the building says exactly that on its face.
+
+  THIS TILE REPORTS NOTHING, and that is a decision, not an omission. A tile
+  reports ONE honest number or none at all, and there is no honest number here.
+  A count of reminders set is not progress toward getting stronger, feeling
+  good or showing up - it is a count of intentions, and the ledger is for what
+  happened. Reporting it would put a meaningless row next to real ones and
+  then invite a weight in weights.ts to pretend it meant something. Same reason
+  Notes is absent from every goal. See lib/tiles/weights.ts.
+
+  NO prompt(), confirm() OR alert() ANYWHERE. The frame is sandbox=allow-scripts
+  with no allow-modals, so all three are silently dead here - prompt returns
+  null and confirm returns false with nothing in the console. Naming a reminder
+  uses an input, the time uses a native time input the OS can pick, and delete
+  arms a button that says what it is about to do. See tiles/sealed.test.js.
+
+  IT NEVER CLAIMS MORE THAN IT HAS DONE. Signed out, no vault, notifications
+  off, or the SQL not yet run: each of those is said in plain words at the top
+  of the page, because a reminders tile that looks healthy while nothing can
+  possibly arrive is the worst thing this file could be.
+-->
+<style>
+  :root{
+    --bg:#050505;
+    --card:rgba(9,13,12,0.72);
+    --border:rgba(148,163,158,0.16);
+    --text:#E7ECEA;
+    --muted:#94A39E;
+    --faint:#5C6B66;
+    --mint:#6EE7B7;
+    --amber:#FCD34D;
+  }
+  *{ box-sizing:border-box; }
+  /* THE hidden ATTRIBUTE HAS TO WIN, and by default it does not. The browser
+     hides [hidden] from its OWN stylesheet, so any display rule written here
+     beats it - and .posterHero is display:flex. With nothing set, renderPoster
+     hid the hero and it stayed on screen anyway, so the board showed "--:--"
+     next to "Nothing set yet": a time that is not a time, on the face of the
+     tile. Measured by tools/hidden-check.js. */
+  [hidden]{ display:none !important; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    min-height:100vh;
+    background:transparent;
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    accent-color:var(--mint);
+    overflow-x:hidden;
+  }
+  /* SAFE AREA INSETS BELONG TO PAGE MODE ONLY. env(safe-area-inset-*) resolves
+     inside a sealed iframe, so putting these on `body` would give the poster
+     the phone's notch values while it sits as a small card in the middle of
+     the board, nowhere near the screen edge. An s-sized card is about 122px
+     tall and an iPhone's top inset about 59px. Full screen the tile IS the
+     viewport and genuinely needs them. tiles/sealed.test.js enforces this. */
+  html[data-mode="page"] body{
+    background:var(--bg);
+    padding-top:env(safe-area-inset-top);
+    padding-right:env(safe-area-inset-right);
+    padding-bottom:env(safe-area-inset-bottom);
+    padding-left:env(safe-area-inset-left);
+  }
+  ::selection{ background:rgba(110,231,183,.28); }
+
+  .eyebrow{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:10px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--muted); margin:0;
+  }
+  .mono{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+
+  /* ── poster ───────────────────────────────────────────────────────────────
+     NOT opacity:0 plus an entrance animation - see checkin.html and
+     vault/decisions.md. Sealed tiles mount together and Chromium sometimes
+     never starts a fresh iframe's CSS animation, leaving a poster invisible
+     for ever. */
+  /* THE POSTER GETS 122px AND NOT ONE PIXEL MORE, and this is a budget, not a
+     guideline. An 'm' card is one row tall, so with 14px of padding each side
+     there are about 94px for everything, and the three lines below come to 90.
+     WHAT HAPPENS WHEN IT DOES NOT FIT is not a scrollbar - a poster does not
+     scroll. This is a flex column, and the first thing it does with content
+     that will not fit is SHRINK whichever item is allowed to: an item with
+     overflow:hidden has an automatic minimum size of zero, so it goes to
+     literally 0px and vanishes. That is exactly what happened here - four
+     lines of content in a three line box, and the reminder's title silently
+     disappeared while everything around it looked perfect. The same failure as
+     Lists' 0px-wide titles, stood on its end.
+     So: three elements, never four. The status line and the count share one
+     slot rather than taking one each, which is where the 18px of overflow came
+     from. tools/number-check.js measures the laid-out document against the
+     card at five phone widths and is what caught it. */
+  .posterView{
+    display:flex; flex-direction:column; justify-content:center;
+    gap:5px; height:100%; min-height:100vh; padding:14px;
+  }
+  /* NOTHING ON THE POSTER MAY SHRINK, and this line is the whole reason the
+     title is visible at all.
+     A flex item whose overflow is not `visible` has an automatic minimum size
+     of ZERO, so both text lines here were legal to crush to nothing - and the
+     column, being 3px over budget, duly crushed them. The card looked fine:
+     the eyebrow and the clock were perfect and the reminder's title was simply
+     not there, at 0px, with no overflow to see and nothing in the console.
+     With flex:0 0 auto the box cannot absorb a mistake quietly. Content that
+     does not fit makes the document taller than the card, which is loud,
+     measurable, and exactly what tools/number-check.js fails on. */
+  .posterView > *{ flex:0 0 auto; }
+  .posterHero{ display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+  /* A SEALED TILE'S vw IS THE TILE, NOT THE SCREEN - an iframe carries its own
+     viewport, so this tracks the card at every breakpoint. A fixed size
+     overflowed a 320px phone by 18px once. tools/number-check.js measures the
+     laid-out text in a real browser rather than guessing from the CSS. */
+  .posterHero .num{ font-size:clamp(20px,13vw,30px); line-height:1; letter-spacing:-0.02em; }
+  .posterHero .unit{ font-size:12.5px; color:var(--muted); }
+  /* One line, with the ellipsis to say there was more. The whole title is a
+     tap away on the page, and a second line here costs the status slot. */
+  .posterWhat{
+    font-size:12.5px; color:var(--muted); line-height:1.35;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  /* ONE SLOT, TWO JOBS: how many are on, or - when something means none of
+     them can arrive - what is wrong. The warning wins, because "these cannot
+     reach you" matters more than which one is next. Amber, never red: nothing
+     on this poster is a verdict on him. */
+  .posterNote{ font-size:11.5px; color:var(--faint); line-height:1.35;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .posterNote.warn{ color:var(--amber); }
+  .posterEmpty{ font-size:13px; color:var(--faint); line-height:1.45; }
+
+  /* ── page ─────────────────────────────────────────────────────────────── */
+  .pageView{ display:none; }
+  html[data-mode="page"] .pageView{
+    display:block; min-height:100vh;
+    padding:28px 20px calc(40px + env(safe-area-inset-bottom));
+    max-width:560px; margin:0 auto;
+  }
+  html[data-mode="page"] .posterView{ display:none; }
+
+  /* The host's close button is fixed 16px from the VIEWPORT's top right and is
+     36px wide, so it owns 16-52px in from that corner. The header keeps out of
+     its way rather than sitting under it. */
+  .pageHead{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px;
+    padding-right:52px; }
+  .pageTitle{ font-size:22px; font-weight:600; margin:6px 0 0; letter-spacing:-0.01em; }
+  .pageSub{ font-size:12.5px; color:var(--muted); margin:4px 0 0; line-height:1.45; }
+
+  .status{
+    margin:18px 0 0; padding:12px 14px; border-radius:12px;
+    border:1px solid var(--border); background:var(--card);
+    font-size:12.5px; line-height:1.5; color:var(--muted);
+  }
+  .status.good{ border-color:rgba(110,231,183,.32); color:var(--text); }
+  .status.warn{ border-color:rgba(252,211,77,.34); }
+  .status b{ color:var(--text); font-weight:600; }
+  .statusRow{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:10px; }
+
+  button{ font:inherit; color:inherit; cursor:pointer; }
+  .btn{
+    border:1px solid var(--border); background:rgba(255,255,255,.03);
+    color:var(--text); border-radius:10px; padding:10px 14px; font-size:13px;
+    /* 44px is the smallest thing a thumb hits reliably. tools/touch-check.js
+       measures every control on the board against it. */
+    min-height:44px;
+  }
+  .btn:hover{ border-color:rgba(148,163,158,.3); }
+  .btn:disabled{ opacity:.45; cursor:default; }
+  .btn.primary{ background:rgba(110,231,183,.14); border-color:rgba(110,231,183,.4); color:var(--mint); }
+  .btn.armed{ background:rgba(252,211,77,.14); border-color:rgba(252,211,77,.45); color:var(--amber); }
+  .btn.small{ padding:8px 12px; font-size:12.5px; min-height:44px; }
+
+  .addRow{ margin:18px 0 0; }
+
+  /* ── the editor ───────────────────────────────────────────────────────── */
+  .editor{
+    margin:18px 0 0; padding:16px; border-radius:14px;
+    border:1px solid var(--border); background:var(--card);
+  }
+  .editor[hidden]{ display:none; }
+  .field{ margin:0 0 14px; }
+  .field:last-of-type{ margin-bottom:0; }
+  .label{ display:block; font-size:12px; color:var(--muted); margin:0 0 6px; }
+  .hint{ font-size:11.5px; color:var(--faint); margin:6px 0 0; line-height:1.45; }
+  input[type="text"], textarea, input[type="time"], input[type="date"]{
+    width:100%; background:rgba(255,255,255,.04); color:var(--text);
+    border:1px solid var(--border); border-radius:10px; padding:11px 12px;
+    font:inherit; font-size:14px; min-height:44px;
+  }
+  input:focus, textarea:focus{ outline:none; border-color:rgba(110,231,183,.45); }
+  textarea{ resize:vertical; min-height:66px; line-height:1.5; }
+  /* Time and date are NATIVE inputs on purpose: the phone opens its own
+     picker, which is a real wheel he already knows, and there is no modal for
+     the sandbox to block. */
+  .timeIn{ max-width:170px; }
+  .dateIn{ max-width:200px; }
+
+  .chips{ display:flex; flex-wrap:wrap; gap:8px; }
+  .chip{
+    border:1px solid var(--border); background:rgba(255,255,255,.03);
+    border-radius:999px; padding:9px 13px; font-size:12.5px; color:var(--muted);
+    min-height:44px;
+  }
+  .chip[aria-pressed="true"]{
+    background:rgba(110,231,183,.14); border-color:rgba(110,231,183,.42); color:var(--mint);
+  }
+  /* 44px each way, not 42. tools/touch-check.js holds every control on the
+     board to the smallest thing a thumb hits reliably, and a day chip is the
+     easiest one to shave without noticing. */
+  .dayChips .chip{ padding:9px 0; width:44px; text-align:center; }
+
+  .toggleRow{ display:flex; align-items:flex-start; gap:11px; }
+  .toggleRow input{ margin-top:13px; width:18px; height:18px; flex:0 0 auto; }
+  .toggleRow .label{ margin:0; }
+  .editorActions{ display:flex; gap:10px; flex-wrap:wrap; margin-top:16px; }
+  .editorErr{ font-size:12.5px; color:var(--amber); margin:10px 0 0; line-height:1.45; }
+  .editorErr:empty{ display:none; }
+
+  /* ── the list ─────────────────────────────────────────────────────────── */
+  .list{ margin:22px 0 0; display:flex; flex-direction:column; gap:10px; }
+  .item{
+    padding:14px; border-radius:14px;
+    border:1px solid var(--border); background:var(--card);
+  }
+  .item.off{ opacity:.55; }
+  .itemTop{ display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  .itemTime{ font-size:19px; letter-spacing:-0.01em; flex:0 0 auto; }
+  /* A FLEXIBLE TEXT ELEMENT NEEDS A REAL FLOOR, NEVER min-width:0. In a row of
+     fixed-width controls the text is the only thing that can give, and 0 lets
+     it give all of it - Lists' titles once measured literally 0px wide, one
+     letter per line, reading as a vertical column, with every node suite
+     green. The row wraps instead. tools/squeeze-check.js measures it. */
+  .itemTitle{ flex:1 1 auto; min-width:min(100%, 11rem); font-size:14.5px; font-weight:500;
+    overflow-wrap:anywhere; }
+  .itemBody{ font-size:12.5px; color:var(--muted); margin:6px 0 0; line-height:1.45;
+    overflow-wrap:anywhere; }
+  .itemWhen{ font-size:11.5px; color:var(--faint); margin:8px 0 0; line-height:1.45; }
+  .itemSent{ font-size:11.5px; color:var(--mint); margin:4px 0 0; }
+  .itemActions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .itemActions .btn{ flex:0 0 auto; }
+
+  .empty{
+    margin:22px 0 0; padding:18px; border-radius:14px;
+    border:1px dashed var(--border); color:var(--faint);
+    font-size:13px; line-height:1.55;
+  }
+</style>
+</head>
+<body>
+
+<!-- POSTER: the face on the board. One question - what is next, and when. -->
+<div class="posterView" id="posterView">
+  <p class="eyebrow">Reminders</p>
+  <div class="posterHero" id="posterHero" hidden>
+    <span class="num mono" id="pTime">--:--</span>
+    <span class="unit" id="pWhen"></span>
+  </div>
+  <p class="posterWhat" id="pWhat" hidden></p>
+  <!-- ONE slot for the count and the warning, never one each. Two lines here
+       is 18px more than the card has, and a flex column answers that by
+       crushing the title to 0px rather than by scrolling. -->
+  <p class="posterNote" id="pNote" hidden></p>
+  <p class="posterEmpty" id="pEmpty" hidden>Nothing set yet. Tap to add one.</p>
+</div>
+
+<!-- PAGE: the whole thing, full screen. -->
+<div class="pageView">
+  <div class="pageHead">
+    <div>
+      <p class="eyebrow">Reminders</p>
+      <h1 class="pageTitle">Reminders</h1>
+      <p class="pageSub" id="pageSub">Loading what you have set.</p>
+    </div>
+  </div>
+
+  <div class="status" id="status">Checking whether these can reach your phone.</div>
+
+  <div class="addRow">
+    <button class="btn primary" id="addBtn" disabled>New reminder</button>
+  </div>
+
+  <div class="editor" id="editor" hidden>
+    <div class="field">
+      <label class="label" for="fTitle">What should it say?</label>
+      <input type="text" id="fTitle" maxlength="200" placeholder="Take creatine" autocomplete="off">
+      <p class="hint">This is the bold line on the notification.</p>
+    </div>
+
+    <div class="field">
+      <label class="label" for="fBody">The line underneath</label>
+      <textarea id="fBody" maxlength="500" placeholder="Optional. Leave it empty and the phone shows just the line above."></textarea>
+    </div>
+
+    <div class="field">
+      <label class="label" for="fTime">Time</label>
+      <input type="time" id="fTime" class="timeIn" value="08:00">
+    </div>
+
+    <div class="field">
+      <span class="label">Repeat</span>
+      <div class="chips" id="repeatChips">
+        <button type="button" class="chip" data-repeat="once" aria-pressed="false">Once</button>
+        <button type="button" class="chip" data-repeat="daily" aria-pressed="false">Every day</button>
+        <button type="button" class="chip" data-repeat="weekdays" aria-pressed="false">Weekdays</button>
+        <button type="button" class="chip" data-repeat="weekends" aria-pressed="false">Weekends</button>
+        <button type="button" class="chip" data-repeat="days" aria-pressed="false">Pick days</button>
+      </div>
+    </div>
+
+    <div class="field" id="daysField" hidden>
+      <span class="label">Which days</span>
+      <div class="chips dayChips" id="dayChips"></div>
+    </div>
+
+    <div class="field" id="dateField" hidden>
+      <label class="label" for="fDate">Which day</label>
+      <input type="date" id="fDate" class="dateIn">
+    </div>
+
+    <div class="field">
+      <div class="toggleRow">
+        <input type="checkbox" id="fSticky">
+        <div>
+          <label class="label" for="fSticky">Keep it on screen until I tap it</label>
+          <p class="hint">Android holds it there. iPhone mostly does not, and this
+            board will not pretend otherwise.</p>
+        </div>
+      </div>
+    </div>
+
+    <p class="editorErr" id="editorErr"></p>
+    <div class="editorActions">
+      <button class="btn primary" id="saveBtn">Save reminder</button>
+      <button class="btn" id="cancelBtn">Cancel</button>
+    </div>
+  </div>
+
+  <div class="list" id="list"></div>
+  <p class="empty" id="emptyNote" hidden>
+    Nothing set. A reminder is a line you write and a time you pick, and then
+    your phone says it whether or not this is open.
+  </p>
+</div>
+
+<script>
+// The Vitality bridge. postMessage only: a sealed tile has no storage of its
+// own, so save/load/report all travel to the host and back. The reminder
+// messages are this board's own and the host ignores anything it does not
+// know, so this same file still runs unchanged on the hosted Vitality board -
+// it simply never hears back, and says so instead of pretending.
+(function(){
+  'use strict';
+
+  var seq = 0;
+  var pending = {};
+  var writeErrorHandlers = [];
+
+  window.addEventListener('message', function (e) {
+    var msg = e.data;
+    if (!msg || msg.source !== 'vitality-host') return;
+    if (msg.type === 'load:result') {
+      var p = pending[msg.id];
+      if (p) { delete pending[msg.id]; p.resolve({ ok: true, data: msg.data }); }
+      return;
+    }
+    // Every reminder message answers on '<type>:result' with the same id it
+    // was asked with.
+    if (/^reminders:.+:result$/.test(msg.type || '')) {
+      var q = pending[msg.id];
+      if (q) { delete pending[msg.id]; q.resolve(msg); }
+      return;
+    }
+    if (msg.type === 'save:error' || msg.type === 'report:error') {
+      writeErrorHandlers.forEach(function (fn) { fn(msg.type, msg.reason); });
+    }
+  });
+
+  function post(type, payload) {
+    var msg = { source: 'vitality-tile', type: type };
+    for (var k in payload) { if (Object.prototype.hasOwnProperty.call(payload, k)) msg[k] = payload[k]; }
+    parent.postMessage(msg, '*');
+    return msg;
+  }
+
+  /**
+   * Ask once and wait, with a deadline. A host that does not know this message
+   * type - the hosted Vitality board - will never answer, and a promise that
+   * never settles would leave the tile showing its loading state for ever.
+   * `ok:false` here means "no answer", which is not the same as "no".
+   */
+  function ask(type, payload, ms) {
+    var id = 'q' + (++seq);
+    return new Promise(function (resolve) {
+      var done = false;
+      var finish = function (r) { if (!done) { done = true; delete pending[id]; resolve(r); } };
+      pending[id] = { resolve: finish };
+      var body = { id: id };
+      for (var k in payload) { if (Object.prototype.hasOwnProperty.call(payload, k)) body[k] = payload[k]; }
+      post(type, body);
+      setTimeout(function () { finish({ ok: false, timedOut: true }); }, ms || 8000);
+    });
+  }
+
+  window.Vitality = {
+    save: function (data) { post('save', { data: data }); },
+
+    /**
+     * Resolves { ok, data }. ok:false means the host never answered, NOT that
+     * the slot is empty. Treating an unanswered load as "you have nothing"
+     * lets the next save write that emptiness over real data.
+     */
+    load: function () {
+      var id = 'l' + (++seq);
+      return new Promise(function (resolve) {
+        pending[id] = { resolve: resolve };
+        post('load', { id: id });
+        var tries = 0;
+        var retry = setInterval(function () {
+          if (!pending[id]) { clearInterval(retry); return; }
+          if (++tries > 12) {
+            clearInterval(retry);
+            delete pending[id];
+            resolve({ ok: false, data: null });
+            return;
+          }
+          post('load', { id: id });
+        }, 800);
+      });
+    },
+
+    report: function (stream) { post('report', { stream: stream }); },
+    onWriteError: function (fn) { writeErrorHandlers.push(fn); },
+
+    // The reminder half. The tile cannot write these rows or ask for a
+    // notification permission itself - a sealed frame has an opaque origin, so
+    // a service worker will not register there any more than localStorage will
+    // open. The host owns both and does it on request.
+    remindersSync: function (list) { return ask('reminders:sync', { list: list }, 12000); },
+    remindersState: function () { return ask('reminders:state', {}, 8000); },
+    remindersPush: function (on) { return ask('reminders:push', { on: on }, 60000); }
+  };
+})();
+</script>
+
+<script>
+(function(){
+  'use strict';
+
+  var mode = location.hash === '#page' ? 'page' : 'grid';
+  document.documentElement.setAttribute('data-mode', mode);
+
+  var state = { v:1, items: [] };
+  // Until the vault has actually answered, this tile does not know what it
+  // holds, so it must not write. Saving an assumed-empty list would delete
+  // every reminder he has, here AND in the table, because the sync mirrors
+  // this list exactly.
+  var loaded = false;
+
+  var host = {                 // what the board told us about itself
+    known: false,
+    signedIn: false,
+    push: 'unknown',           // on | off | unavailable | unknown
+    pushWhy: '',
+    fired: {},                 // id -> 'YYYY-MM-DD@HH:MM' of the last real send
+    needsMigration: false
+  };
+  var syncNote = '';           // the last thing the vault said about writing
+  var syncing = false;
+
+  var editing = null;          // the id being edited, '' for a new one, null for closed
+  var form = { title:'', body:'', time:'08:00', repeat:'daily', days:[], date:'', sticky:false };
+  var formErr = '';
+  var armedDelete = '';        // id whose Delete is one tap from firing
+  var saveTimer = null;
+
+  var DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  // Monday first, because that is how the week reads here. The VALUES stay
+  // 0=Sunday to match getDay() and the server's own weekday numbering; only
+  // the order on screen changes.
+  var DAY_ORDER = [1,2,3,4,5,6,0];
+
+  function $(id){ return document.getElementById(id); }
+
+  function tz(){
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
+    catch (e) { return 'UTC'; }
+  }
+
+  // [a-z0-9] only, deliberately. These ids travel into a PostgREST `not in`
+  // list that is split on commas, so anything with punctuation in it could
+  // silently shorten that list and delete a reminder he still has.
+  function newId(){
+    return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+  }
+
+  function two(n){ return (n < 10 ? '0' : '') + n; }
+  function dayKey(d){ return d.getFullYear() + '-' + two(d.getMonth()+1) + '-' + two(d.getDate()); }
+
+  function validTime(s){
+    var m = /^(\d{1,2}):(\d{2})$/.exec(String(s || ''));
+    if (!m) return '';
+    var h = Number(m[1]), mi = Number(m[2]);
+    if (!(h >= 0 && h < 24 && mi >= 0 && mi < 60)) return '';
+    return two(h) + ':' + two(mi);
+  }
+
+  /**
+   * WHEN DOES THIS NEXT GO OFF, in his own clock. Returns a Date, or null for
+   * a one-off whose moment has passed.
+   *
+   * This runs in the browser, in his timezone, so plain Date arithmetic is
+   * exact - no Intl gymnastics needed here, unlike the server, which has to
+   * work out what time it is somewhere it is not.
+   *
+   * IT IS FOR THE SCREEN ONLY. Nothing fires from this. The sender decides
+   * what actually goes out, and it decides from the same rule, not from
+   * anything computed here.
+   */
+  function nextFire(it, now){
+    var t = validTime(it.time);
+    if (!t) return null;
+    var hh = Number(t.slice(0,2)), mm = Number(t.slice(3,5));
+
+    function at(d){
+      var x = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh, mm, 0, 0);
+      return x;
+    }
+
+    if (it.repeat === 'once'){
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(it.date || ''))) return null;
+      var p = it.date.split('-');
+      var when = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]), hh, mm, 0, 0);
+      return when.getTime() > now.getTime() ? when : null;
+    }
+
+    // Today first, then the next seven days. Seven is enough for every weekly
+    // rule there is; an eighth would only ever repeat the first.
+    for (var i = 0; i <= 7; i++){
+      var d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
+      var wd = d.getDay();
+      var matches =
+        it.repeat === 'daily' ? true :
+        it.repeat === 'weekdays' ? (wd >= 1 && wd <= 5) :
+        it.repeat === 'weekends' ? (wd === 0 || wd === 6) :
+        it.repeat === 'days' ? (Array.isArray(it.days) && it.days.indexOf(wd) !== -1) :
+        false;
+      if (!matches) continue;
+      var cand = at(d);
+      if (cand.getTime() > now.getTime()) return cand;
+    }
+    return null;
+  }
+
+  /** 'today', 'tomorrow', or the day's name. Never a bare date he has to decode. */
+  function whenWord(when, now){
+    if (!when) return '';
+    var a = dayKey(when), b = dayKey(now);
+    if (a === b) return 'today';
+    var t = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    if (a === dayKey(t)) return 'tomorrow';
+    return DAYS[when.getDay()];
+  }
+
+  function repeatWords(it){
+    if (it.repeat === 'daily') return 'Every day';
+    if (it.repeat === 'weekdays') return 'Weekdays';
+    if (it.repeat === 'weekends') return 'Weekends';
+    if (it.repeat === 'days'){
+      var ds = DAY_ORDER.filter(function(d){ return it.days && it.days.indexOf(d) !== -1; });
+      if (!ds.length) return 'No days picked';
+      if (ds.length === 7) return 'Every day';
+      return ds.map(function(d){ return DAYS[d]; }).join(', ');
+    }
+    return it.date ? 'Once, on ' + it.date : 'Once';
+  }
+
+  /** The reminders that could still go off, soonest first. */
+  function upcoming(now){
+    return state.items
+      .filter(function(it){ return it.enabled; })
+      .map(function(it){ return { it: it, when: nextFire(it, now) }; })
+      .filter(function(x){ return !!x.when; })
+      .sort(function(a,b){ return a.when - b.when; });
+  }
+
+  /** Was this one actually sent, and when? Read from the server's own stamp. */
+  function sentWords(it){
+    var key = host.fired[it.id];
+    if (!key) return '';
+    var bits = String(key).split('@');
+    if (bits.length !== 2) return '';
+    var d = bits[0], t = bits[1];
+    var today = dayKey(new Date());
+    var y = new Date(); y.setDate(y.getDate() - 1);
+    var word = d === today ? 'today' : (d === dayKey(y) ? 'yesterday' : 'on ' + d);
+    return 'Sent ' + word + ' at ' + t;
+  }
+
+  /* ── writing ───────────────────────────────────────────────────────────── */
+
+  /**
+   * Save locally, then push the list to the vault.
+   *
+   * BOTH, ALWAYS, AND IN THAT ORDER. The slot is what makes the tile paint
+   * instantly and survive being signed out; the table is the only thing a cron
+   * job at 07:00 can read. Writing one without the other would give a tile
+   * that looks right and never rings, or one that rings and forgets.
+   */
+  function persist(){
+    if (!loaded) return;
+    if (window.Vitality) Vitality.save(state);
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(pushToVault, 500);
+  }
+
+  function pushToVault(){
+    if (!loaded || !window.Vitality || !Vitality.remindersSync) return;
+    syncing = true; render();
+    var list = state.items.map(function(it){
+      return {
+        id: it.id, title: it.title, body: it.body, time: it.time, tz: it.tz || tz(),
+        repeat: it.repeat, days: it.days || [], date: it.date || '',
+        enabled: !!it.enabled, sticky: !!it.sticky, updatedAt: it.updatedAt
+      };
+    });
+    Vitality.remindersSync(list).then(function(r){
+      syncing = false;
+      host.needsMigration = !!(r && r.needsMigration);
+      if (r && r.ok){
+        syncNote = '';
+        if (r.signedOut) host.signedIn = false;
+      } else if (r && r.timedOut){
+        // Not "failed". We genuinely do not know, and saying either would be
+        // a claim this tile has not earned.
+        syncNote = 'The board did not answer, so these may not have reached your phone yet.';
+      } else {
+        syncNote = (r && r.reason) || 'Could not save these to your vault.';
+        if (r && r.signedOut) host.signedIn = false;
+      }
+      render();
+    });
+  }
+
+  function refreshState(){
+    if (!window.Vitality || !Vitality.remindersState) { host.known = true; render(); return; }
+    Vitality.remindersState().then(function(r){
+      host.known = true;
+      if (r && r.ok){
+        host.signedIn = !!r.signedIn;
+        host.push = r.push || 'unknown';
+        host.pushWhy = r.pushWhy || '';
+        host.fired = r.fired || {};
+        if (r.needsMigration) host.needsMigration = true;
+      } else {
+        host.push = 'unknown';
+      }
+      render();
+    });
+  }
+
+  /* ── the editor ────────────────────────────────────────────────────────── */
+
+  function openEditor(id){
+    editing = id || '';
+    formErr = '';
+    armedDelete = '';
+    if (id){
+      var it = state.items.filter(function(x){ return x.id === id; })[0];
+      if (!it) { editing = null; return; }
+      form = {
+        title: it.title, body: it.body, time: it.time, repeat: it.repeat,
+        days: (it.days || []).slice(), date: it.date || '', sticky: !!it.sticky
+      };
+    } else {
+      var now = new Date();
+      form = { title:'', body:'', time:'08:00', repeat:'daily', days:[], date: dayKey(now), sticky:false };
+    }
+    render();
+    var t = $('fTitle');
+    if (t) t.focus();
+  }
+
+  function closeEditor(){ editing = null; formErr = ''; render(); }
+
+  function commit(){
+    var title = String(form.title || '').trim();
+    if (!title){ formErr = 'Give it something to say. That line is the whole notification.'; render(); return; }
+    var t = validTime(form.time);
+    if (!t){ formErr = 'Pick a time.'; render(); return; }
+    if (form.repeat === 'days' && !form.days.length){
+      formErr = 'Pick at least one day, or choose a different repeat.'; render(); return;
+    }
+    if (form.repeat === 'once'){
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(form.date || ''))){
+        formErr = 'Pick the day it should go off.'; render(); return;
+      }
+    }
+
+    var nowIso = new Date().toISOString();
+    if (editing){
+      state.items = state.items.map(function(it){
+        if (it.id !== editing) return it;
+        return {
+          id: it.id, title: title, body: String(form.body || '').trim(),
+          time: t, repeat: form.repeat, days: form.days.slice(),
+          date: form.repeat === 'once' ? form.date : '',
+          enabled: it.enabled, sticky: !!form.sticky, tz: tz(),
+          createdAt: it.createdAt,
+          // ONLY THIS ONE'S STAMP MOVES. The sender will not fire an
+          // occurrence older than the rule, so a shared stamp would let
+          // editing one reminder silently swallow another's alert.
+          updatedAt: nowIso
+        };
+      });
+    } else {
+      state.items.push({
+        id: newId(), title: title, body: String(form.body || '').trim(),
+        time: t, repeat: form.repeat, days: form.days.slice(),
+        date: form.repeat === 'once' ? form.date : '',
+        enabled: true, sticky: !!form.sticky, tz: tz(),
+        createdAt: nowIso, updatedAt: nowIso
+      });
+    }
+    editing = null;
+    formErr = '';
+    persist();
+    render();
+  }
+
+  function toggleItem(id){
+    state.items = state.items.map(function(it){
+      if (it.id !== id) return it;
+      var copy = {};
+      for (var k in it) if (Object.prototype.hasOwnProperty.call(it, k)) copy[k] = it[k];
+      copy.enabled = !it.enabled;
+      // Switching it back on is a new intention, so it starts from now rather
+      // than firing an occurrence from earlier today the moment it is enabled.
+      copy.updatedAt = new Date().toISOString();
+      return copy;
+    });
+    persist();
+    render();
+  }
+
+  function removeItem(id){
+    state.items = state.items.filter(function(it){ return it.id !== id; });
+    armedDelete = '';
+    if (editing === id) editing = null;
+    persist();
+    render();
+  }
+
+  /* ── rendering ─────────────────────────────────────────────────────────── */
+
+  function renderPoster(){
+    var now = new Date();
+    var next = upcoming(now)[0];
+    var on = state.items.filter(function(it){ return it.enabled; }).length;
+
+    var hero = $('posterHero'), what = $('pWhat'),
+        note = $('pNote'), empty = $('pEmpty');
+
+    // THREE ELEMENTS, AT MOST, AND NEVER MORE. See the poster's CSS: a fourth
+    // line is 18px the card does not have, and this being a flex column, the
+    // way that shows up is the title silently rendering at 0px rather than
+    // anything overflowing where it can be seen.
+    var show = function (time, when, title, noteText, noteWarn, emptyText) {
+      hero.hidden = !time;
+      what.hidden = !title;
+      note.hidden = !noteText;
+      empty.hidden = !emptyText;
+      if (time){ $('pTime').textContent = time; $('pWhen').textContent = when || ''; }
+      if (title) what.textContent = title;
+      if (noteText) note.textContent = noteText;
+      note.classList.toggle('warn', !!noteWarn);
+      if (emptyText) empty.textContent = emptyText;
+    };
+
+    if (!loaded){ show('', '', '', '', false, 'Reading your reminders.'); return; }
+
+    // The one thing the poster must never do is look ready when nothing can
+    // arrive. Amber, not red: nothing here is a verdict on him.
+    var blocked = host.known && !!state.items.length &&
+      (!host.signedIn || host.needsMigration || host.push === 'off' || host.push === 'unavailable');
+    var blockedWhy = !host.signedIn ? 'Signed out, so these cannot arrive.'
+      : host.needsMigration ? 'Vault missing a table, so these cannot arrive.'
+      : 'Notifications are off, so these cannot arrive.';
+
+    if (!next){
+      var why = !state.items.length ? 'Nothing set yet. Tap to add one.'
+        : !on ? 'All switched off.'
+        // Enabled, but nothing coming: every one is a one-off already past.
+        : 'Nothing coming up.';
+      show('', '', '', blocked ? blockedWhy : '', true, why);
+      return;
+    }
+
+    // WHEN SOMETHING IS BROKEN, THE WARNING TAKES THE SLOT. "These cannot
+    // reach you" is worth more than "2 on", and there is only one line for
+    // both.
+    show(next.it.time, whenWord(next.when, now), next.it.title,
+      blocked ? blockedWhy : (on > 1 ? on + ' on' : ''), blocked, '');
+  }
+
+  function renderStatus(){
+    var box = $('status');
+    box.className = 'status';
+    var bits = [];
+
+    if (!host.known){
+      box.textContent = 'Checking whether these can reach your phone.';
+      return;
+    }
+
+    // In order of what actually blocks delivery, most fundamental first. Each
+    // one names the fix, because "unavailable" on its own sends someone
+    // hunting the wrong thing.
+    if (!host.signedIn){
+      box.classList.add('warn');
+      bits.push('<b>Signed out.</b> A reminder has to live in your vault for anything to send it while your phone is locked. Sign in from the gear, top right.');
+    } else if (host.needsMigration){
+      box.classList.add('warn');
+      bits.push('<b>Your vault has no reminders table yet.</b> Run <code>supabase/reminders.sql</code> in the Supabase SQL editor. Everything below is saved and will start arriving once it is there.');
+    } else if (host.push === 'unavailable'){
+      box.classList.add('warn');
+      bits.push('<b>This device cannot show notifications.</b> ' + (host.pushWhy || ''));
+    } else if (host.push === 'off'){
+      box.classList.add('warn');
+      bits.push('<b>Notifications are off on this device.</b> Nothing below will reach you until they are on.');
+    } else if (host.push === 'on'){
+      box.classList.add('good');
+      bits.push('<b>On.</b> These reach this phone with the app closed, give or take a minute.');
+    } else {
+      bits.push('This board did not say whether notifications are on, so nothing here is promised.');
+    }
+
+    if (syncNote) bits.push('<span style="color:var(--amber)">' + syncNote + '</span>');
+    else if (syncing) bits.push('Saving to your vault.');
+
+    box.innerHTML = bits.join('<br>');
+
+    /**
+     * THE BUTTON ONLY EXISTS WHEN IT CAN WORK. Signed out it was still there,
+     * green and inviting, and tapping it would ask the phone for permission
+     * and then fail on the way to the vault - because a subscription is
+     * stored against an account and there is not one. Two instructions on
+     * screen at once, the louder of them the wrong one.
+     * Signed out, the sentence about the gear is the only thing to do next.
+     */
+    if (host.signedIn && (host.push === 'off' || host.push === 'on')){
+      var row = document.createElement('div');
+      row.className = 'statusRow';
+      var b = document.createElement('button');
+      b.className = 'btn small' + (host.push === 'off' ? ' primary' : '');
+      b.textContent = host.push === 'off' ? 'Turn notifications on' : 'Turn them off on this device';
+      b.addEventListener('click', function(){
+        var turningOn = host.push === 'off';
+        b.disabled = true;
+        b.textContent = turningOn ? 'Asking for permission...' : 'Turning them off...';
+        Vitality.remindersPush(turningOn).then(function(r){
+          if (r && r.ok){ syncNote = ''; }
+          else {
+            syncNote = (r && r.reason) ||
+              'Could not change it here. The gear at the top right of the board can do it too.';
+          }
+          refreshState();
+        });
+      });
+      row.appendChild(b);
+      box.appendChild(row);
+    }
+  }
+
+  function chip(label, pressed, onTap, cls){
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip' + (cls ? ' ' + cls : '');
+    b.textContent = label;
+    b.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+    b.addEventListener('click', onTap);
+    return b;
+  }
+
+  function renderEditor(){
+    var ed = $('editor');
+    ed.hidden = editing === null;
+    if (editing === null) return;
+
+    $('fTitle').value = form.title;
+    $('fBody').value = form.body;
+    $('fTime').value = form.time;
+    $('fDate').value = form.date;
+    $('fSticky').checked = !!form.sticky;
+
+    [].forEach.call($('repeatChips').querySelectorAll('.chip'), function(c){
+      c.setAttribute('aria-pressed', c.getAttribute('data-repeat') === form.repeat ? 'true' : 'false');
+    });
+
+    $('daysField').hidden = form.repeat !== 'days';
+    $('dateField').hidden = form.repeat !== 'once';
+
+    var wrap = $('dayChips');
+    wrap.textContent = '';
+    DAY_ORDER.forEach(function(d){
+      wrap.appendChild(chip(DAYS[d].slice(0,1) + DAYS[d].slice(1,2), form.days.indexOf(d) !== -1, function(){
+        var at = form.days.indexOf(d);
+        if (at === -1) form.days.push(d); else form.days.splice(at, 1);
+        render();
+      }));
+    });
+
+    $('editorErr').textContent = formErr;
+    $('saveBtn').textContent = editing ? 'Save changes' : 'Save reminder';
+  }
+
+  function renderList(){
+    var wrap = $('list');
+    wrap.textContent = '';
+    var now = new Date();
+
+    // Soonest first, then the ones that are off, then the one-offs that have
+    // been. Order by when he will next hear from it, which is the only thing
+    // he is scanning this list for.
+    var rows = state.items.slice().sort(function(a, b){
+      var na = a.enabled ? nextFire(a, now) : null;
+      var nb = b.enabled ? nextFire(b, now) : null;
+      if (na && nb) return na - nb;
+      if (na) return -1;
+      if (nb) return 1;
+      return String(a.time).localeCompare(String(b.time));
+    });
+
+    $('emptyNote').hidden = rows.length > 0;
+
+    rows.forEach(function(it){
+      var card = document.createElement('div');
+      card.className = 'item' + (it.enabled ? '' : ' off');
+
+      var top = document.createElement('div');
+      top.className = 'itemTop';
+      var time = document.createElement('span');
+      time.className = 'itemTime mono';
+      time.textContent = it.time;
+      var title = document.createElement('span');
+      title.className = 'itemTitle';
+      title.textContent = it.title;
+      top.appendChild(time);
+      top.appendChild(title);
+      card.appendChild(top);
+
+      if (it.body){
+        var body = document.createElement('p');
+        body.className = 'itemBody';
+        body.textContent = it.body;
+        card.appendChild(body);
+      }
+
+      var when = document.createElement('p');
+      when.className = 'itemWhen';
+      var next = it.enabled ? nextFire(it, now) : null;
+      var line = repeatWords(it);
+      if (!it.enabled) line += ' - off';
+      else if (next) line += ' - next ' + whenWord(next, now) + ' at ' + it.time;
+      else if (it.repeat === 'once') line += ' - been and gone';
+      if (it.sticky) line += ' - stays on screen';
+      when.textContent = line;
+      card.appendChild(when);
+
+      var sent = sentWords(it);
+      if (sent){
+        var s = document.createElement('p');
+        s.className = 'itemSent';
+        s.textContent = sent;
+        card.appendChild(s);
+      }
+
+      var acts = document.createElement('div');
+      acts.className = 'itemActions';
+
+      var tog = document.createElement('button');
+      tog.className = 'btn small';
+      tog.textContent = it.enabled ? 'Turn off' : 'Turn on';
+      tog.addEventListener('click', function(){ toggleItem(it.id); });
+      acts.appendChild(tog);
+
+      var ed = document.createElement('button');
+      ed.className = 'btn small';
+      ed.textContent = 'Edit';
+      ed.addEventListener('click', function(){ openEditor(it.id); });
+      acts.appendChild(ed);
+
+      // NO confirm(). A sealed frame returns false from it every time and the
+      // button would simply look broken. The button arms and says what the
+      // next tap does instead. tiles/sealed.test.js pins this.
+      var del = document.createElement('button');
+      del.className = 'btn small' + (armedDelete === it.id ? ' armed' : '');
+      del.textContent = armedDelete === it.id ? 'Tap again to delete' : 'Delete';
+      del.addEventListener('click', function(){
+        if (armedDelete !== it.id){ armedDelete = it.id; render(); return; }
+        removeItem(it.id);
+      });
+      acts.appendChild(del);
+
+      card.appendChild(acts);
+      wrap.appendChild(card);
+    });
+  }
+
+  function render(){
+    if (mode === 'page'){
+      var on = state.items.filter(function(it){ return it.enabled; }).length;
+      $('pageSub').textContent = !loaded ? 'Reading your reminders.'
+        : !state.items.length ? 'Nothing set yet.'
+        : on + (on === 1 ? ' on' : ' on') + ', ' + state.items.length + ' in total.';
+      $('addBtn').disabled = !loaded;
+      renderStatus();
+      renderEditor();
+      renderList();
+    } else {
+      renderPoster();
+    }
+  }
+
+  /* ── wiring ────────────────────────────────────────────────────────────── */
+
+  if (mode === 'page'){
+    $('addBtn').addEventListener('click', function(){ openEditor(''); });
+    $('saveBtn').addEventListener('click', commit);
+    $('cancelBtn').addEventListener('click', closeEditor);
+
+    $('fTitle').addEventListener('input', function(){ form.title = this.value; });
+    $('fBody').addEventListener('input', function(){ form.body = this.value; });
+    $('fTime').addEventListener('change', function(){ form.time = this.value; });
+    $('fDate').addEventListener('change', function(){ form.date = this.value; });
+    $('fSticky').addEventListener('change', function(){ form.sticky = this.checked; });
+
+    [].forEach.call($('repeatChips').querySelectorAll('.chip'), function(c){
+      c.addEventListener('click', function(){
+        form.repeat = c.getAttribute('data-repeat');
+        formErr = '';
+        render();
+      });
+    });
+  }
+  // THE POSTER HAS NO CLICK HANDLER OF ITS OWN, and must not grow one. The
+  // host lays its own button over the whole card (lib/tiles/host.js, .tileHit)
+  // because an iframe swallows the tap otherwise, so a listener in here would
+  // never fire and would read as broken code that someone later "fixes".
+
+  if (window.Vitality){
+    Vitality.onWriteError(function(){
+      syncNote = 'This device could not save the change, so nothing was written anywhere.';
+      render();
+    });
+
+    Vitality.load().then(function(res){
+      // ok:false means the host never answered, which is NOT an empty slot.
+      // Writing here would delete every reminder he has, in the table too.
+      if (res && res.ok){
+        var d = res.data;
+        if (d && Array.isArray(d.items)){
+          state.items = d.items.filter(function(it){ return it && it.id && it.title; });
+        }
+        loaded = true;
+      }
+      render();
+      refreshState();
+    });
+  }
+
+  render();
+
+  // The poster shows what is next, and "next" moves on its own. A minute is
+  // the resolution of the thing being displayed, so anything finer would
+  // redraw for no reason.
+  if (mode === 'grid') setInterval(renderPoster, 60000);
+})();
+</script>
+</body>
+</html>

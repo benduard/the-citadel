@@ -250,8 +250,14 @@ if (privMatch) {
 console.log('\n[8] the service worker cannot fail silently')
 check('it lives at the repo root, or it could never control the board',
   fs.existsSync(path.join(ROOT, 'sw.js')))
+// The fallback title was 'Rest is up' while the rest timer was the only thing
+// that pushed. Reminders push through the same worker now, so an unreadable
+// payload announcing itself as a rest timer would be a sentence nobody wrote.
+// Still something rather than nothing; just nothing it cannot know.
 check('a malformed payload still shows something true, never nothing',
-  /catch \(e\) \{ data = \{\} \}/.test(sw) && /data\.title \|\| 'Rest is up'/.test(sw))
+  /catch \(e\) \{ data = \{\} \}/.test(sw) && /data\.title \|\| 'The Citadel'/.test(sw))
+check('the worker never invents a reason it was not given',
+  !/'Rest is up'/.test(sw))
 check('clicking focuses the board rather than opening a second copy',
   /'focus' in c\) return c\.focus\(\)/.test(sw))
 check('no caching, so it can never serve a stale tile',

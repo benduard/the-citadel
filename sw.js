@@ -1,6 +1,9 @@
 /**
  * THE SERVICE WORKER. It exists for exactly one reason: to be awake when the
- * page is not, so a rest timer can still reach you with the phone locked.
+ * page is not, so the board can still reach you with the phone locked. Two
+ * things send through it - the rest timer (supabase/functions/send-timer-push)
+ * and reminders (send-reminder-push) - and this file does not care which:
+ * it shows whatever the payload says, with no opinion of its own.
  *
  * IT MUST SIT AT THE REPO ROOT. A service worker can only control pages at or
  * below its own path, so one served from /lib/ could never receive a push for
@@ -26,19 +29,34 @@ self.addEventListener('push', function (event) {
   var data = {}
   try { data = event.data ? event.data.json() : {} } catch (e) { data = {} }
 
-  var title = data.title || 'Rest is up'
-  var body = data.body || 'Back to it.'
+  /**
+   * THE FALLBACK IS NEUTRAL, AND IT USED TO SAY "Rest is up".
+   *
+   * That was true while the rest timer was the only thing that pushed. It is
+   * not any more: a reminder arriving with a payload this worker could not
+   * parse would have announced itself as a rest timer, which is a made-up
+   * sentence on a locked phone and exactly the kind of small lie the house
+   * rules forbid. When the payload is unreadable the only honest thing to say
+   * is that the board wants you, and nothing about why.
+   */
+  var title = data.title || 'The Citadel'
+  var body = data.body || ''
 
   event.waitUntil(
     self.registration.showNotification(title, {
       body: body,
       icon: '/icons/icon-192.png',
       badge: '/icons/favicon-32.png',
-      // Same tag means a second timer replaces the first rather than stacking
-      // two "rest is up" notifications from one session.
+      // The sender decides what replaces what. The rest timer sends one fixed
+      // tag, so a second timer replaces the first rather than stacking two
+      // "rest is up" notifications from one session; a reminder sends its own
+      // id, so two different reminders at 07:00 both appear and the same one
+      // arriving twice does not.
       tag: data.tag || 'rest-timer',
       renotify: true,
-      requireInteraction: false,
+      // Stays on screen until it is tapped, for a reminder that asked to. The
+      // tile is honest that iOS largely ignores this; Android honours it.
+      requireInteraction: !!data.sticky,
       vibrate: [40, 80, 40],
       data: { url: data.url || '/' }
     })

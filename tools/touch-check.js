@@ -25,7 +25,7 @@
 const { chromium } = require('playwright')
 
 const URL = process.env.BOARD || 'http://localhost:3000/'
-const TILES = ['Lists', 'Check in', 'Body', 'Recovery', 'Lifting', 'Progress', 'Notes']
+const TILES = ['Lists', 'Check in', 'Body', 'Recovery', 'Lifting', 'Progress', 'Notes', 'Screen time', 'Reminders']
 const MIN = 44
 
 // Compact controls that live inside a dense row and have a full-size path to

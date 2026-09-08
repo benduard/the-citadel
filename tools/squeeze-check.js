@@ -24,7 +24,7 @@
 const { chromium } = require('playwright')
 
 const URL = process.env.BOARD_URL || 'http://localhost:3000/'
-const TILES = ['Lists', 'Check in', 'Body', 'Recovery', 'Lifting', 'Progress', 'Notes']
+const TILES = ['Lists', 'Check in', 'Body', 'Recovery', 'Lifting', 'Progress', 'Notes', 'Reminders']
 // 320 is the narrowest phone that has to work; 430 is a Pro Max. If it reads
 // at 320 it reads everywhere.
 const WIDTHS = [320, 390]
@@ -70,7 +70,18 @@ const SEED = {
     scheme:'yours', customSplits:[], attempts:[], uni:{} },
   'v:tile:progress': { v:1, quests:[{ id:'q1', title:'Train four times this week', done:true, createdAt:day(7) }], retired:0, xp:1250 },
   'v:tile:notes': { v:1, notes:[
-    { id:'n1', body:'Gym plan\nPush Monday, pull Wednesday', createdAt:TODAY + 'T09:00:00.000Z', updatedAt:TODAY + 'T09:00:00.000Z' }] }
+    { id:'n1', body:'Gym plan\nPush Monday, pull Wednesday', createdAt:TODAY + 'T09:00:00.000Z', updatedAt:TODAY + 'T09:00:00.000Z' }] },
+  // THE ROW THIS CHECK EXISTS FOR. A reminder's title sits in a row beside a
+  // fixed-width clock, and three buttons sit under it - exactly the shape that
+  // measured Lists' titles at 0px wide, one letter per line, with every node
+  // suite green. Long titles, so there is something real to crush.
+  'v:tile:reminders': { v:1, items:[
+    { id:'ra', title:'Take creatine and magnesium before bed', body:'The tub on the second shelf, not the one in the cupboard',
+      time:'22:30', repeat:'daily', days:[], date:'', enabled:true, sticky:false,
+      tz:'Europe/Zurich', createdAt:day(7) + 'T09:00:00.000Z', updatedAt:day(7) + 'T09:00:00.000Z' },
+    { id:'rb', title:'Weigh in before breakfast, before anything else', body:'',
+      time:'07:00', repeat:'days', days:[1,3,5], date:'', enabled:false, sticky:true,
+      tz:'Europe/Zurich', createdAt:day(7) + 'T09:00:00.000Z', updatedAt:day(7) + 'T09:00:00.000Z' }] }
 }
 
 /**

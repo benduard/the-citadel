@@ -40,6 +40,7 @@ const TILES = [
   { name: 'lifting',  sel: '.posterView' },
   { name: 'progress', sel: '#posterView' },
   { name: 'notes',    sel: '#posterView' },
+  { name: 'reminders', sel: '#posterView' },
 ]
 
 async function oneRun(browser) {

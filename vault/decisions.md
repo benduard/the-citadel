@@ -1685,3 +1685,74 @@ time the page opens the day is already marked rolled. That note has never been
 shown for the ordinary daily archive either. Making it work means putting it in
 the store and deciding when it clears. The demoted item is not invisible in the
 meantime: it arrives in Daily wearing its "carried 1 day" tag.
+
+## Reminders: the rule is stored, never the moment
+
+2026-09-07. Ruben asked for a square that does one thing - notifications he
+writes himself, at times he picks, fully customisable.
+
+WHY IT IS NOT JUST ANOTHER TILE SLOT. Every other tile keeps its state in one
+JSON blob and that is enough, because the only thing that ever reads it is the
+tile. A reminder is the exception: the thing that has to read it is a cron job
+running at 07:00 while the phone is face down on a table. It cannot open the
+app to find out what he wanted. So the rule lives in columns something can
+query (`supabase/reminders.sql`), and the tile's slot is the copy that makes
+the board paint instantly and survive being signed out.
+
+ONE DIRECTION, DELIBERATELY. The tile is the source of truth and every change
+pushes the WHOLE list down: upsert what is in it, delete what is not. No merge,
+no reconciliation, no second copy that can disagree - the same last-write-wins
+the slots have always had. The only thing that flows back up is whether a
+reminder was actually SENT, because that is the one fact the tile cannot know
+and the one the house has been burned by not showing.
+
+07:00 IS A RULE, NOT AN INSTANT. The row stores '07:00' plus an IANA timezone
+and the sender asks, every minute, what time it is where he is. Storing an
+absolute timestamp would have been simpler and wrong twice a year: the alert
+would drift an hour at each clock change, and be wrong the day he lands
+somewhere else. This way there is no recurrence arithmetic anywhere - nothing
+computes a "next fire" and stores it, so there is nothing to drift, nothing to
+bootstrap and nothing to repair when a rule changes.
+
+THE DOUBLE-SEND GUARD IS A KEY, NOT A DATE, and this is the subtle one. The
+obvious design is `last_fired_on date`. It breaks the first time he moves a
+reminder: fire the 07:00, change it to 22:00 that afternoon, and today is
+already marked done so the 22:00 never comes - silently, with a tile that still
+looks perfectly healthy. The stamp is `YYYY-MM-DD@HH:MM`, so changing the time
+changes the key and 22:00 is simply an occurrence this rule has not fired yet.
+No migration, no clearing, no second column to disagree with the first.
+
+AND IT WILL NOT GO OFF IN YOUR HAND. Set one at 08:00 for 07:30 and 07:30 today
+is still inside the sender's one hour grace window, so without a guard the
+phone buzzes as you tap Save. The sender refuses any occurrence older than the
+rule's own `updated_at`, and the tile bumps that stamp for the reminder being
+edited and never for its neighbours - a shared stamp would let switching one
+reminder off swallow another one's alert.
+
+A SEPARATE EDGE FUNCTION FROM THE REST TIMER. They share what is genuinely
+shared - the VAPID keys, push_subscriptions, sw.js, one permission - and
+nothing else. The rest alert is the thing he trusts mid-set and it has already
+been taken down once by a change made next door to it. Every minute rather than
+every fifteen seconds, too: a rest timer a minute late is useless, a reminder a
+minute late is a reminder.
+
+THE HOST GATES IT ON THE TILE'S OWN ID. `save` and `load` are safe for any tile
+because they route to the sender's own slot and a tile cannot name another.
+Reminder rows are keyed by the PERSON, and the sync deletes everything not in
+the list it is handed - so without `tileId !== 'reminders'` a tile pasted in
+from someone else's repo could wipe every reminder he has with one message.
+
+IT REPORTS NOTHING TO THE LEDGER, and the temptation here was real. It would be
+easy to report how many reminders fired and call it showing up. It is not: a
+notification arriving is the phone doing something, not him. Whether he took
+the creatine is a fact this tile has no way of knowing, and a number built out
+of a delivery receipt is exactly the made-up number the house rules forbid.
+
+THE RULES ARE TESTED FOR REAL, not asserted to look right. `dueKey` and the
+timezone maths live in `send-reminder-push/due.mjs` as plain JavaScript so that
+Deno imports the same file node does. The alternative - a node test that
+re-implements the rule and then greps the TypeScript to check it still agrees -
+is how two copies of a rule drift apart with one of them wrong, which this repo
+has already paid for once. `tools/reminders.test.js` runs the real thing
+against a fake clock: DST in both directions, midnight, the moved reminder, the
+one saved for a time already gone.

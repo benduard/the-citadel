@@ -38,6 +38,15 @@ export const OVERALL_GOAL =
  * showing up - it would be a row in the ledger that means nothing, and a
  * weight here would be the thing that pretended it did. Notes is a place to
  * write, and its worth is that the writing is kept.
+ *
+ * `reminders` is absent for that same reason, and it is worth being precise
+ * about which reason, because this one is tempting. It would be easy to report
+ * how many reminders fired and call it showing up. It is not: a notification
+ * arriving is the phone doing something, not him. Whether he actually took the
+ * creatine is a fact this tile has no way of knowing, and inventing a number
+ * out of a delivery receipt is exactly the made-up number the house rules
+ * forbid. What he did lands in the ledger from the tile where he did it.
+ * Reminders is a nudge, and its worth is that the nudge arrives.
  */
 export const DEFAULT_GOALS: Goal[] = [
   {

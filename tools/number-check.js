@@ -53,6 +53,10 @@ const TARGETS = [
   { tile: 'lifting',  sel: '.pHero, .pUnit' },
   { tile: 'progress', sel: '.posterHero .num, .posterHero .unit' },
   { tile: 'notes',    sel: '.posterHero .num, .posterHero .unit' },
+  // The hero here is a CLOCK - '07:00' plus 'tomorrow' beside it - so the
+  // widest case is not a big number but a long day name. '22:30' next to
+  // 'Wednesday' is the one that has to survive 320px.
+  { tile: 'reminders', sel: '.posterHero .num, .posterHero .unit' },
 ]
 
 const MIN_READABLE = 11
@@ -121,6 +125,17 @@ const SEED = {
   'v:tile:notes': { v:1, notes:[
       { id:'n1', body:'Gym plan\nPush Monday', createdAt:TODAY + 'T09:00:00.000Z', updatedAt:TODAY + 'T09:00:00.000Z' },
       { id:'n2', body:'Groceries\nolive oil', createdAt:day(1) + 'T09:00:00.000Z', updatedAt:day(1) + 'T09:00:00.000Z' }
+    ] },
+  // 22:30 is the widest a clock gets, and a daily rule guarantees there is
+  // always a next one whatever time this check runs - a poster with nothing
+  // coming renders its empty state and would pass by having no number in it.
+  'v:tile:reminders': { v:1, items:[
+      { id:'ra', title:'Take creatine and magnesium', body:'The tub on the second shelf',
+        time:'22:30', repeat:'daily', days:[], date:'', enabled:true, sticky:false,
+        tz:'Europe/Zurich', createdAt:day(7) + 'T09:00:00.000Z', updatedAt:day(7) + 'T09:00:00.000Z' },
+      { id:'rb', title:'Weigh in before breakfast', body:'',
+        time:'07:00', repeat:'weekdays', days:[], date:'', enabled:true, sticky:true,
+        tz:'Europe/Zurich', createdAt:day(7) + 'T09:00:00.000Z', updatedAt:day(7) + 'T09:00:00.000Z' }
     ] }
 }
 

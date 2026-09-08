@@ -133,14 +133,59 @@ changes nothing.
 `./run-tests.sh` runs everything: the rank maths, the shell panels, backups,
 the icon set, Lifting's own suite (last-time, splits, unilateral, grouping,
 suggestions, the body map, rest timing, routines, supersets, bodyweight sets),
-Lists with its calendar and day view, Notes, the sealed-frame rules, and the
-rest-timer push wiring. Plain node, no install, no framework. Run it before
-you push.
+Lists with its calendar and day view, Notes, the sealed-frame rules, the
+rest-timer push wiring, and the reminder rules - whether one fires twice,
+whether it fires the moment you save it, and what happens to 07:00 when the
+clocks change. Plain node, no install, no framework. Run it before you push.
 
-If `tools/node_modules` is installed, it also runs six browser checks:
+If `tools/node_modules` is installed, it also runs seven browser checks:
 every tile actually paints (`visual-check.js`), nothing sits under the page's
 close button at any width (`collision-check.js`), every control is big
 enough to hit with a thumb (`touch-check.js`), every big number fits its
 box and stays readable on a phone (`number-check.js`), no text is
-crushed into a vertical column of letters (`squeeze-check.js`), and no hint
-or label is cut off mid-word by its own box (`clip-check.js`).
+crushed into a vertical column of letters (`squeeze-check.js`), no hint
+or label is cut off mid-word by its own box (`clip-check.js`), and everything
+the code hides is actually hidden (`hidden-check.js`).
+
+Those seven need the board running: `npx --yes serve .` in one terminal, then
+the checks in another. They are skipped, loudly, if the browser is not
+installed - never silently.
+
+---
+
+# Reminders
+
+Anything you want your phone to say, at a time you pick. It is the Reminders
+tile plus two things that have to exist in your project, because a page cannot
+wake a locked phone: something outside it has to send.
+
+Notifications themselves are already wired - same permission, same subscription
+and same service worker the rest timer uses. If rest alerts reach you, the
+permission half is done and you can skip straight to the two steps below.
+
+- [ ] Run `supabase/reminders.sql` in the Supabase SQL editor
+       makes the `reminders` table with row level security on it. Safe to run
+       again. Until this exists the tile SAYS so at the top of the page rather
+       than looking healthy - your reminders are saved, they just cannot send
+- [ ] Deploy the sender
+       `supabase functions deploy send-reminder-push`. It uses the VAPID keys
+       already in your project's secrets from the rest timer, so there is no
+       new key to make
+- [ ] Schedule it, every minute
+       the two `cron.schedule` lines at the bottom of `supabase/reminders.sql`,
+       with your project ref and service_role key filled in. Uncomment and run
+       them AFTER the deploy above, or the first tick calls a URL that is not
+       there yet
+- [ ] Open Reminders and add one, then check the top of the page
+       it says On, Signed out, or exactly which piece is missing. It never
+       says On unless it is
+
+WHAT IT WILL NOT DO, on purpose: it never invents the words. The notification
+says the title and line you typed and nothing else. And "keep it on screen
+until I tap it" is honoured by Android and largely ignored by iPhone, which
+the tile tells you next to the switch rather than quietly failing.
+
+A reminder is a rule, not an alarm clock: 07:00 plus your timezone, so it stays
+07:00 through a clock change and in another country. Nothing here reports a
+number to your vault - a reminder arriving is the phone doing something, not
+you.

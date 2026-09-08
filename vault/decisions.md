@@ -1593,3 +1593,95 @@ guaranteed, not hypothetical.
 that rejects the column, and asserts the alert is still scheduled. The
 string-matching in push.test.js proves the fallback is written; this proves it
 runs.
+
+## Urgent is a list that empties itself into Daily
+
+2026-09-07. Ruben asked for an urgent tab on Lists, and for anything on it that
+he does not finish on the day he added it to move to the Daily list.
+
+WHY THAT RULE IS THE WHOLE TILE. An urgent list nothing ever leaves stops being
+an urgent list within about a week. It fills, everything on it is urgent, so
+nothing on it is, and he stops looking at it - exactly what Someday was added
+to protect Daily from. The self-emptying is not a nice extra on top of the
+tab, it is the reason the tab can exist at all.
+
+HOW IT IS BUILT. One field: `demoteTo:'daily'` on the Urgent entry in
+BUILTIN_LISTS, and roll() acts on it. Nothing else in the tile knows this list
+is special. The existing roll already ran once per day at boot, already
+archived finished one-offs, already carried unfinished work forward; demoting
+is that last branch pointing somewhere else. If a second list ever needs the
+same behaviour it is one field, not a second mechanism.
+
+THE DAY IT WAS ADDED DECIDES, NOT THE DAY THE ROLL RUNS. This is the one thing
+that would have been wrong if it had been written the obvious way. roll() fires
+at boot, so a tile left open past midnight rolls whenever it is next opened. A
+blanket "everything still open on Urgent, move it" would then sweep a task
+typed twenty minutes earlier into Daily on the same day it was added - the
+single promise the list makes, broken by the mechanism meant to keep it. So
+the move is guarded on `createdAt` being an earlier day than today, and an item
+with no createdAt at all stays put rather than having a date guessed for it.
+
+WHAT MOVES IS THE WHOLE ITEM. Same id, same createdAt, same place in the done
+log. That means it lands in Daily already saying "carried 1 day" rather than
+arriving looking new, and the calendar's record of it is untouched - the log
+names the list a thing was crossed off on, which was true on that day, and
+rewriting it to agree with a move made later would be falsifying the record to
+tidy a label. Same rule the manual Move already followed.
+
+WHAT URGENT DELIBERATELY DOES NOT DO. It does not repeat: a standing habit is
+not urgent, and a repeating item that demoted would come back on a list it had
+already left. It does not reach the ledger: projects_done has counted done
+items on Projects since v1, and folding a second list into it would make every
+row written before today a lie about what it counted. A number for urgent work
+would want its own key, its own weight in weights.ts and its own entry in
+lib/rank.js. That is a decision, not a side effect of adding a tab.
+
+NO VERSION BUMP. A v3 blob written before today has no `lists.urgent`, which
+the loader reads as an empty list, which is what was true. Same as `custom` and
+`at` before it.
+
+Urgent sits first in the tab strip, so `listById`'s fallback had to stop being
+`a[0]` and start naming Daily. That fallback is what a stale id lands on -
+most of all a done-log entry naming a list he has since deleted - and it has
+always read "Daily". Left as `a[0]` the tab reorder would have quietly
+relabelled old records "Urgent". Tabs can be ordered however they read best
+now; the record does not move with them.
+
+## A hidden attribute that was not hiding anything
+
+Found while adding Urgent, and the reason for the second half of that change.
+
+`el.hidden = true` reads like it settles the question. It does not. The browser
+hides `[hidden]` from its OWN stylesheet, so any `display` rule written in the
+tile beats it on specificity, and there is no error, nothing in the console,
+and nothing to see unless you happen to look at the one state where the element
+should be gone.
+
+THREE WERE LIVE ON THIS BOARD, and only one of them is small:
+
+  Reminders  `.posterHero` is display:flex. With nothing set, renderPoster hid
+             the hero and it stayed - so the poster showed `--:--` next to
+             "Nothing set yet". A time that is not a time, on the face of a
+             tile. That is the made up number rule broken by a specificity
+             accident rather than by anyone inventing anything.
+  Lists      `.repToggle` is display:flex, so "Repeats every day" sat on
+             Grocery, Projects, Someday and now Urgent - lists that cannot
+             repeat, where add() ignores the box entirely. A control that looks
+             live and does nothing. `.addRow` too, so the new-list name row was
+             never actually put away.
+  Notes      `.posterLast` is display:-webkit-box for its two line clamp.
+
+Lifting already carried `[hidden]{ display:none !important; }` and was clean.
+The fix was known and had simply not travelled, which is the argument for a
+check rather than for remembering harder. Every tile carries the line now, and
+`tools/hidden-check.js` measures that hiding WORKS - a rule someone later
+out-specifies would still pass a grep for the line.
+
+STILL OPEN, and not fixed here because it is a design decision. `rolledNote`
+("New day: 1 unfinished Urgent task moved to Daily") is a local variable in
+whichever instance of the tile did the roll, and only page mode renders it. The
+grid poster boots first, so the poster rolls, the note dies with it, and by the
+time the page opens the day is already marked rolled. That note has never been
+shown for the ordinary daily archive either. Making it work means putting it in
+the store and deciding when it clears. The demoted item is not invisible in the
+meantime: it arrives in Daily wearing its "carried 1 day" tag.

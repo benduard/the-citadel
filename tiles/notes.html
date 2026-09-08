@@ -64,6 +64,11 @@
     --amber:#FCD34D;
   }
   *{ box-sizing:border-box; }
+  /* THE hidden ATTRIBUTE HAS TO WIN, and by default it does not. The browser
+     hides [hidden] from its OWN stylesheet, so any display rule here beats it,
+     and .posterLast is display:-webkit-box for its two line clamp. Measured by
+     tools/hidden-check.js. */
+  [hidden]{ display:none !important; }
   html,body{ height:100%; }
   body{
     margin:0;

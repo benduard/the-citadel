@@ -60,7 +60,7 @@ vm.runInContext(`
   ${grab('doneCount')}
   ${grab('roll')}
   function fresh(){
-    state = { v:2, lists:{daily:[],weekly:[],grocery:[],projects:[],someday:[]},
+    state = { v:2, lists:{urgent:[],daily:[],weekly:[],grocery:[],projects:[],someday:[]},
               archive:[], rolledOn:'', rolledWeek:'' };
     rolledNote = '';
     return state;
@@ -73,6 +73,10 @@ const check = (label, cond, extra) => {
   if (!cond) fails++
 }
 const item = (title, done, repeat) => ({ id: title, title, done: !!done, repeat: !!repeat, doneAt: done ? '2026-07-30' : null })
+// The same, plus the day it was added. Urgent's whole rule turns on createdAt,
+// so a test of it cannot use an item that has none.
+const born = (title, createdAt, done) => ({ id: title, title, done: !!done, repeat: false,
+  createdAt, doneAt: done ? createdAt : null })
 
 // ── 1. the ledger contract ────────────────────────────────────────────────
 console.log('\n[1] projects_done still counts exactly what v1 counted')
@@ -187,7 +191,8 @@ const ids = sandbox.LISTS.map(l => l.id)
 check('daily to do', ids.includes('daily'))
 check('grocery', ids.includes('grocery'))
 check('pending projects', ids.includes('projects'))
-check('plus the two recommended', ids.includes('weekly') && ids.includes('someday'))
+check('plus the three recommended',
+  ids.includes('weekly') && ids.includes('someday') && ids.includes('urgent'))
 check('only projects reaches the ledger',
   sandbox.LISTS.filter(l => l.counts).map(l => l.id).join(',') === 'projects',
   sandbox.LISTS.filter(l => l.counts).map(l => l.id).join(','))
@@ -356,6 +361,83 @@ check('backing out of naming abandons the pending move',
 const moveBody = grab('moveItem')
 check('moving never rewrites the calendar record', !/state\.done/.test(moveBody), moveBody)
 check('nor the archive', !/state\.archive/.test(moveBody), moveBody)
+
+// ── 17. URGENT HANDS ITS WORK TO DAILY ────────────────────────────────────
+// The one rule this list exists for: what you do not cross off on the day you
+// added it is not urgent any more, it is just a task, so it goes to Daily.
+console.log('\n[17] an urgent task not done on its day moves to Daily')
+s = sandbox.fresh()
+s.rolledOn = '2026-07-30'; s.rolledWeek = sandbox.weekKey()
+s.lists.urgent = [
+  born('Call the landlord', '2026-07-30'),          // yesterday, still open
+  born('Pay the fine',      '2026-07-30', true),    // yesterday, crossed off
+  born('Book the van',      '2026-07-31')           // added TODAY
+]
+sandbox.roll()
+let u = s.lists.urgent.map(x => x.title)
+let dl = s.lists.daily.map(x => x.title)
+check('the one left open moved to Daily', dl.includes('Call the landlord'), dl.join(','))
+check('...and left Urgent', !u.includes('Call the landlord'), u.join(','))
+check('the finished one went to the archive, not to Daily',
+  !dl.includes('Pay the fine') && s.archive.some(a => a.title === 'Pay the fine'),
+  JSON.stringify(s.archive))
+check('the archive says it came off Urgent',
+  s.archive.find(a => a.title === 'Pay the fine').list === 'urgent')
+check('it says what it did', /unfinished Urgent task moved to Daily/.test(sandbox.rolledNote),
+  sandbox.rolledNote)
+
+// The trap this was written against: roll() runs at BOOT, so a tile left open
+// past midnight rolls the next time it is opened. Sweeping every open urgent
+// item would move something typed an hour ago on the same day it was added -
+// the exact promise the list makes, broken by the mechanism meant to keep it.
+console.log('\n[17b] nothing moves on the day it was added')
+check("today's task is still on Urgent", u.includes('Book the van'), u.join(','))
+check('...and is not also in Daily', !dl.includes('Book the van'), dl.join(','))
+
+console.log('\n[17c] the move keeps the item whole')
+const landed = s.lists.daily.find(x => x.title === 'Call the landlord')
+check('same id, so nothing of its history is orphaned', landed.id === 'Call the landlord')
+check('same createdAt, so Daily shows how long it has been carrying',
+  landed.createdAt === '2026-07-30', landed.createdAt)
+check('still open', landed.done === false)
+check('nothing was duplicated',
+  s.lists.urgent.length + s.lists.daily.length === 2,
+  s.lists.urgent.length + '+' + s.lists.daily.length)
+
+console.log('\n[17d] a second roll on the same day moves nothing again')
+const beforeDaily = s.lists.daily.length
+sandbox.roll()
+check('daily did not grow', s.lists.daily.length === beforeDaily, s.lists.daily.length)
+check("urgent still holds today's task", s.lists.urgent.length === 1, s.lists.urgent.length)
+
+console.log('\n[17e] an item with no createdAt is left alone, never guessed at')
+s = sandbox.fresh()
+s.rolledOn = '2026-07-30'; s.rolledWeek = sandbox.weekKey()
+s.lists.urgent = [item('From before this rule existed', false)]
+sandbox.roll()
+check('it stays on Urgent', s.lists.urgent.length === 1, s.lists.urgent.length)
+check('and Daily was not handed a task with no date', s.lists.daily.length === 0)
+
+console.log('\n[17f] Urgent is the only list that hands its work on')
+const demoters = sandbox.LISTS.filter(l => l.demoteTo)
+check('exactly one', demoters.length === 1, demoters.map(l => l.id).join(','))
+check('and it is Urgent to Daily', demoters[0].id === 'urgent' && demoters[0].demoteTo === 'daily')
+check('Urgent rolls on the day', sandbox.listById('urgent').roll === 'day')
+// A standing habit is not urgent, and a repeating item that demoted would come
+// back on a list it had already left.
+check('Urgent does not repeat', sandbox.listById('urgent').repeatable === false)
+check('Urgent does not reach the ledger', !sandbox.listById('urgent').counts)
+
+// Handing work over must not have turned Daily's ordinary carry-forward into a
+// move as well.
+console.log('\n[17g] Daily still carries its own work forward')
+s = sandbox.fresh()
+s.rolledOn = '2026-07-30'; s.rolledWeek = sandbox.weekKey()
+s.lists.daily = [born('Call bank', '2026-07-29')]
+sandbox.roll()
+check('it is still on Daily', s.lists.daily.length === 1 && s.lists.daily[0].title === 'Call bank')
+check('and did not leak onto Urgent', s.lists.urgent.length === 0)
+
 
 console.log(`\n${fails} failure(s)`)
 process.exit(fails ? 1 : 0)

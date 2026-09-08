@@ -18,6 +18,7 @@
     {
       v: 3,
       lists: {
+        urgent:   [ { id, title, done, createdAt, doneAt, at? } ],
         daily:    [ { id, title, done, repeat, createdAt, doneAt, at? } ],
         weekly:   [ { id, title, done, repeat, createdAt, doneAt, at? } ],
         grocery:  [ { id, title, done, createdAt, doneAt, at? } ],
@@ -103,6 +104,34 @@
   new. On a new week the weekly list does the same. Nothing is deleted - a
   finished item keeps its text and its date in the archive, because a list
   that quietly eats what you did is a list that cannot be trusted.
+
+  URGENT, AND THE ONE LIST THAT HANDS ITS WORK OVER. Added 2026-09-07. Urgent
+  is today or it is not urgent. It rolls like Daily with one difference, and
+  that difference is the whole reason it exists: an item still open when the
+  day turns does not stay on Urgent, it MOVES to Daily. That is
+  demoteTo:'daily' in BUILTIN_LISTS, and roll() is the only thing that acts on
+  it - nothing moves while you are looking at it, and nothing moves on the day
+  it was added.
+
+  THE DAY IT WAS ADDED DECIDES, not the day roll() happens to run. A tile left
+  open past midnight rolls the next time it boots, so a blanket "everything
+  open on Urgent, move it" would sweep a task typed an hour ago into Daily on
+  the same day it was added, which is the exact thing this rule promises not
+  to do. So the move is guarded on createdAt being an EARLIER day than today.
+  An item with no createdAt stays where it is: no record of the day it was
+  added is no licence to invent one.
+
+  The item keeps its id, its createdAt and its place in the done log, so it
+  lands in Daily saying how long it has been carrying rather than arriving
+  looking new, and the calendar's record of it is untouched. Urgent does not
+  repeat - a standing habit is not urgent, and a repeating item that demoted
+  would come back on a list it had already left. It does not reach the ledger
+  either; projects_done still counts exactly what it counted in v1.
+
+  NO VERSION BUMP. A v3 blob written before today has no lists.urgent key,
+  which the loader reads as an empty list, which is exactly what was true. The
+  five lists already there are unaffected by this one existing, the same way
+  custom and at arrived on v3 without moving it.
 -->
 <style>
   :root{
@@ -117,6 +146,18 @@
     --amber:#FCD34D;
   }
   *{ box-sizing:border-box; }
+  /* THE hidden ATTRIBUTE HAS TO WIN, and by default it does not.
+     The browser hides [hidden] with display:none from its OWN stylesheet, so
+     ANY display rule written here beats it. Two rows in this file set
+     display:flex - the new-list name row (.addRow) and the "Repeats every
+     day" toggle (.repToggle) - and both were on screen permanently no matter
+     what renderPage set .hidden to. The repeat toggle was the worse of the
+     two: it sat on Grocery, Projects, Someday and now Urgent, lists that do
+     not repeat, and add() ignores the box on those, so ticking it did
+     nothing at all. A control that looks live and does nothing is exactly
+     the kind of quiet lie this board is not allowed to tell.
+     Caught by tools/hidden-check.js, which now measures every tile for it. */
+  [hidden]{ display:none !important; }
   html,body{ height:100%; }
   body{
     margin:0;
@@ -648,14 +689,24 @@
    *   Someday  is the capture list. Anything that is not today's problem goes
    *            here instead of sitting in Daily looking like a failure. A
    *            daily list you scroll past is a daily list you stop reading.
+   *   Urgent   is the third, added 2026-09-07, and it is the only list that
+   *            hands its work on: what you do not cross off on the day you
+   *            added it moves itself to Daily overnight rather than sitting
+   *            here going stale. An urgent list nothing ever leaves is just a
+   *            second daily list with a louder name, and once everything on
+   *            it is urgent, nothing on it is.
    *
-   * Delete either from this array if they are not earning their place.
+   * Delete any of them from this array if they are not earning their place.
    * `roll` decides behaviour, not decoration:
    *   'day'   unchecks repeats and archives finished one-offs each new day
    *   'week'  the same, each new Monday
    *   null    stays until you clear it yourself
+   * `demoteTo` is what makes Urgent urgent: the id of the list that inherits
+   * anything still open when this one rolls, instead of it carrying on here.
    */
   var BUILTIN_LISTS = [
+    { id:'urgent',   name:'Urgent',   roll:'day',  repeatable:false, demoteTo:'daily',
+      why:'Today, or it is not urgent. Anything you have not crossed off by the time the day turns moves itself to Daily and carries its age with it, so this list only ever holds what you took on today. Nothing here repeats and nothing here reaches your ledger.' },
     { id:'daily',    name:'Daily',    roll:'day',  repeatable:true,
       why:'Today only. Finished one-offs move to Recently finished overnight, and anything marked repeating just unchecks itself.' },
     { id:'weekly',   name:'Weekly',   roll:'week', repeatable:true,
@@ -692,9 +743,17 @@
     });
   }
   function allLists(){ return BUILTIN_LISTS.concat(customLists()); }
+  // THE FALLBACK IS DAILY BY NAME, not a[0]. It is what a stale id lands on -
+  // most of all a done-log entry naming a list he has since deleted - and
+  // that has always read "Daily". Urgent sits first in the array now, so a[0]
+  // would quietly start labelling those old entries "Urgent" instead: the
+  // record changed by a tab reorder. Naming it means the tabs can be ordered
+  // however they read best without touching what the log says happened.
   function listById(id){
     var a = allLists();
-    for (var i=0;i<a.length;i++) if (a[i].id === id) return a[i];
+    var i;
+    for (i=0;i<a.length;i++) if (a[i].id === id) return a[i];
+    for (i=0;i<a.length;i++) if (a[i].id === 'daily') return a[i];
     return a[0];
   }
 
@@ -705,7 +764,7 @@
 
   var state = {
     v: 3,
-    lists: { daily:[], weekly:[], grocery:[], projects:[], someday:[] },
+    lists: { urgent:[], daily:[], weekly:[], grocery:[], projects:[], someday:[] },
     // Lists he made. Added 2026-08-04. An older blob has no key and simply has
     // none, which needs no migration - the five built-ins are unaffected by
     // this existing, which is why the version did not move.
@@ -895,7 +954,14 @@
   // The rolling lists are the ones a calendar day can be "clear" of: they are
   // the lists that carry unfinished work forward. Grocery, Projects and
   // Someday have no notion of being owed on a given day.
-  var ROLLING = ['daily', 'weekly'];
+  //
+  // Urgent belongs here even though it carries its work to Daily rather than
+  // into its own next day: an urgent task still open at midnight WAS owed on
+  // that date, and a calendar that ignored it would score the day as clear.
+  // It cannot double count. The moment it demotes it is gone from
+  // items('urgent'), and its log entry names the list it was really crossed
+  // off on, so the day counts it exactly once, under whichever list held it.
+  var ROLLING = ['urgent', 'daily', 'weekly'];
 
   // Was this tile keeping the record on that day? Before logFrom it was not,
   // and a day it never watched must never be scored as a day you missed.
@@ -975,6 +1041,13 @@
    * eats what you finished is a list you stop trusting. Repeating items simply
    * uncheck.
    *
+   * A list with `demoteTo` hands its unfinished work to another list instead
+   * of keeping it. Urgent is the only one, and the guard is createdAt: only
+   * an item added on an EARLIER day moves. Roll runs at boot, so a tile left
+   * open past midnight rolls whenever it is next opened, and without that
+   * guard something typed twenty minutes ago would be swept into Daily on the
+   * day it was added - breaking the one promise the list makes.
+   *
    * Guarded on `loaded`: rolling before the vault answers would roll an empty
    * list and then save that emptiness over the real one. And a blank marker
    * rolls NOTHING - it only sets itself - or a first ever run would archive
@@ -984,6 +1057,7 @@
     if (!loaded) return false;
     var changed = false;
     var moved = 0, reset = 0;
+    var handed = [];                          // demotions, applied after the loop
     var t = todayLocal(), wk = weekKey();
 
     // A list he made has no roll rule, so this passes straight over it.
@@ -1001,20 +1075,45 @@
           moved++;
           return;                              // archived, never deleted
         }
+        // Still open, and this list hands its work on rather than keeping it.
+        // Only what was added on an earlier day: see the note above, and note
+        // that no createdAt means it stays put rather than being guessed at.
+        if (L.demoteTo && state.lists[L.demoteTo] && x.createdAt && x.createdAt < t){
+          handed.push({ to:L.demoteTo, from:L.name, x:x });
+          return;
+        }
         keep.push(x);                          // unfinished carries over
       });
       state.lists[L.id] = keep;
       changed = true;
     });
 
+    // Applied after every list has rolled, so an item cannot be handed to a
+    // list that then rolls it in the same pass. It keeps its id, its
+    // createdAt and its history, which is what makes it arrive in Daily
+    // already saying how many days it has been carrying.
+    handed.forEach(function(h){ state.lists[h.to].push(h.x); });
+
     if (state.rolledOn !== t){ state.rolledOn = t; changed = true; }
     if (state.rolledWeek !== wk){ state.rolledWeek = wk; changed = true; }
 
     if (state.archive.length > ARCHIVE_CAP) state.archive.length = ARCHIVE_CAP;
 
-    if (moved || reset){
+    if (moved || reset || handed.length){
       var bits = [];
       if (moved) bits.push(moved + (moved === 1 ? ' finished item' : ' finished items') + ' moved to Recently finished');
+      // Counted per from-list, so this still reads correctly if a second list
+      // is ever given a demoteTo.
+      var tally = {}, order = [];
+      handed.forEach(function(h){
+        var k = h.from + ' to ' + listById(h.to).name;
+        if (!tally[k]){ tally[k] = 0; order.push(k); }
+        tally[k]++;
+      });
+      order.forEach(function(k){
+        var n = tally[k], pair = k.split(' to ');
+        bits.push(n + ' unfinished ' + pair[0] + (n === 1 ? ' task moved to ' : ' tasks moved to ') + pair[1]);
+      });
       if (reset) bits.push(reset + ' repeating ' + (reset === 1 ? 'item' : 'items') + ' unchecked');
       rolledNote = 'New day: ' + bits.join(', ') + '.';
     }
@@ -1057,7 +1156,8 @@
     pill.className = 'pill' + (clear ? '' : ' flat');
 
     rows.innerHTML = '';
-    ['weekly','grocery','projects'].forEach(function(id){
+    // Urgent leads: it is the only one of these rows with a clock on it.
+    ['urgent','weekly','grocery','projects'].forEach(function(id){
       var n = openOf(id).length;
       var d = document.createElement('div');
       d.className = 'pRow' + (n ? ' has' : '');

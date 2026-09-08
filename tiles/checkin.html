@@ -37,6 +37,10 @@
     --amber:#FCD34D;
   }
   *{ box-sizing:border-box; }
+  /* [hidden] loses to any display rule in this file, because the browser sets
+     it from its own stylesheet. Nothing here is hiding wrongly today; this is
+     so it cannot start. See tools/hidden-check.js and tiles/reminders.html. */
+  [hidden]{ display:none !important; }
   html,body{ height:100%; }
   body{
     margin:0;

@@ -83,7 +83,10 @@ const day = (back = 0) => {
 const TODAY = day(0)
 
 const SEED = {
-  'v:tile:projects': { v:3, lists:{ daily:[
+  'v:tile:projects': { v:3, lists:{ urgent:[
+      { id:'u1', title:'Send the deposit', done:false, createdAt:TODAY, doneAt:null },
+      { id:'u2', title:'Renew the passport', done:false, createdAt:TODAY, doneAt:null }
+    ], daily:[
       { id:'a', title:'Write the thing', done:false, repeat:false, createdAt:day(7), doneAt:null },
       { id:'b', title:'Call the bank', done:true, repeat:false, createdAt:day(7), doneAt:TODAY },
       { id:'c', title:'Stretch', done:false, repeat:true, createdAt:day(7), doneAt:null }

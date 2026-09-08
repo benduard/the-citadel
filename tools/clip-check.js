@@ -59,6 +59,7 @@ const TODAY = day(0)
 
 const SEED = {
   'v:tile:projects': { v:3, lists:{
+      urgent:[{ id:'u1', title:'Send the deposit before the office shuts', done:false, createdAt:TODAY, doneAt:null }],
       daily:[{ id:'a', title:'Call the bank about the mortgage', done:false, repeat:true, createdAt:day(28), doneAt:null }],
       weekly:[], grocery:[], projects:[], someday:[] },
     custom:[], archive:[], done:{}, logFrom:day(35), rolledOn:'', rolledWeek:'' },
